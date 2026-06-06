@@ -78,10 +78,10 @@ class SignalCard extends StatelessWidget {
                   ),
 
                   // 描述
-                  if (signal.desc.isNotEmpty) ...[
+                  if (signal.description.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Text(
-                      signal.desc,
+                      signal.description,
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.6),
                         fontSize: 12,

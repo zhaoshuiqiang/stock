@@ -1,3 +1,4 @@
+import 'dart:math';
 import '../models/stock_models.dart';
 
 List<HistoryKline> calcMA(List<HistoryKline> data, List<int> periods) {
@@ -269,15 +270,6 @@ List<HistoryKline> calcBOLL(List<HistoryKline> data, {int n = 20, int k = 2}) {
   }
 
   return result;
-}
-
-double sqrt(double x) {
-  if (x <= 0) return 0;
-  double guess = x;
-  for (int i = 0; i < 10; i++) {
-    guess = (guess + x / guess) / 2;
-  }
-  return guess;
 }
 
 List<HistoryKline> calcAllIndicators(List<HistoryKline> data) {

@@ -7,6 +7,13 @@ class ApiClient {
   final http.Client _client = http.Client();
   final Map<String, dynamic> _cache = {};
   final Duration _cacheDuration = const Duration(minutes: 5);
+  String _baseUrl = '';
+
+  String get baseUrl => _baseUrl;
+
+  void setBaseUrl(String url) {
+    _baseUrl = url;
+  }
 
   Future<List<StockInfo>> searchStocks(String keyword) async {
     final cacheKey = 'search_$keyword';
@@ -30,7 +37,7 @@ class ApiClient {
               .where((item) => item is List && item.length >= 4)
               .map((item) {
                 final rawCode = item[3].toString();
-                final code = _addMarketPrefix(rawCode);
+                final code = addMarketPrefix(rawCode);
                 return StockInfo(
                   code: code,
                   name: item[0].toString(),

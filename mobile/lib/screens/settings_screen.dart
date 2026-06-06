@@ -61,9 +61,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('设置'),
+        title: Text('设置', style: textTheme.titleLarge),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
@@ -75,32 +78,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       '服务器配置',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _ipController,
-                      decoration: const InputDecoration(
+                      style: textTheme.bodyLarge,
+                      decoration: InputDecoration(
                         labelText: '服务器 IP 地址',
+                        labelStyle: textTheme.bodyMedium?.copyWith(color: Colors.grey[400]),
                         hintText: '如: 192.168.1.100',
+                        hintStyle: textTheme.bodyMedium?.copyWith(color: Colors.grey[500]),
+                        border: OutlineInputBorder(
+                          borderSide: BorderSide(color: theme.dividerColor),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: theme.dividerColor),
+                        ),
+                        filled: true,
+                        fillColor: theme.cardColor,
                       ),
                       keyboardType: TextInputType.numberWithOptions(decimal: true),
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _portController,
-                      decoration: const InputDecoration(
+                      style: textTheme.bodyLarge,
+                      decoration: InputDecoration(
                         labelText: '端口号',
+                        labelStyle: textTheme.bodyMedium?.copyWith(color: Colors.grey[400]),
                         hintText: '如: 8000',
+                        hintStyle: textTheme.bodyMedium?.copyWith(color: Colors.grey[500]),
+                        border: OutlineInputBorder(
+                          borderSide: BorderSide(color: theme.dividerColor),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: theme.dividerColor),
+                        ),
+                        filled: true,
+                        fillColor: theme.cardColor,
                       ),
                       keyboardType: TextInputType.number,
                     ),
                     const SizedBox(height: 16),
-                    const Text(
+                    Text(
                       '注意：手机和电脑需连接同一 WiFi 网络',
-                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                      style: textTheme.bodySmall?.copyWith(color: Colors.grey[500]),
                     ),
                   ],
                 ),
@@ -123,14 +148,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       '当前服务器地址',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       ApiClient().baseUrl,
-                      style: const TextStyle(color: Colors.green),
+                      style: textTheme.bodyMedium?.copyWith(color: Colors.green),
                     ),
                   ],
                 ),

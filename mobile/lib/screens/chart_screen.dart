@@ -27,7 +27,7 @@ class _ChartScreenState extends State<ChartScreen> {
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final data = await _api.getHistory(widget.code, days: _selectedRange);
+    final data = await _api.getStockHistory(widget.code, days: _selectedRange);
     if (mounted) {
       setState(() {
         _data = data;
@@ -41,7 +41,7 @@ class _ChartScreenState extends State<ChartScreen> {
     return _isLoading
         ? const Center(child: CircularProgressIndicator())
         : _data.isEmpty
-            ? const Center(child: Text('暂无K线数据', style: TextStyle(color: Colors.white38)))
+            ? Center(child: Text('暂无K线数据', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white38)))
             : Column(
                 children: [
                   // Range selector

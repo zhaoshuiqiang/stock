@@ -55,6 +55,9 @@ class HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+
     return _isLoading
         ? const Center(child: CircularProgressIndicator())
         : ListView(
@@ -66,9 +69,9 @@ class HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     children: [
-                      const Text(
+                      Text(
                         '今日大盘',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 16),
                       Row(
@@ -89,9 +92,9 @@ class HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     children: [
-                      const Text(
+                      Text(
                         '热门股票',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 16),
                       ..._quotes
@@ -109,6 +112,7 @@ class HomeScreenState extends State<HomeScreen> {
     final quote = _quotes.firstWhere((q) => q.code == code, orElse: () => QuoteData.empty());
     final isUp = quote.change >= 0;
     final color = isUp ? Colors.red : Colors.green;
+    final textTheme = Theme.of(context).textTheme;
 
     return InkWell(
       onTap: () {
@@ -121,13 +125,13 @@ class HomeScreenState extends State<HomeScreen> {
       },
       child: Column(
         children: [
-          Text(name, style: const TextStyle(fontSize: 14)),
+          Text(name, style: textTheme.bodyMedium),
           const SizedBox(height: 4),
-          Text(quote.price.toStringAsFixed(2), style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          Text(quote.price.toStringAsFixed(2), style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           Text(
             '${isUp ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
-            style: TextStyle(fontSize: 14, color: color),
+            style: textTheme.bodyMedium?.copyWith(color: color),
           ),
         ],
       ),
@@ -137,6 +141,7 @@ class HomeScreenState extends State<HomeScreen> {
   Widget _buildStockItem(QuoteData quote) {
     final isUp = quote.change >= 0;
     final color = isUp ? Colors.red : Colors.green;
+    final textTheme = Theme.of(context).textTheme;
 
     return InkWell(
       onTap: () {
@@ -155,18 +160,18 @@ class HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(quote.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  Text(quote.code, style: const TextStyle(fontSize: 12, color: Colors.grey[400])),
+                  Text(quote.name, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                  Text(quote.code, style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
                 ],
               ),
             ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(quote.price.toStringAsFixed(2), style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(quote.price.toStringAsFixed(2), style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                 Text(
                   '${isUp ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
-                  style: TextStyle(fontSize: 14, color: color),
+                  style: textTheme.bodyMedium?.copyWith(color: color),
                 ),
               ],
             ),

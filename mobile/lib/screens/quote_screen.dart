@@ -142,6 +142,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   }
 
   Widget _buildQuoteHeader(QuoteData quote, Color color) {
+    final textTheme = Theme.of(context).textTheme;
+
     return Container(
       padding: const EdgeInsets.all(16),
       color: Theme.of(context).cardColor,
@@ -152,7 +154,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             children: [
               Text(
                 quote.price.toStringAsFixed(2),
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: color),
+                style: textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold, color: color),
               ),
             ],
           ),
@@ -162,12 +164,12 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             children: [
               Text(
                 '${quote.change >= 0 ? '+' : ''}${quote.change.toStringAsFixed(2)}',
-                style: TextStyle(fontSize: 18, color: color),
+                style: textTheme.titleLarge?.copyWith(color: color),
               ),
               const SizedBox(width: 12),
               Text(
                 '(${quote.change >= 0 ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%)',
-                style: TextStyle(fontSize: 18, color: color),
+                style: textTheme.titleLarge?.copyWith(color: color),
               ),
             ],
           ),
@@ -177,26 +179,26 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             children: [
               Column(
                 children: [
-                  const Text('开盘', style: TextStyle(fontSize: 12, color: Colors.grey[400])),
-                  Text(quote.open.toStringAsFixed(2), style: Theme.of(context).textTheme.bodyMedium),
+                  Text('开盘', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text(quote.open.toStringAsFixed(2), style: textTheme.bodyMedium),
                 ],
               ),
               Column(
                 children: [
-                  const Text('最高', style: TextStyle(fontSize: 12, color: Colors.grey[400])),
-                  Text(quote.high.toStringAsFixed(2), style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.red)),
+                  Text('最高', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text(quote.high.toStringAsFixed(2), style: textTheme.bodyMedium?.copyWith(color: Colors.red)),
                 ],
               ),
               Column(
                 children: [
-                  const Text('最低', style: TextStyle(fontSize: 12, color: Colors.grey[400])),
-                  Text(quote.low.toStringAsFixed(2), style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.green)),
+                  Text('最低', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text(quote.low.toStringAsFixed(2), style: textTheme.bodyMedium?.copyWith(color: Colors.green)),
                 ],
               ),
               Column(
                 children: [
-                  const Text('昨收', style: TextStyle(fontSize: 12, color: Colors.grey[400])),
-                  Text(quote.preClose.toStringAsFixed(2), style: Theme.of(context).textTheme.bodyMedium),
+                  Text('昨收', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text(quote.preClose.toStringAsFixed(2), style: textTheme.bodyMedium),
                 ],
               ),
             ],
@@ -208,7 +210,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
   Widget _buildKlineChart() {
     if (_klines.isEmpty) {
-      return const Center(child: Text('暂无数据'));
+      return Center(child: Text('暂无数据', style: Theme.of(context).textTheme.bodyMedium));
     }
 
     return ListView(
@@ -218,9 +220,22 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           padding: const EdgeInsets.all(8),
           child: LineChart(
             LineChartData(
-              gridData: const FlGridData(show: true),
-              titlesData: const FlTitlesData(show: true),
-              borderData: FlBorderData(show: true),
+              gridData: FlGridData(show: true, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10)),
+              titlesData: FlTitlesData(
+                show: true,
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    getTitlesWidget: (value, meta) => Text(value.toStringAsFixed(2), style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                  ),
+                ),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(showTitles: false),
+                ),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              ),
+              borderData: FlBorderData(show: false),
               lineBarsData: [
                 LineChartBarData(
                   spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.close)).toList(),
@@ -258,9 +273,20 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           padding: const EdgeInsets.all(8),
           child: LineChart(
             LineChartData(
-              gridData: const FlGridData(show: true),
-              titlesData: const FlTitlesData(show: true),
-              borderData: FlBorderData(show: true),
+              gridData: FlGridData(show: true, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10)),
+              titlesData: FlTitlesData(
+                show: true,
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    getTitlesWidget: (value, meta) => Text(value.toStringAsFixed(2), style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                  ),
+                ),
+                bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              ),
+              borderData: FlBorderData(show: false),
               lineBarsData: [
                 LineChartBarData(
                   spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.macdDif)).toList(),
@@ -283,9 +309,20 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           padding: const EdgeInsets.all(8),
           child: LineChart(
             LineChartData(
-              gridData: const FlGridData(show: true),
-              titlesData: const FlTitlesData(show: true),
-              borderData: FlBorderData(show: true),
+              gridData: FlGridData(show: true, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10)),
+              titlesData: FlTitlesData(
+                show: true,
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    getTitlesWidget: (value, meta) => Text(value.toInt().toString(), style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                  ),
+                ),
+                bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              ),
+              borderData: FlBorderData(show: false),
               lineBarsData: [
                 LineChartBarData(
                   spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.rsi6)).toList(),
@@ -303,7 +340,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
   Widget _buildSignalList() {
     if (_analysis == null || _analysis!.signals.isEmpty) {
-      return const Center(child: Text('暂无信号'));
+      return Center(child: Text('暂无信号', style: Theme.of(context).textTheme.bodyMedium));
     }
 
     return ListView.builder(
@@ -318,10 +355,11 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
   Widget _buildAnalysis() {
     if (_analysis == null) {
-      return const Center(child: Text('暂无分析数据'));
+      return Center(child: Text('暂无分析数据', style: Theme.of(context).textTheme.bodyMedium));
     }
 
     final analysis = _analysis!;
+    final textTheme = Theme.of(context).textTheme;
 
     return ListView(
       padding: const EdgeInsets.all(8),
@@ -332,7 +370,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             padding: const EdgeInsets.all(12),
             child: Column(
               children: [
-                const Text('综合评分', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text('综合评分', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 16),
                 Container(
                   width: 120,
@@ -347,12 +385,11 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       children: [
                         Text(
                           analysis.score.toString(),
-                          style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
+                          style: textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         Text(
                           analysis.recommendation,
-                          style: TextStyle(
-                            fontSize: 18,
+                          style: textTheme.titleLarge?.copyWith(
                             color: analysis.score >= 60 ? Colors.red : Colors.green,
                           ),
                         ),
@@ -372,17 +409,16 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               children: [
                 Text(
                   '风险等级: ${analysis.riskLevel}',
-                  style: TextStyle(
-                    fontSize: 16,
+                  style: textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: analysis.riskLevel == '高' ? Colors.red : analysis.riskLevel == '中等' ? Colors.orange : Colors.green,
                   ),
                 ),
                 if (analysis.riskFactors.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  const Text('风险因素:'),
+                  Text('风险因素:', style: textTheme.bodyMedium),
                   for (final factor in analysis.riskFactors)
-                    Text('- $factor', style: const TextStyle(color: Colors.red)),
+                    Text('- $factor', style: textTheme.bodyMedium?.copyWith(color: Colors.red)),
                 ],
               ],
             ),
@@ -394,10 +430,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             padding: const EdgeInsets.all(12),
             child: Column(
               children: [
-                const Text('操作建议:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text('操作建议:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 for (final suggestion in analysis.suggestions)
-                  Text('- $suggestion'),
+                  Text('- $suggestion', style: textTheme.bodyMedium),
               ],
             ),
           ),
@@ -409,7 +445,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               padding: const EdgeInsets.all(12),
               child: Column(
                 children: [
-                  const Text('指标摘要:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text('指标摘要:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   for (final entry in analysis.indicators.entries)
                     Padding(
@@ -417,8 +453,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(entry.key),
-                          Text(entry.value.toString()),
+                          Text(entry.key, style: textTheme.bodyMedium),
+                          Text(entry.value.toString(), style: textTheme.bodyMedium),
                         ],
                       ),
                     ),

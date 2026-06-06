@@ -66,6 +66,9 @@ class SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+
     return Column(
       children: [
         Padding(
@@ -75,10 +78,19 @@ class SearchScreenState extends State<SearchScreen> {
               Expanded(
                 child: TextField(
                   controller: _controller,
-                  decoration: const InputDecoration(
+                  style: textTheme.bodyLarge,
+                  decoration: InputDecoration(
                     hintText: '输入股票名称或代码',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 12),
+                    hintStyle: textTheme.bodyMedium?.copyWith(color: Colors.grey[400]),
+                    border: OutlineInputBorder(
+                      borderSide: BorderSide(color: theme.dividerColor),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: theme.dividerColor),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                    filled: true,
+                    fillColor: theme.cardColor,
                   ),
                   onSubmitted: (_) => _onSearch(),
                 ),
@@ -95,7 +107,7 @@ class SearchScreenState extends State<SearchScreen> {
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : _results.isEmpty
-                  ? const Center(child: Text('请输入关键词搜索'))
+                  ? Center(child: Text('请输入关键词搜索', style: textTheme.bodyMedium))
                   : ListView.builder(
                       padding: const EdgeInsets.all(8),
                       itemCount: _results.length,
@@ -114,12 +126,12 @@ class SearchScreenState extends State<SearchScreen> {
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(stock.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                                        Text(stock.code, style: const TextStyle(fontSize: 14, color: Colors.grey[400])),
+                                        Text(stock.name, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                                        Text(stock.code, style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
                                       ],
                                     ),
                                   ),
-                                  const Icon(Icons.arrow_forward_ios, size: 16),
+                                  Icon(Icons.arrow_forward_ios, size: 16, color: theme.dividerColor),
                                 ],
                               ),
                             ),
