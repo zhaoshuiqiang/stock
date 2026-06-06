@@ -34,7 +34,7 @@ void main() {
 
   test('AlertRule fromJson/toJson', () {
     final json = {
-      'id': '123',
+      'id': 123,
       'code': '000001',
       'name': '平安银行',
       'alert_type': 'price_up',
@@ -43,7 +43,7 @@ void main() {
       'enabled': true,
     };
     final rule = AlertRule.fromJson(json);
-    expect(rule.id, '123');
+    expect(rule.id, 123);
     expect(rule.code, '000001');
     expect(rule.threshold, 15.0);
 

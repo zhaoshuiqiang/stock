@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_client.dart';
+import 'update_log_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -160,6 +161,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                 ),
               ),
+            ),
+            const SizedBox(height: 20),
+            Card(
+              color: const Color(0xFF16213e),
+              child: InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const UpdateLogScreen()),
+                  );
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.history, size: 24, color: Colors.blue),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          '更新日志',
+                          style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[400]),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              '版本: v2.0.5',
+              style: textTheme.bodySmall?.copyWith(color: Colors.grey[500]),
             ),
           ],
         ),
