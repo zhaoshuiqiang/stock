@@ -1,0 +1,26 @@
+buildscript {
+    ext.kotlin_version = '2.0.0'
+    repositories {
+        maven { url 'https://mirrors.tuna.tsinghua.edu.cn/repository/google/' }
+        maven { url 'https://mirrors.tuna.tsinghua.edu.cn/maven2/' }
+        maven { url 'https://storage.flutter-io.cn/download.flutter.io/' }
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.6.0'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+rootProject.buildDir = '../build'
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(':app')
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}

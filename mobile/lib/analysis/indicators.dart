@@ -1,0 +1,420 @@
+import '../models/stock_models.dart';
+
+List<HistoryKline> calcMA(List<HistoryKline> data, List<int> periods) {
+  if (data.isEmpty) return data;
+
+  final result = List<HistoryKline>.from(data);
+
+  for (final period in periods) {
+    if (data.length < period) continue;
+
+    double sum = 0;
+    for (int i = 0; i < period; i++) {
+      sum += data[i].close;
+    }
+
+    for (int i = 0; i < data.length; i++) {
+      if (i >= period) {
+        sum = sum - data[i - period].close + data[i].close;
+      }
+
+      final maValue = i >= period - 1 ? sum / period : 0.0;
+
+      switch (period) {
+        case 5:
+          result[i] = result[i].copyWith(ma5: maValue);
+          break;
+        case 10:
+          result[i] = result[i].copyWith(ma10: maValue);
+          break;
+        case 20:
+          result[i] = result[i].copyWith(ma20: maValue);
+          break;
+        case 60:
+          result[i] = result[i].copyWith(ma60: maValue);
+          break;
+      }
+    }
+  }
+
+  return result;
+}
+
+List<HistoryKline> calcVolumeMA(List<HistoryKline> data, List<int> periods) {
+  if (data.isEmpty) return data;
+
+  final result = List<HistoryKline>.from(data);
+
+  for (final period in periods) {
+    if (data.length < period) continue;
+
+    double sum = 0;
+    for (int i = 0; i < period; i++) {
+      sum += data[i].volume;
+    }
+
+    for (int i = 0; i < data.length; i++) {
+      if (i >= period) {
+        sum = sum - data[i - period].volume + data[i].volume;
+      }
+
+      final volMaValue = i >= period - 1 ? sum / period : 0.0;
+
+      switch (period) {
+        case 5:
+          result[i] = result[i].copyWith(volMa5: volMaValue);
+          break;
+        case 10:
+          result[i] = result[i].copyWith(volMa10: volMaValue);
+          break;
+      }
+    }
+  }
+
+  return result;
+}
+
+List<HistoryKline> calcMACD(
+  List<HistoryKline> data, {
+  int fast = 12,
+  int slow = 26,
+  int signal = 9,
+}) {
+  if (data.isEmpty) return data;
+
+  final result = List<HistoryKline>.from(data);
+
+  final List<double> emaFast = List.filled(data.length, 0);
+  final List<double> emaSlow = List.filled(data.length, 0);
+
+  double alphaFast = 2.0 / (fast + 1);
+  double alphaSlow = 2.0 / (slow + 1);
+
+  emaFast[0] = data[0].close;
+  emaSlow[0] = data[0].close;
+
+  for (int i = 1; i < data.length; i++) {
+    emaFast[i] = alphaFast * data[i].close + (1 - alphaFast) * emaFast[i - 1];
+    emaSlow[i] = alphaSlow * data[i].close + (1 - alphaSlow) * emaSlow[i - 1];
+  }
+
+  final List<double> dif = List.filled(data.length, 0);
+  for (int i = 0; i < data.length; i++) {
+    dif[i] = emaFast[i] - emaSlow[i];
+  }
+
+  double alphaSignal = 2.0 / (signal + 1);
+  final List<double> dea = List.filled(data.length, 0);
+  dea[0] = dif[0];
+
+  for (int i = 1; i < data.length; i++) {
+    dea[i] = alphaSignal * dif[i] + (1 - alphaSignal) * dea[i - 1];
+  }
+
+  for (int i = 0; i < data.length; i++) {
+    result[i] = result[i].copyWith(
+      macdDif: dif[i],
+      macdDea: dea[i],
+      macdHist: 2 * (dif[i] - dea[i]),
+    );
+  }
+
+  return result;
+}
+
+List<HistoryKline> calcRSI(List<HistoryKline> data, List<int> periods) {
+  if (data.length < 2) return data;
+
+  final result = List<HistoryKline>.from(data);
+  final List<double> delta = List.filled(data.length, 0);
+
+  for (int i = 1; i < data.length; i++) {
+    delta[i] = data[i].close - data[i - 1].close;
+  }
+
+  for (final period in periods) {
+    if (data.length < period) continue;
+
+    final List<double> gains = List.filled(data.length, 0);
+    final List<double> losses = List.filled(data.length, 0);
+
+    for (int i = 0; i < data.length; i++) {
+      gains[i] = delta[i] > 0 ? delta[i] : 0;
+      losses[i] = delta[i] < 0 ? -delta[i] : 0;
+    }
+
+    final List<double> avgGain = List.filled(data.length, 0);
+    final List<double> avgLoss = List.filled(data.length, 0);
+
+    double sumGain = 0;
+    double sumLoss = 0;
+    for (int i = 1; i <= period; i++) {
+      sumGain += gains[i];
+      sumLoss += losses[i];
+    }
+    avgGain[period] = sumGain / period;
+    avgLoss[period] = sumLoss / period;
+
+    for (int i = period + 1; i < data.length; i++) {
+      avgGain[i] = (avgGain[i - 1] * (period - 1) + gains[i]) / period;
+      avgLoss[i] = (avgLoss[i - 1] * (period - 1) + losses[i]) / period;
+    }
+
+    final List<double> rsi = List.filled(data.length, 0);
+    for (int i = period; i < data.length; i++) {
+      if (avgLoss[i] == 0) {
+        rsi[i] = 100;
+      } else {
+        final rs = avgGain[i] / avgLoss[i];
+        rsi[i] = 100 - (100 / (1 + rs));
+      }
+    }
+
+    for (int i = 0; i < data.length; i++) {
+      switch (period) {
+        case 6:
+          result[i] = result[i].copyWith(rsi6: rsi[i]);
+          break;
+        case 12:
+          result[i] = result[i].copyWith(rsi12: rsi[i]);
+          break;
+        case 24:
+          result[i] = result[i].copyWith(rsi24: rsi[i]);
+          break;
+      }
+    }
+  }
+
+  return result;
+}
+
+List<HistoryKline> calcKDJ(
+  List<HistoryKline> data, {
+  int n = 9,
+  int m1 = 3,
+  int m2 = 3,
+}) {
+  if (data.length < n) return data;
+
+  final result = List<HistoryKline>.from(data);
+
+  final List<double> lowMin = List.filled(data.length, 0);
+  final List<double> highMax = List.filled(data.length, 0);
+
+  for (int i = n - 1; i < data.length; i++) {
+    double minL = data[i].low;
+    double maxH = data[i].high;
+    for (int j = i - n + 1; j <= i; j++) {
+      if (data[j].low < minL) minL = data[j].low;
+      if (data[j].high > maxH) maxH = data[j].high;
+    }
+    lowMin[i] = minL;
+    highMax[i] = maxH;
+  }
+
+  final List<double> rsv = List.filled(data.length, 0);
+  for (int i = n - 1; i < data.length; i++) {
+    final diff = highMax[i] - lowMin[i];
+    rsv[i] = diff > 0 ? ((data[i].close - lowMin[i]) / diff * 100) : 0;
+  }
+
+  final List<double> k = List.filled(data.length, 0);
+  final List<double> d = List.filled(data.length, 0);
+
+  k[n - 1] = rsv[n - 1];
+  d[n - 1] = rsv[n - 1];
+
+  double alphaK = 1.0 / m1;
+  double alphaD = 1.0 / m2;
+
+  for (int i = n; i < data.length; i++) {
+    k[i] = alphaK * rsv[i] + (1 - alphaK) * k[i - 1];
+    d[i] = alphaD * k[i] + (1 - alphaD) * d[i - 1];
+  }
+
+  for (int i = 0; i < data.length; i++) {
+    final j = 3 * k[i] - 2 * d[i];
+    result[i] = result[i].copyWith(k: k[i], d: d[i], j: j);
+  }
+
+  return result;
+}
+
+List<HistoryKline> calcBOLL(List<HistoryKline> data, {int n = 20, int k = 2}) {
+  if (data.length < n) return data;
+
+  final result = List<HistoryKline>.from(data);
+
+  for (int i = n - 1; i < data.length; i++) {
+    double sum = 0;
+    for (int j = i - n + 1; j <= i; j++) {
+      sum += data[j].close;
+    }
+    final mid = sum / n;
+
+    double variance = 0;
+    for (int j = i - n + 1; j <= i; j++) {
+      variance += (data[j].close - mid) * (data[j].close - mid);
+    }
+    final std = variance > 0 ? sqrt(variance / n) : 0;
+
+    final upper = mid + k * std;
+    final lower = mid - k * std;
+
+    result[i] = result[i].copyWith(
+      bollUpper: upper,
+      bollMid: mid,
+      bollLower: lower,
+    );
+  }
+
+  return result;
+}
+
+double sqrt(double x) {
+  if (x <= 0) return 0;
+  double guess = x;
+  for (int i = 0; i < 10; i++) {
+    guess = (guess + x / guess) / 2;
+  }
+  return guess;
+}
+
+List<HistoryKline> calcAllIndicators(List<HistoryKline> data) {
+  if (data.isEmpty || data.length < 2) return data;
+
+  var result = calcMA(data, [5, 10, 20, 60]);
+  result = calcMACD(result);
+  result = calcRSI(result, [6, 12, 24]);
+  result = calcKDJ(result);
+  result = calcBOLL(result);
+  result = calcVolumeMA(result, [5, 10]);
+
+  return result;
+}
+
+Map<String, dynamic> getIndicatorSummary(List<HistoryKline> data) {
+  if (data.isEmpty || data.length < 2) return {};
+
+  final last = data[data.length - 1];
+  final prev = data[data.length - 2];
+  final summary = <String, dynamic>{};
+
+  if (last.ma5 > 0) {
+    final maPos = <String>[];
+    for (final p in [5, 10, 20, 60]) {
+      final maValue = _getMAValue(last, p);
+      if (maValue > 0) {
+        maPos.add(last.close > maValue ? 'MA$p上方' : 'MA$p下方');
+      }
+    }
+    if (maPos.isNotEmpty) {
+      summary['均线位置'] = maPos.join('、');
+    }
+
+    final ma5AboveMa10 = last.ma5 > last.ma10;
+    final prevMa5AboveMa10 = prev.ma5 > prev.ma10;
+
+    if (ma5AboveMa10 && !prevMa5AboveMa10) {
+      summary['均线信号'] = '金叉（MA5上穿MA10）';
+    } else if (!ma5AboveMa10 && prevMa5AboveMa10) {
+      summary['均线信号'] = '死叉（MA5下穿MA10）';
+    } else if (ma5AboveMa10) {
+      summary['均线信号'] = '多头排列';
+    } else {
+      summary['均线信号'] = '空头排列';
+    }
+  }
+
+  if (last.macdDif != 0) {
+    summary['DIF'] = double.parse(last.macdDif.toStringAsFixed(4));
+    summary['DEA'] = double.parse(last.macdDea.toStringAsFixed(4));
+    summary['MACD柱'] = double.parse(last.macdHist.toStringAsFixed(4));
+
+    if (last.macdDif > last.macdDea && prev.macdDif <= prev.macdDea) {
+      summary['MACD信号'] = '金叉';
+    } else if (last.macdDif < last.macdDea && prev.macdDif >= prev.macdDea) {
+      summary['MACD信号'] = '死叉';
+    } else if (last.macdHist > prev.macdHist && last.macdHist < 0) {
+      summary['MACD信号'] = '绿柱缩短（偏多）';
+    } else if (last.macdHist < prev.macdHist && last.macdHist > 0) {
+      summary['MACD信号'] = '红柱缩短（偏空）';
+    } else if (last.macdHist > 0) {
+      summary['MACD信号'] = '红柱运行（多头）';
+    } else {
+      summary['MACD信号'] = '绿柱运行（空头）';
+    }
+  }
+
+  if (last.rsi6 > 0) {
+    summary['RSI6'] = double.parse(last.rsi6.toStringAsFixed(2));
+    summary['RSI12'] = double.parse(last.rsi12.toStringAsFixed(2));
+    summary['RSI24'] = double.parse(last.rsi24.toStringAsFixed(2));
+
+    if (last.rsi6 > 80) {
+      summary['RSI信号'] = '超买（>80）';
+    } else if (last.rsi6 < 20) {
+      summary['RSI信号'] = '超卖（<20）';
+    } else if (last.rsi6 > 60) {
+      summary['RSI信号'] = '偏强';
+    } else if (last.rsi6 < 40) {
+      summary['RSI信号'] = '偏弱';
+    } else {
+      summary['RSI信号'] = '中性';
+    }
+  }
+
+  if (last.k > 0) {
+    summary['K'] = double.parse(last.k.toStringAsFixed(2));
+    summary['D'] = double.parse(last.d.toStringAsFixed(2));
+    summary['J'] = double.parse(last.j.toStringAsFixed(2));
+
+    if (last.k > last.d && prev.k <= prev.d) {
+      summary['KDJ信号'] = '金叉';
+    } else if (last.k < last.d && prev.k >= prev.d) {
+      summary['KDJ信号'] = '死叉';
+    } else if (last.j > 100) {
+      summary['KDJ信号'] = '超买区（J>100）';
+    } else if (last.j < 0) {
+      summary['KDJ信号'] = '超卖区（J<0）';
+    } else {
+      summary['KDJ信号'] = '中性';
+    }
+  }
+
+  if (last.bollUpper > 0) {
+    summary['BOLL上轨'] = double.parse(last.bollUpper.toStringAsFixed(2));
+    summary['BOLL中轨'] = double.parse(last.bollMid.toStringAsFixed(2));
+    summary['BOLL下轨'] = double.parse(last.bollLower.toStringAsFixed(2));
+
+    final bollWidth = ((last.bollUpper - last.bollLower) / last.bollMid * 100);
+    summary['BOLL带宽%'] = double.parse(bollWidth.toStringAsFixed(2));
+
+    if (last.close > last.bollUpper) {
+      summary['BOLL信号'] = '突破上轨（强势/超买）';
+    } else if (last.close < last.bollLower) {
+      summary['BOLL信号'] = '跌破下轨（弱势/超卖）';
+    } else if (last.close > last.bollMid) {
+      summary['BOLL信号'] = '中轨上方（偏多）';
+    } else {
+      summary['BOLL信号'] = '中轨下方（偏空）';
+    }
+  }
+
+  return summary;
+}
+
+double _getMAValue(HistoryKline kline, int period) {
+  switch (period) {
+    case 5:
+      return kline.ma5;
+    case 10:
+      return kline.ma10;
+    case 20:
+      return kline.ma20;
+    case 60:
+      return kline.ma60;
+    default:
+      return 0;
+  }
+}

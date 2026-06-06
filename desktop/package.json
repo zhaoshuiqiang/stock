@@ -1,0 +1,26 @@
+{
+  "name": "stock-analyzer",
+  "version": "1.0.0",
+  "description": "股票分析系统桌面客户端",
+  "main": "main.js",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build",
+    "start": "electron .",
+    "vite:dev": "vite",
+    "electron:dev": "electron ."
+  },
+  "dependencies": {
+    "electron-store": "^8.1.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^28.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^2.10.3",
+    "vite": "^5.0.12",
+    "wait-on": "^7.2.0"
+  }
+}
