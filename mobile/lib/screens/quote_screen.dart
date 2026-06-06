@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:intl/intl.dart';
 import '../api/api_client.dart';
+import '../api/websocket_client.dart';
 import '../models/stock_models.dart';
 import '../analysis/indicators.dart';
 import '../analysis/signal_engine.dart';
@@ -24,11 +26,14 @@ class QuoteScreen extends StatefulWidget {
 class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderStateMixin {
   final ApiClient _apiClient = ApiClient();
   final DatabaseService _dbService = DatabaseService();
+  final WebSocketClient _wsClient = WebSocketClient();
   QuoteData? _quote;
   List<HistoryKline> _klines = [];
   AnalysisResult? _analysis;
   bool _isLoading = true;
   bool _isFavorite = false;
+  bool _isRealtime = false;
+  String _lastUpdateTime = '';
   TabController? _tabController;
 
   @override
@@ -37,6 +42,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     _tabController = TabController(length: 3, vsync: this);
     _loadData();
     _checkFavorite();
+    _startRealtime();
   }
 
   Future<void> _checkFavorite() async {
@@ -59,6 +65,22 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('已从自选股移除')),
       );
+    }
+  }
+
+  void _startRealtime() {
+    _wsClient.onQuoteUpdate = _handleQuoteUpdate;
+    _wsClient.connect();
+    _wsClient.subscribe(widget.code);
+  }
+
+  void _handleQuoteUpdate(QuoteData quote) {
+    if (quote.code == widget.code) {
+      setState(() {
+        _quote = quote;
+        _isRealtime = true;
+        _lastUpdateTime = DateFormat('HH:mm:ss').format(DateTime.now());
+      });
     }
   }
 
@@ -156,8 +178,27 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                 quote.price.toStringAsFixed(2),
                 style: textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold, color: color),
               ),
+              const SizedBox(width: 8),
+              if (_isRealtime)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.green,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    '实时',
+                    style: TextStyle(color: Colors.white, fontSize: 10),
+                  ),
+                ),
             ],
           ),
+          const SizedBox(height: 4),
+          if (_lastUpdateTime.isNotEmpty)
+            Text(
+              '更新: $_lastUpdateTime',
+              style: textTheme.bodySmall?.copyWith(color: Colors.grey[500]),
+            ),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -199,6 +240,24 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                 children: [
                   Text('昨收', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
                   Text(quote.preClose.toStringAsFixed(2), style: textTheme.bodyMedium),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              Column(
+                children: [
+                  Text('成交量', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text('${(quote.volume / 10000).toStringAsFixed(0)}万', style: textTheme.bodyMedium),
+                ],
+              ),
+              Column(
+                children: [
+                  Text('成交额', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text('${(quote.amount / 10000).toStringAsFixed(0)}万', style: textTheme.bodyMedium),
                 ],
               ),
             ],
@@ -464,5 +523,12 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           ),
       ],
     );
+  }
+
+  @override
+  void dispose() {
+    _tabController?.dispose();
+    _wsClient.unsubscribe(widget.code);
+    super.dispose();
   }
 }

@@ -192,7 +192,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 20),
             Text(
-              '版本: v2.0.5',
+              '版本: v2.0.6',
               style: textTheme.bodySmall?.copyWith(color: Colors.grey[500]),
             ),
           ],

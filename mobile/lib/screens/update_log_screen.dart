@@ -10,6 +10,16 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.0.6',
+        'date': '2026-06-07',
+        'changes': [
+          '新增实时行情功能，支持WebSocket推送',
+          '股票详情页面显示"实时"标签和更新时间',
+          '新增成交量和成交额显示',
+          '支持实时价格变动更新',
+        ],
+      },
+      {
         'version': 'v2.0.5',
         'date': '2026-06-07',
         'changes': [
