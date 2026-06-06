@@ -55,6 +55,21 @@ class _MyAppState extends State<MyApp> {
       title: '股票分析助手',
       theme: ThemeData(
         primarySwatch: Colors.blue,
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF1a1a2e),
+        cardColor: const Color(0xFF16213e),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF0f3460),
+        ),
+        bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+          backgroundColor: Color(0xFF0f3460),
+        ),
+        textTheme: const TextTheme(
+          bodyLarge: TextStyle(color: Colors.white),
+          bodyMedium: TextStyle(color: Colors.white),
+          titleLarge: TextStyle(color: Colors.white),
+          titleMedium: TextStyle(color: Colors.white),
+        ),
       ),
       home: Scaffold(
         appBar: AppBar(

@@ -28,11 +28,15 @@ class ApiClient {
           final data = json.decode(jsonStr) as List;
           final results = data
               .where((item) => item is List && item.length >= 4)
-              .map((item) => StockInfo(
-                    code: item[3].toString(),
-                    name: item[0].toString(),
-                    display: '${item[0]}(${item[3]})',
-                  ))
+              .map((item) {
+                final rawCode = item[3].toString();
+                final code = _addMarketPrefix(rawCode);
+                return StockInfo(
+                  code: code,
+                  name: item[0].toString(),
+                  display: '${item[0]}($rawCode)',
+                );
+              })
               .toList();
           _setCached(cacheKey, results);
           return results;
@@ -50,8 +54,7 @@ class ApiClient {
     if (cached != null) return cached as QuoteData;
 
     try {
-      final market = code.startsWith('sh') ? 'sh' : 'sz';
-      final url = Uri.parse('https://hq.sinajs.cn/list=$market$code');
+      final url = Uri.parse('https://hq.sinajs.cn/list=$code');
       final response = await _client.get(url, headers: {
         'Referer': 'https://finance.sina.com.cn',
       }).timeout(const Duration(seconds: 10));
@@ -96,9 +99,8 @@ class ApiClient {
     if (cached != null) return cached as List<HistoryKline>;
 
     try {
-      final market = code.startsWith('sh') ? 'sh' : 'sz';
       final url = Uri.parse(
-          'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=${market}${code}&scale=240&ma=no&datalen=$days');
+          'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=$code&scale=240&ma=no&datalen=$days');
       final response = await _client.get(url, headers: {
         'Referer': 'https://finance.sina.com.cn',
       }).timeout(const Duration(seconds: 15));
@@ -173,6 +175,21 @@ class ApiClient {
       'timestamp': DateTime.now().millisecondsSinceEpoch,
       'data': data,
     };
+  }
+
+  String addMarketPrefix(String code) {
+    if (code.isEmpty) return code;
+    if (code.startsWith('sh') || code.startsWith('sz')) {
+      return code.toLowerCase();
+    }
+    final firstChar = code[0];
+    if (firstChar == '6') {
+      return 'sh$code';
+    }
+    if (firstChar == '0' || firstChar == '3') {
+      return 'sz$code';
+    }
+    return code;
   }
 
   double _parseDouble(dynamic value) {

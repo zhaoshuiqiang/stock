@@ -21,7 +21,6 @@ class SignalsScreenState extends State<SignalsScreen> {
   final ApiClient _apiClient = ApiClient();
   String? _code;
   String? _name;
-  List<HistoryKline> _klines = [];
   AnalysisResult? _analysis;
   bool _isLoading = false;
 
@@ -44,23 +43,25 @@ class SignalsScreenState extends State<SignalsScreen> {
   Future<void> _loadAnalysis(String code) async {
     setState(() {
       _isLoading = true;
-      _code = code;
     });
 
     try {
-      final quote = await _apiClient.getRealtimeQuote(code);
+      final codeWithPrefix = _apiClient.addMarketPrefix(code);
+      setState(() {
+        _code = codeWithPrefix;
+      });
+      final quote = await _apiClient.getRealtimeQuote(codeWithPrefix);
       if (quote != null) {
         setState(() {
           _name = quote.name;
         });
       }
 
-      final klines = await _apiClient.getStockHistory(code, days: 120);
+      final klines = await _apiClient.getStockHistory(codeWithPrefix, days: 120);
       final calculated = calcAllIndicators(klines);
       final analysis = generateAnalysis(calculated, quote);
 
       setState(() {
-        _klines = calculated;
         _analysis = analysis;
       });
     } catch (e) {
@@ -74,13 +75,20 @@ class SignalsScreenState extends State<SignalsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final upColor = isDark ? const Color(0xFFef5350) : const Color(0xFFc62828);
+    final downColor = isDark ? const Color(0xFF26a69a) : const Color(0xFF2e7d32);
+    final orangeColor = isDark ? const Color(0xFFff9800) : const Color(0xFFe65100);
+
     return _isLoading
         ? const Center(child: CircularProgressIndicator())
         : _code == null
-            ? const Center(
+            ? Center(
                 child: Padding(
-                  padding: EdgeInsets.all(32),
-                  child: Text('请选择一只股票查看信号分析'),
+                  padding: const EdgeInsets.all(32),
+                  child: Text('请选择一只股票查看信号分析', style: textTheme.titleMedium),
                 ),
               )
             : ListView(
@@ -94,7 +102,7 @@ class SignalsScreenState extends State<SignalsScreen> {
                         children: [
                           Text(
                             '$_name ($_code)',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 12),
                           if (_analysis != null)
@@ -102,22 +110,20 @@ class SignalsScreenState extends State<SignalsScreen> {
                               children: [
                                 Text(
                                   '综合评分: ${_analysis!.score}',
-                                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                                  style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
                                   '操作建议: ${_analysis!.recommendation}',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: _analysis!.score >= 60 ? Colors.red : Colors.green,
+                                  style: textTheme.titleMedium?.copyWith(
+                                    color: _analysis!.score >= 60 ? upColor : downColor,
                                   ),
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
                                   '风险等级: ${_analysis!.riskLevel}',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: _analysis!.riskLevel == '高' ? Colors.red : Colors.orange,
+                                  style: textTheme.bodyLarge?.copyWith(
+                                    color: _analysis!.riskLevel == '高' ? upColor : orangeColor,
                                   ),
                                 ),
                               ],
@@ -129,11 +135,11 @@ class SignalsScreenState extends State<SignalsScreen> {
                   if (_analysis != null && _analysis!.signals.isNotEmpty)
                     ..._analysis!.signals.map((signal) => SignalCard(signal: signal)),
                   if (_analysis != null && _analysis!.signals.isEmpty)
-                    const Card(
-                      margin: EdgeInsets.all(8),
+                    Card(
+                      margin: const EdgeInsets.all(8),
                       child: Padding(
-                        padding: EdgeInsets.all(12),
-                        child: Center(child: Text('暂无信号')),
+                        padding: const EdgeInsets.all(12),
+                        child: Center(child: Text('暂无信号', style: textTheme.bodyMedium)),
                       ),
                     ),
                   if (_analysis != null && _analysis!.suggestions.isNotEmpty)
@@ -143,9 +149,9 @@ class SignalsScreenState extends State<SignalsScreen> {
                         padding: const EdgeInsets.all(12),
                         child: Column(
                           children: [
-                            const Text('操作建议:', style: TextStyle(fontWeight: FontWeight.bold)),
+                            Text('操作建议:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                             const SizedBox(height: 8),
-                            ..._analysis!.suggestions.map((s) => Text('- $s')),
+                            ..._analysis!.suggestions.map((s) => Text('- $s', style: textTheme.bodyMedium)),
                           ],
                         ),
                       ),

@@ -93,6 +93,11 @@ class AlertsScreenState extends State<AlertsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final dangerColor = isDark ? const Color(0xFFef5350) : const Color(0xFFc62828);
+
     return _isLoading
         ? const Center(child: CircularProgressIndicator())
         : _alerts.isEmpty
@@ -101,7 +106,7 @@ class AlertsScreenState extends State<AlertsScreen> {
                   padding: const EdgeInsets.all(32),
                   child: Column(
                     children: [
-                      const Text('暂无提醒规则'),
+                      Text('暂无提醒规则', style: textTheme.titleMedium),
                       const SizedBox(height: 16),
                       ElevatedButton(
                         onPressed: _createAlert,
@@ -131,12 +136,12 @@ class AlertsScreenState extends State<AlertsScreen> {
                                   children: [
                                     Text(
                                       '${alert.name} (${alert.code})',
-                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                      style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
                                       '${_formatCondition(alert.conditionType)} ${alert.thresholdValue}',
-                                      style: const TextStyle(fontSize: 14),
+                                      style: textTheme.bodyMedium?.copyWith(color: isDark ? Colors.grey[500] : Colors.grey[600]),
                                     ),
                                   ],
                                 ),
@@ -152,11 +157,11 @@ class AlertsScreenState extends State<AlertsScreen> {
                             children: [
                               TextButton(
                                 onPressed: () => _editAlert(alert),
-                                child: const Text('编辑'),
+                                child: Text('编辑', style: textTheme.bodyMedium?.copyWith(color: theme.colorScheme.primary)),
                               ),
                               TextButton(
                                 onPressed: () => _deleteAlert(alert.id),
-                                child: const Text('删除', style: TextStyle(color: Colors.red)),
+                                child: Text('删除', style: textTheme.bodyMedium?.copyWith(color: dangerColor)),
                               ),
                             ],
                           ),

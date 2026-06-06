@@ -144,7 +144,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   Widget _buildQuoteHeader(QuoteData quote, Color color) {
     return Container(
       padding: const EdgeInsets.all(16),
-      color: Colors.white,
+      color: Theme.of(context).cardColor,
       child: Column(
         children: [
           Row(
@@ -177,26 +177,26 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             children: [
               Column(
                 children: [
-                  const Text('开盘', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  Text(quote.open.toStringAsFixed(2), style: const TextStyle(fontSize: 14)),
+                  const Text('开盘', style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                  Text(quote.open.toStringAsFixed(2), style: Theme.of(context).textTheme.bodyMedium),
                 ],
               ),
               Column(
                 children: [
-                  const Text('最高', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  Text(quote.high.toStringAsFixed(2), style: TextStyle(fontSize: 14, color: Colors.red)),
+                  const Text('最高', style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                  Text(quote.high.toStringAsFixed(2), style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.red)),
                 ],
               ),
               Column(
                 children: [
-                  const Text('最低', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  Text(quote.low.toStringAsFixed(2), style: TextStyle(fontSize: 14, color: Colors.green)),
+                  const Text('最低', style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                  Text(quote.low.toStringAsFixed(2), style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.green)),
                 ],
               ),
               Column(
                 children: [
-                  const Text('昨收', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  Text(quote.preClose.toStringAsFixed(2), style: const TextStyle(fontSize: 14)),
+                  const Text('昨收', style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                  Text(quote.preClose.toStringAsFixed(2), style: Theme.of(context).textTheme.bodyMedium),
                 ],
               ),
             ],
@@ -339,7 +339,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                   height: 120,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.grey[200],
+                    color: Theme.of(context).cardColor,
                   ),
                   child: Center(
                     child: Column(

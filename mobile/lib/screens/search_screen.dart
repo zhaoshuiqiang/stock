@@ -115,7 +115,7 @@ class SearchScreenState extends State<SearchScreen> {
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text(stock.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                                        Text(stock.code, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                                        Text(stock.code, style: const TextStyle(fontSize: 14, color: Colors.grey[400])),
                                       ],
                                     ),
                                   ),

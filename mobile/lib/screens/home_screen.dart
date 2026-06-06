@@ -156,7 +156,7 @@ class HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(quote.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  Text(quote.code, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  Text(quote.code, style: const TextStyle(fontSize: 12, color: Colors.grey[400])),
                 ],
               ),
             ),

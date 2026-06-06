@@ -44,7 +44,7 @@ class WatchlistScreenState extends State<WatchlistScreen> {
           _quotes = [];
         });
       } else {
-        final codes = watchlist.map((item) => item.code).toList();
+        final codes = watchlist.map((item) => _apiClient.addMarketPrefix(item.code)).toList();
         final futures = codes.map((code) => _apiClient.getRealtimeQuote(code));
         final results = await Future.wait(futures);
         final quotes = results.where((q) => q != null).cast<QuoteData>().toList();
@@ -86,6 +86,12 @@ class WatchlistScreenState extends State<WatchlistScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final upColor = isDark ? const Color(0xFFef5350) : const Color(0xFFc62828);
+    final downColor = isDark ? const Color(0xFF26a69a) : const Color(0xFF2e7d32);
+
     return _isLoading
         ? const Center(child: CircularProgressIndicator())
         : _watchlist.isEmpty
@@ -94,7 +100,7 @@ class WatchlistScreenState extends State<WatchlistScreen> {
                   padding: const EdgeInsets.all(32),
                   child: Column(
                     children: [
-                      const Text('暂无自选股'),
+                      Text('暂无自选股', style: textTheme.titleMedium),
                       const SizedBox(height: 16),
                       ElevatedButton(
                         onPressed: () {
@@ -116,9 +122,10 @@ class WatchlistScreenState extends State<WatchlistScreen> {
                 itemCount: _watchlist.length,
                 itemBuilder: (context, index) {
                   final item = _watchlist[index];
-                  final quote = _quotes.firstWhere((q) => q.code == item.code, orElse: () => QuoteData.empty());
+                  final codeWithPrefix = _apiClient.addMarketPrefix(item.code);
+                  final quote = _quotes.firstWhere((q) => q.code == codeWithPrefix, orElse: () => QuoteData.empty());
                   final isUp = quote.change >= 0;
-                  final color = isUp ? Colors.red : Colors.green;
+                  final color = isUp ? upColor : downColor;
 
                   return Card(
                     margin: const EdgeInsets.symmetric(vertical: 8),
@@ -128,12 +135,12 @@ class WatchlistScreenState extends State<WatchlistScreen> {
                         children: [
                           Expanded(
                             child: InkWell(
-                              onTap: () => _onStockTap(item.code, item.name),
+                              onTap: () => _onStockTap(codeWithPrefix, item.name),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(item.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                                  Text(item.code, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                                  Text(item.name, style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+                                  Text(item.code, style: textTheme.bodyMedium?.copyWith(color: isDark ? Colors.grey[500] : Colors.grey[600])),
                                 ],
                               ),
                             ),
@@ -141,16 +148,16 @@ class WatchlistScreenState extends State<WatchlistScreen> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              Text(quote.price.toStringAsFixed(2), style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                              Text(quote.price.toStringAsFixed(2), style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
                               Text(
                                 '${isUp ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
-                                style: TextStyle(fontSize: 14, color: color),
+                                style: textTheme.bodyMedium?.copyWith(color: color),
                               ),
                             ],
                           ),
                           const SizedBox(width: 12),
                           IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
+                            icon: Icon(Icons.delete, color: isDark ? const Color(0xFFef5350) : const Color(0xFFc62828)),
                             onPressed: () => _removeFromWatchlist(item.code),
                           ),
                         ],
