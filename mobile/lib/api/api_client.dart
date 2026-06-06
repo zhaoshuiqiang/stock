@@ -29,7 +29,7 @@ class ApiClient {
       }).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
-        final body = response.body;
+        final body = await _decodeGbk(response.bodyBytes);
         final start = body.indexOf('[');
         final end = body.lastIndexOf(']');
         if (start >= 0 && end > start) {
