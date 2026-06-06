@@ -33,6 +33,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "1.4.1"
+  charset_converter:
+    dependency: "direct main"
+    description:
+      name: charset_converter
+      sha256: af00b5b73b367101c661b8dfaa52abf3e533de7b3e247e3f65c535ebc4df820a
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "2.4.0"
   clock:
     dependency: transitive
     description:

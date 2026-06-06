@@ -69,7 +69,9 @@ class SearchScreenState extends State<SearchScreen> {
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
 
-    return Column(
+    return Container(
+      color: theme.scaffoldBackgroundColor,
+      child: Column(
       children: [
         Padding(
           padding: const EdgeInsets.all(8),
@@ -141,6 +143,7 @@ class SearchScreenState extends State<SearchScreen> {
                     ),
         ),
       ],
+    ),
     );
   }
 }

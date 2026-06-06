@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:charset_converter/charset_converter.dart';
 import '../models/stock_models.dart';
 
 class ApiClient {
@@ -67,7 +69,7 @@ class ApiClient {
       }).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
-        final body = response.body;
+        final body = await _decodeGbk(response.bodyBytes);
         final start = body.indexOf('="');
         final end = body.lastIndexOf('";');
         if (start >= 0 && end > start) {
@@ -205,5 +207,13 @@ class ApiClient {
     if (value is int) return value.toDouble();
     if (value is String) return double.tryParse(value) ?? 0;
     return 0;
+  }
+
+  Future<String> _decodeGbk(Uint8List bytes) async {
+    try {
+      return await CharsetConverter.decode("GBK", bytes);
+    } catch (e) {
+      return utf8.decode(bytes, allowMalformed: true);
+    }
   }
 }

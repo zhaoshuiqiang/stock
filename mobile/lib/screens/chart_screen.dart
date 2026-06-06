@@ -119,97 +119,134 @@ class _ChartScreenState extends State<ChartScreen> {
     return Container(
       height: 300,
       padding: const EdgeInsets.fromLTRB(0, 8, 8, 0),
-      child: LineChart(
-        LineChartData(
-          minY: minPrice - priceRange * 0.05,
-          maxY: maxPrice + priceRange * 0.05,
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: false,
-            getDrawingHorizontalLine: (value) => FlLine(
-              color: Colors.white10,
-              strokeWidth: 0.5,
-            ),
-          ),
-          titlesData: FlTitlesData(
-            leftTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 56,
-                getTitlesWidget: (value, meta) => Text(
-                  value.toStringAsFixed(2),
-                  style: const TextStyle(color: Colors.white38, fontSize: 10),
+      child: Stack(
+        children: [
+          LineChart(
+            LineChartData(
+              minY: minPrice - priceRange * 0.05,
+              maxY: maxPrice + priceRange * 0.05,
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: false,
+                getDrawingHorizontalLine: (value) => FlLine(
+                  color: Colors.white10,
+                  strokeWidth: 0.5,
                 ),
               ),
-            ),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 22,
-                interval: (chartData.length / 4).ceil().toDouble(),
-                getTitlesWidget: (value, meta) {
-                  final idx = value.toInt();
-                  if (idx < 0 || idx >= chartData.length) return const SizedBox.shrink();
-                  return Text(
-                    DateFormat('MM/dd').format(chartData[idx].date),
-                    style: const TextStyle(color: Colors.white38, fontSize: 9),
-                  );
-                },
+              titlesData: FlTitlesData(
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 56,
+                    getTitlesWidget: (value, meta) => Text(
+                      value.toStringAsFixed(2),
+                      style: const TextStyle(color: Colors.white38, fontSize: 10),
+                    ),
+                  ),
+                ),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 22,
+                    interval: (chartData.length / 4).ceil().toDouble(),
+                    getTitlesWidget: (value, meta) {
+                      final idx = value.toInt();
+                      if (idx < 0 || idx >= chartData.length) return const SizedBox.shrink();
+                      return Text(
+                        DateFormat('MM/dd').format(chartData[idx].date),
+                        style: const TextStyle(color: Colors.white38, fontSize: 9),
+                      );
+                    },
+                  ),
+                ),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
               ),
-            ),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          ),
-          borderData: FlBorderData(show: false),
-          lineTouchData: LineTouchData(
-            enabled: true,
-            touchTooltipData: LineTouchTooltipData(
-              getTooltipItems: (spots) {
-                return spots.map((spot) {
-                  final idx = spot.x.toInt();
-                  if (idx < 0 || idx >= chartData.length) return null;
-                  final d = chartData[idx];
-                  return LineTooltipItem(
-                    '${DateFormat('MM/dd').format(d.date)}\nO:${d.open} H:${d.high}\nL:${d.low} C:${d.close}',
-                    const TextStyle(color: Colors.white, fontSize: 11),
-                  );
-                }).toList();
-              },
+              borderData: FlBorderData(show: false),
+              lineTouchData: LineTouchData(enabled: true),
+              lineBarsData: [
+                // MA5
+                if (chartData.any((d) => d.ma5 > 0))
+                  _maLine(chartData, (d) => d.ma5, Colors.yellow, 'MA5'),
+                // MA10
+                if (chartData.any((d) => d.ma10 > 0))
+                  _maLine(chartData, (d) => d.ma10, Colors.orange, 'MA10'),
+                // MA20
+                if (chartData.any((d) => d.ma20 > 0))
+                  _maLine(chartData, (d) => d.ma20, Colors.purpleAccent, 'MA20'),
+              ],
             ),
           ),
-          lineBarsData: [
-            // K-line bar (simulated with line segments - each candle as vertical line)
-            _buildCandleLine(chartData, minPrice, maxPrice),
-            // MA5
-            if (chartData.any((d) => d.ma5 > 0))
-              _maLine(chartData, (d) => d.ma5, Colors.yellow, 'MA5'),
-            // MA10
-            if (chartData.any((d) => d.ma10 > 0))
-              _maLine(chartData, (d) => d.ma10, Colors.orange, 'MA10'),
-            // MA20
-            if (chartData.any((d) => d.ma20 > 0))
-              _maLine(chartData, (d) => d.ma20, Colors.purpleAccent, 'MA20'),
-          ],
-        ),
+          // K-line candles overlay
+          Positioned.fill(
+            child: CustomPaint(
+              painter: _KlinePainter(chartData),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  LineChartBarData _buildCandleLine(List<HistoryKline> data, double minPrice, double maxPrice) {
-    final spots = <FlSpot>[];
+  class _KlinePainter extends CustomPainter {
+    final List<HistoryKline> data;
+    final Paint _upPaint = Paint()..color = const Color(0xFFef5350);
+    final Paint _downPaint = Paint()..color = const Color(0xFF26a69a);
+    final Paint _linePaint = Paint()..strokeWidth = 1;
 
-    for (int i = 0; i < data.length; i++) {
-      spots.add(FlSpot(i.toDouble(), data[i].close));
+    _KlinePainter(this.data);
+
+    @override
+    void paint(Canvas canvas, Size size) {
+      if (data.isEmpty) return;
+
+      final prices = data.expand((d) => [d.high, d.low]).toList();
+      final minPrice = prices.reduce((a, b) => a < b ? a : b);
+      final maxPrice = prices.reduce((a, b) => a > b ? a : b);
+      final priceRange = maxPrice - minPrice;
+      final padding = 56.0;
+      final chartWidth = size.width - padding;
+      final chartHeight = size.height;
+      final barWidth = chartWidth / data.length * 0.6;
+      final gap = chartWidth / data.length * 0.4;
+
+      for (int i = 0; i < data.length; i++) {
+        final d = data[i];
+        final isUp = d.close >= d.open;
+        final paint = isUp ? _upPaint : _downPaint;
+        _linePaint.color = paint.color;
+
+        final x = padding + i * (barWidth + gap) + barWidth / 2;
+        final highY = chartHeight - ((d.high - minPrice) / priceRange) * chartHeight;
+        final lowY = chartHeight - ((d.low - minPrice) / priceRange) * chartHeight;
+        final openY = chartHeight - ((d.open - minPrice) / priceRange) * chartHeight;
+        final closeY = chartHeight - ((d.close - minPrice) / priceRange) * chartHeight;
+
+        canvas.drawLine(Offset(x, highY), Offset(x, lowY), _linePaint);
+
+        final bodyTop = isUp ? closeY : openY;
+        final bodyBottom = isUp ? openY : closeY;
+        final bodyLeft = x - barWidth / 2;
+
+        if (isUp) {
+          canvas.drawRect(
+            Rect.fromLTWH(bodyLeft, bodyTop, barWidth, bodyBottom - bodyTop),
+            paint,
+          );
+        } else {
+          paint.style = PaintingStyle.stroke;
+          paint.strokeWidth = 1;
+          canvas.drawRect(
+            Rect.fromLTWH(bodyLeft, bodyTop, barWidth, bodyBottom - bodyTop),
+            paint,
+          );
+          paint.style = PaintingStyle.fill;
+        }
+      }
     }
 
-    return LineChartBarData(
-      spots: spots,
-      isCurved: false,
-      color: Colors.white24,
-      barWidth: 1,
-      dotData: const FlDotData(show: false),
-      belowBarData: BarAreaData(show: false),
-    );
+    @override
+    bool shouldRepaint(_KlinePainter oldDelegate) => oldDelegate.data != data;
   }
 
   LineChartBarData _maLine(

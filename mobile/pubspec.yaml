@@ -17,6 +17,7 @@ dependencies:
   flutter_local_notifications: ^17.0.0
   sqflite: ^2.3.0
   path_provider: ^2.1.0
+  charset_converter: ^2.0.1
 
 dev_dependencies:
   flutter_test:
