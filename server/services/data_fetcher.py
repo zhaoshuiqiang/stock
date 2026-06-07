@@ -245,6 +245,8 @@ def get_stock_history(code: str, days: int = 180) -> pd.DataFrame:
         for col in ["open", "close", "high", "low", "volume"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+        df["volume"] = df["volume"] / 100
+
         df["pct_change"] = df["close"].pct_change() * 100
         df["change"] = df["close"].diff()
         df["amplitude"] = 0

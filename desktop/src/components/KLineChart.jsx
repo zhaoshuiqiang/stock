@@ -137,6 +137,14 @@ const COLORS = {
 // 格式化成交量/成交额
 function formatVolume(num) {
   if (num === null || num === undefined) return '-';
+  const value = Number(num) / 10000;
+  if (value >= 1e8) return (value / 1e8).toFixed(2) + '亿手';
+  if (value >= 1e4) return (value / 1e4).toFixed(2) + '万手';
+  return value.toFixed(2) + '万手';
+}
+
+function formatAmount(num) {
+  if (num === null || num === undefined) return '-';
   const value = Number(num);
   if (value >= 1e8) return (value / 1e8).toFixed(2) + '亿';
   if (value >= 1e4) return (value / 1e4).toFixed(2) + '万';
@@ -541,7 +549,7 @@ export default function KLineChart({ history, loading }) {
         `低: ${Number(d.low).toFixed(2)}`,
         `收: ${Number(d.close).toFixed(2)}`,
         `量: ${formatVolume(d.volume)}`,
-        `额: ${formatVolume(d.amount)}`
+        `额: ${formatAmount(d.amount)}`
       ];
       fields.forEach((text, i) => {
         ctx.fillText(text, tipX + 8, tipY + 14 + i * 13);

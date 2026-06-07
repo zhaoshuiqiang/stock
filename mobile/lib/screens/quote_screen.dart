@@ -1004,26 +1004,22 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   }
 
 String _formatVolume(double volumeInShou) {
-    // 腾讯API返回的成交量单位是手(1手=100股)
-    final volumeInGu = volumeInShou * 100; // 转换为股
-    if (volumeInGu >= 100000000) {
-      return '${(volumeInGu / 100000000).toStringAsFixed(2)}亿';
-    } else if (volumeInGu >= 10000) {
-      return '${(volumeInGu / 10000).toStringAsFixed(0)}万';
-    } else {
-      return '${volumeInGu.toStringAsFixed(0)}';
+    final volumeInWanShou = volumeInShou / 10000;
+    if (volumeInWanShou.abs() >= 10000) {
+      return '${(volumeInWanShou / 10000).toStringAsFixed(2)}亿手';
+    } else if (volumeInWanShou.abs() >= 1) {
+      return '${volumeInWanShou.toStringAsFixed(2)}万手';
     }
+    return '${volumeInWanShou.toStringAsFixed(2)}万手';
   }
 
   String _formatAmount(double amount) {
-    // amount单位是元
-    if (amount.abs() >= 100000000) {
-      return '${(amount / 100000000).toStringAsFixed(2)}亿';
-    } else if (amount.abs() >= 10000) {
-      return '${(amount / 10000).toStringAsFixed(0)}万';
-    } else {
-      return '${amount.toStringAsFixed(0)}';
+    if (amount.abs() >= 1e8) {
+      return '${(amount / 1e8).toStringAsFixed(2)}亿元';
+    } else if (amount.abs() >= 1e4) {
+      return '${(amount / 1e4).toStringAsFixed(0)}万元';
     }
+    return '${amount.toStringAsFixed(0)}元';
   }
 
   @override

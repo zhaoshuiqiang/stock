@@ -475,12 +475,13 @@ class _ChartScreenState extends State<ChartScreen> {
   }
 
   String _formatVolume(double vol) {
-    if (vol >= 100000000) {
-      return '${(vol / 100000000).toStringAsFixed(1)}亿';
-    } else if (vol >= 10000) {
-      return '${(vol / 10000).toStringAsFixed(1)}万';
+    final volInWanShou = vol / 10000;
+    if (volInWanShou.abs() >= 10000) {
+      return '${(volInWanShou / 10000).toStringAsFixed(1)}亿手';
+    } else if (volInWanShou.abs() >= 1) {
+      return '${volInWanShou.toStringAsFixed(1)}万手';
     }
-    return vol.toInt().toString();
+    return '${volInWanShou.toStringAsFixed(1)}万手';
   }
 
   Widget _buildSelectedInfo() {
