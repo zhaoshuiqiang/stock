@@ -19,6 +19,7 @@ dependencies:
   path_provider: ^2.1.0
   charset_converter: ^2.0.1
   url_launcher: ^6.2.0
+  webview_flutter: ^4.10.0
 
 dev_dependencies:
   flutter_test:

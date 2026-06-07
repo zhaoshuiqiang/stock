@@ -1,9 +1,8 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../api/api_client.dart';
 import '../storage/database_service.dart';
 import '../services/notification_service.dart';
+import 'webview_screen.dart';
 
 class NewsItem {
   final String title;
@@ -83,6 +82,11 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
     } catch (e) {
       print('Load news error: $e');
       setState(() { _isLoading = false; });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('资讯加载失败: $e'), duration: const Duration(seconds: 3)),
+        );
+      }
     }
   }
 
@@ -90,19 +94,25 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
     final watchlist = await _dbService.getWatchlist();
     if (watchlist.isEmpty) return [];
 
-    final allNews = <Map<String, String>>[];
-    for (final item in watchlist.take(5)) {
-      final news = await _apiClient.getStockNews(item.name);
-      for (final n in news) {
-        allNews.add({
+    // 并行请求所有自选股新闻（最多5只）
+    final futures = watchlist.take(5).map((item) async {
+      try {
+        final news = await _apiClient.getStockNews(item.name);
+        return news.map<Map<String, String>>((n) => {
           'title': n['title'] ?? '',
           'digest': n['digest'] ?? '',
           'url': n['url'] ?? '',
           'showTime': n['showTime'] ?? '',
           'source': n['source'] ?? '',
-        });
+        }).toList();
+      } catch (e) {
+        print('Load stock news failed for ${item.name}: $e');
+        return <Map<String, String>>[];
       }
-    }
+    });
+
+    final results = await Future.wait(futures);
+    final allNews = results.expand((list) => list).toList();
     allNews.sort((a, b) => (b['showTime'] ?? '').compareTo(a['showTime'] ?? ''));
     return allNews;
   }
@@ -153,7 +163,16 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
             const SizedBox(height: 16),
             Text('暂无自选股资讯', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
             const SizedBox(height: 8),
-            Text('请先添加自选股', style: textTheme.bodySmall?.copyWith(color: Colors.grey[500])),
+            Text(
+              '请先添加自选股，或下拉刷新重试',
+              style: textTheme.bodySmall?.copyWith(color: Colors.grey[500]),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: _loadData,
+              icon: const Icon(Icons.refresh),
+              label: const Text('刷新'),
+            ),
           ],
         ),
       );
@@ -180,7 +199,16 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
             margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
             color: const Color(0xFF16213e),
             child: InkWell(
-              onTap: () => _openUrl(item.url),
+              onTap: () {
+                if (item.url.isNotEmpty) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => WebViewScreen(url: item.url, title: item.title),
+                    ),
+                  );
+                }
+              },
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
@@ -226,13 +254,6 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
         },
       ),
     );
-  }
-
-  Future<void> _openUrl(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
   }
 
   void _showPushSettings() {

@@ -450,36 +450,40 @@ class ApiClient {
   Future<List<dynamic>> getStockNews(String stockName) async {
     try {
       final encoded = Uri.encodeComponent(stockName);
-      final url = Uri.parse('https://search-api-web.eastmoney.com/search/jsonp?cb=&param=%7B%22uid%22%3A%22%22%2C%22keyword%22%3A%22$encoded%22%2C%22type%22%3A%5B%22cmsArticleWebOld%22%5D%2C%22client%22%3A%22web%22%2C%22clientType%22%3A%22web%22%2C%22clientVersion%22%3A%22curr%22%2C%22param%22%3A%7B%22cmsArticleWebOld%22%3A%7B%22searchScope%22%3A%22default%22%2C%22sort%22%3A%22default%22%2C%22pageIndex%22%3A1%2C%22pageSize%22%3A10%2C%22preTag%22%3A%22%22%2C%22postTag%22%3A%22%22%7D%7D%7D');
+      final url = Uri.parse('https://search-api-web.eastmoney.com/search/jsonp?cb=jQueryCallback&param=%7B%22uid%22%3A%22%22%2C%22keyword%22%3A%22$encoded%22%2C%22type%22%3A%5B%22cmsArticleWebOld%22%5D%2C%22client%22%3A%22web%22%2C%22clientType%22%3A%22web%22%2C%22clientVersion%22%3A%22curr%22%2C%22param%22%3A%7B%22cmsArticleWebOld%22%3A%7B%22searchScope%22%3A%22default%22%2C%22sort%22%3A%22default%22%2C%22pageIndex%22%3A1%2C%22pageSize%22%3A10%2C%22preTag%22%3A%22%22%2C%22postTag%22%3A%22%22%7D%7D%7D');
       final response = await _client.get(url, headers: {
         'User-Agent': 'Mozilla/5.0',
         'Referer': 'https://so.eastmoney.com/',
       }).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         var body = response.body;
-        // 去掉可能的 JSONP 包裹
-        if (body.startsWith('(')) body = body.substring(1);
-        if (body.endsWith(')')) body = body.substring(0, body.length - 1);
+        // 去掉 JSONP 包裹：jQueryCallback({...})
+        final jsonpMatch = RegExp(r'^[a-zA-Z_]\w*\(([\s\S]*)\);?$').firstMatch(body);
+        if (jsonpMatch != null) {
+          body = jsonpMatch.group(1)!;
+        } else {
+          // 兆底：去掉首尾括号
+          if (body.startsWith('(')) body = body.substring(1);
+          if (body.endsWith(')')) body = body.substring(0, body.length - 1);
+        }
         final data = json.decode(body) as Map<String, dynamic>;
         final result = data['result'] as Map<String, dynamic>?;
         if (result != null) {
-          final articles = result['cmsArticleWebOld'] as Map<String, dynamic>?;
-          if (articles != null) {
-            final list = articles['list'] as List?;
-            if (list != null) {
-              return list.map((item) => {
-                'title': item['title'] ?? item['articleTitle'] ?? '',
-                'digest': item['content'] ?? item['description'] ?? '',
-                'url': item['url'] ?? item['articleUrl'] ?? '',
-                'showTime': item['date'] ?? item['publishDate'] ?? '',
-                'source': item['mediaName'] ?? item['source'] ?? '',
-              }).toList();
-            }
+          // cmsArticleWebOld 是一个直接的 List（数组），不是 Map
+          final list = result['cmsArticleWebOld'] as List?;
+          if (list != null) {
+            return list.map((item) => {
+              'title': item['title'] ?? item['articleTitle'] ?? '',
+              'digest': item['content'] ?? item['description'] ?? '',
+              'url': item['url'] ?? item['articleUrl'] ?? '',
+              'showTime': item['date'] ?? item['publishDate'] ?? '',
+              'source': item['mediaName'] ?? item['source'] ?? '',
+            }).toList();
           }
         }
       }
     } catch (e) {
-      print('Stock news error: $e');
+      print('Stock news error ($stockName): $e');
     }
     return [];
   }
