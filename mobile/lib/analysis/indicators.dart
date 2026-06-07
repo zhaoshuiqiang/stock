@@ -222,8 +222,8 @@ List<HistoryKline> calcKDJ(
   final List<double> k = List.filled(data.length, 0);
   final List<double> d = List.filled(data.length, 0);
 
-  k[n - 1] = rsv[n - 1];
-  d[n - 1] = rsv[n - 1];
+  k[n - 1] = 50;
+  d[n - 1] = 50;
 
   double alphaK = 1.0 / m1;
   double alphaD = 1.0 / m2;
@@ -379,7 +379,9 @@ Map<String, dynamic> getIndicatorSummary(List<HistoryKline> data) {
     summary['BOLL中轨'] = double.parse(last.bollMid.toStringAsFixed(2));
     summary['BOLL下轨'] = double.parse(last.bollLower.toStringAsFixed(2));
 
-    final bollWidth = ((last.bollUpper - last.bollLower) / last.bollMid * 100);
+    final bollWidth = last.bollMid > 0
+        ? ((last.bollUpper - last.bollLower) / last.bollMid * 100)
+        : 0.0;
     summary['BOLL带宽%'] = double.parse(bollWidth.toStringAsFixed(2));
 
     if (last.close > last.bollUpper) {
