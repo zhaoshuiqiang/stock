@@ -134,6 +134,15 @@ const COLORS = {
   crosshair: 'rgba(255,255,255,0.3)'
 };
 
+// 格式化成交量/成交额
+function formatVolume(num) {
+  if (num === null || num === undefined) return '-';
+  const value = Number(num);
+  if (value >= 1e8) return (value / 1e8).toFixed(2) + '亿';
+  if (value >= 1e4) return (value / 1e4).toFixed(2) + '万';
+  return value.toFixed(0);
+}
+
 export default function KLineChart({ history, loading }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -342,6 +351,10 @@ export default function KLineChart({ history, loading }) {
     ctx.font = '10px monospace';
     ctx.textAlign = 'left';
     ctx.fillText('VOL', padding.left + 2, volTop + 12);
+    
+    // 显示最大成交量
+    ctx.textAlign = 'right';
+    ctx.fillText(formatVolume(volMax), W - 2, volTop + 12);
 
     for (let i = 0; i < count; i++) {
       const d = visibleData[i];
@@ -527,7 +540,8 @@ export default function KLineChart({ history, loading }) {
         `高: ${Number(d.high).toFixed(2)}`,
         `低: ${Number(d.low).toFixed(2)}`,
         `收: ${Number(d.close).toFixed(2)}`,
-        `量: ${Number(d.volume).toFixed(0)}`
+        `量: ${formatVolume(d.volume)}`,
+        `额: ${formatVolume(d.amount)}`
       ];
       fields.forEach((text, i) => {
         ctx.fillText(text, tipX + 8, tipY + 14 + i * 13);
