@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
@@ -8,6 +9,7 @@ import '../analysis/indicators.dart';
 import '../analysis/signal_engine.dart';
 import '../storage/database_service.dart';
 import '../widgets/signal_card.dart';
+import '../widgets/technical_indicators_panel.dart';
 
 class QuoteScreen extends StatefulWidget {
   final String code;
@@ -43,7 +45,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _loadData();
     _checkFavorite();
     _startRealtime();
@@ -197,6 +199,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               Tab(text: 'K线'),
               Tab(text: '信号'),
               Tab(text: '分析'),
+              Tab(text: '指标'),
             ],
           ),
           Expanded(
@@ -207,6 +210,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                 _buildKlineChart(),
                 _buildSignalList(),
                 _buildAnalysis(),
+                TechnicalIndicatorsPanel(klines: _klines),
               ],
             ),
           ),
@@ -1070,7 +1074,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     );
   }
 
-String _formatVolume(double volumeInShou) {
+  String _formatVolume(double volumeInShou) {
     final volumeInWanShou = volumeInShou / 10000;
     if (volumeInWanShou.abs() >= 10000) {
       return '${(volumeInWanShou / 10000).toStringAsFixed(2)}亿手';
@@ -1132,25 +1136,30 @@ class _KlinePainter extends CustomPainter {
     final barWidth = chartWidth / data.length * 0.6;
     final gap = chartWidth / data.length * 0.4;
 
-    // 绘制支撑位（绿色虚线）
+    // 绘制支撑位（绿色虚线）并标注价格
     for (final level in supportLevels) {
       final y = chartHeight - ((level - minPrice) / priceRange) * chartHeight;
       _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), const Color(0xFF26a69a));
+      _drawPriceLabel(canvas, size, level, y, const Color(0xFF26a69a));
     }
 
-    // 绘制阻力位（红色虚线）
+    // 绘制阻力位（红色虚线）并标注价格
     for (final level in resistanceLevels) {
       final y = chartHeight - ((level - minPrice) / priceRange) * chartHeight;
       _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), const Color(0xFFef5350));
+      _drawPriceLabel(canvas, size, level, y, const Color(0xFFef5350));
     }
 
-    // 绘制斐波那契回撤位
+    // 绘制斐波那契回撤位并标注价格和比例
     if (fibonacciLevels != null) {
       for (final entry in fibonacciLevels!.entries) {
         final level = entry.value;
+        final ratio = entry.key;
         final y = chartHeight - ((level - minPrice) / priceRange) * chartHeight;
-        final isGolden = entry.key == '61.8%';
-        _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), isGolden ? const Color(0xFFFFD700) : Colors.white54);
+        final isGolden = ratio == '61.8%';
+        final color = isGolden ? const Color(0xFFFFD700) : Colors.white54;
+        _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), color);
+        _drawFibonacciLabel(canvas, size, level, ratio, y, color);
       }
     }
 
@@ -1224,6 +1233,54 @@ class _KlinePainter extends CustomPainter {
       );
       offset += dashWidth + dashSpace;
     }
+  }
+
+  void _drawPriceLabel(Canvas canvas, Size size, double price, double y, Color color) {
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: price.toStringAsFixed(2),
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: ui.TextDirection.ltr,
+    );
+    textPainter.layout();
+    
+    // 在右侧绘制价格标签，带背景
+    final x = size.width - textPainter.width - 8;
+    final bgRect = Rect.fromLTWH(x - 2, y - textPainter.height / 2 - 2, 
+                                  textPainter.width + 4, textPainter.height + 4);
+    final bgPaint = Paint()..color = Colors.black.withOpacity(0.7);
+    canvas.drawRect(bgRect, bgPaint);
+    
+    textPainter.paint(canvas, Offset(x, y - textPainter.height / 2));
+  }
+
+  void _drawFibonacciLabel(Canvas canvas, Size size, double price, String ratio, double y, Color color) {
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: '$ratio ${price.toStringAsFixed(2)}',
+        style: TextStyle(
+          color: color,
+          fontSize: 9,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      textDirection: ui.TextDirection.ltr,
+    );
+    textPainter.layout();
+    
+    // 在左侧绘制斐波那契标签，带背景
+    final x = 60.0; // padding是56，留点边距
+    final bgRect = Rect.fromLTWH(x - 2, y - textPainter.height / 2 - 2, 
+                                  textPainter.width + 4, textPainter.height + 4);
+    final bgPaint = Paint()..color = Colors.black.withOpacity(0.7);
+    canvas.drawRect(bgRect, bgPaint);
+    
+    textPainter.paint(canvas, Offset(x, y - textPainter.height / 2));
   }
 
   @override
