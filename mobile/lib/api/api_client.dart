@@ -287,7 +287,7 @@ class ApiClient {
           final open = _parseDouble(item['open']);
           final high = _parseDouble(item['high']);
           final low = _parseDouble(item['low']);
-          final volume = _parseDouble(item['volume']);
+          final volume = _parseDouble(item['volume']) / 100;
           double preClose = open;
           if (i > 0) {
             preClose = _parseDouble(data[i - 1]['close']);

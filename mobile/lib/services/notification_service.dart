@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:stock_analyzer/api/api_client.dart';
 import 'package:stock_analyzer/storage/database_service.dart';
+import 'package:stock_analyzer/core/navigator_key.dart';
+import 'package:stock_analyzer/screens/webview_screen.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -50,7 +53,27 @@ class NotificationService {
   }
 
   void _onNotificationTapped(NotificationResponse response) {
-    // 点击通知后的回调，可以在这里做跳转逻辑
+    final payload = response.payload;
+    if (payload != null && payload.isNotEmpty) {
+      final parts = payload.split('|');
+      final url = parts[0];
+      final title = parts.length > 1 ? parts[1] : '';
+      if (url.isNotEmpty) {
+        _navigateToWebView(url, title);
+      }
+    }
+  }
+
+  void _navigateToWebView(String url, String title) {
+    final context = navigatorKey.currentContext;
+    if (context != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => WebViewScreen(url: url, title: title),
+        ),
+      );
+    }
   }
 
   Future<bool> isEnabled() async {
@@ -110,13 +133,14 @@ class NotificationService {
         final latest = marketNews.first;
         final newsId = latest['showTime'] ?? latest['title'] ?? '';
         if (newsId.isNotEmpty && newsId != _lastNewsId && _lastNewsId.isNotEmpty) {
-          // 有新消息
           final title = latest['title'] ?? '财经快讯';
           final digest = latest['digest'] ?? '';
+          final url = latest['url'] ?? '';
           await _showNotification(
             id: 0,
             title: '财经快讯',
             body: title.length > 50 ? '${title.substring(0, 50)}...' : title,
+            payload: '$url|$title',
           );
         }
         if (newsId.isNotEmpty) {
@@ -139,10 +163,12 @@ class NotificationService {
             final lastKey = prefs.getString('last_stock_news_${stock.code}');
             if (lastKey != null && newsKey != lastKey) {
               final title = latest['title'] ?? '${stock.name}资讯';
+              final url = latest['url'] ?? '';
               await _showNotification(
                 id: notificationId,
                 title: '${stock.name} 新资讯',
                 body: title.length > 50 ? '${title.substring(0, 50)}...' : title,
+                payload: '$url|$title',
               );
               notificationId++;
             }
@@ -162,6 +188,7 @@ class NotificationService {
     required int id,
     required String title,
     required String body,
+    String? payload,
   }) async {
     const androidDetails = AndroidNotificationDetails(
       _channelId,
@@ -172,11 +199,11 @@ class NotificationService {
       showWhen: true,
     );
     const iosDetails = DarwinNotificationDetails();
-    const details = NotificationDetails(
+    final details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
     );
-    await _plugin.show(id, title, body, details);
+    await _plugin.show(id, title, body, details, payload: payload);
   }
 
   Future<void> requestPermission() async {
