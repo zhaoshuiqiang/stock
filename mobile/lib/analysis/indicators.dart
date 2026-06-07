@@ -466,18 +466,56 @@ Map<String, dynamic> calcFibonacci(List<HistoryKline> data, {int window = 20}) {
   final swingLow = recent.map((d) => d.low).reduce((a, b) => a < b ? a : b);
   final swingHigh = recent.map((d) => d.high).reduce((a, b) => a > b ? a : b);
 
+  // 计算斐波那契回撤位（从高到低）
   final levels = <String, double>{};
   const ratios = [0.236, 0.382, 0.5, 0.618, 0.786];
   for (final ratio in ratios) {
-    levels['${(ratio * 100).toStringAsFixed(1)}%'] = swingLow + (swingHigh - swingLow) * (1 - ratio);
+    // 回撤位 = 高点 - (高点-低点) * ratio
+    levels['${(ratio * 100).toStringAsFixed(1)}%'] = swingHigh - (swingHigh - swingLow) * ratio;
   }
 
+  // 判断当前位置（从高到低检查）
   String currentPosition = '无';
-  for (final ratio in ratios.reversed) {
-    final levelPrice = swingLow + (swingHigh - swingLow) * (1 - ratio);
-    if (data.last.close >= levelPrice) {
-      currentPosition = '${(ratio * 100).toStringAsFixed(1)}阻力位上方';
-      break;
+  final currentPrice = data.last.close;
+  
+  // 如果价格高于所有回撤位
+  if (currentPrice >= swingHigh) {
+    currentPosition = '突破新高';
+  } 
+  // 如果价格低于所有回撤位
+  else if (currentPrice <= swingLow) {
+    currentPosition = '跌破新低';
+  }
+  // 在区间内，找到具体位置
+  else {
+    for (int i = 0; i < ratios.length; i++) {
+      final ratio = ratios[i];
+      final levelPrice = swingHigh - (swingHigh - swingLow) * ratio;
+      
+      if (i == 0 && currentPrice >= levelPrice) {
+        // 价格高于23.6%线
+        currentPosition = '23.6%阻力位上方';
+        break;
+      } else if (i < ratios.length - 1) {
+        // 检查是否在两个回撤位之间
+        final nextRatio = ratios[i + 1];
+        final nextLevelPrice = swingHigh - (swingHigh - swingLow) * nextRatio;
+        
+        if (currentPrice >= nextLevelPrice && currentPrice < levelPrice) {
+          // 判断是支撑还是阻力
+          final midPoint = (levelPrice + nextLevelPrice) / 2;
+          if (currentPrice >= midPoint) {
+            currentPosition = '${(nextRatio * 100).toStringAsFixed(1)}%阻力位附近';
+          } else {
+            currentPosition = '${(ratio * 100).toStringAsFixed(1)}%支撑位附近';
+          }
+          break;
+        }
+      } else if (i == ratios.length - 1 && currentPrice < levelPrice) {
+        // 价格低于78.6%线
+        currentPosition = '78.6%支撑位下方';
+        break;
+      }
     }
   }
 
