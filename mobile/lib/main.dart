@@ -1,11 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:stock_analyzer/screens/home_screen.dart';
-import 'package:stock_analyzer/screens/search_screen.dart';
 import 'package:stock_analyzer/screens/watchlist_screen.dart';
-import 'package:stock_analyzer/screens/signals_screen.dart';
+import 'package:stock_analyzer/screens/news_screen.dart';
 import 'package:stock_analyzer/screens/alerts_screen.dart';
+import 'package:stock_analyzer/screens/update_log_screen.dart';
+import 'package:stock_analyzer/services/notification_service.dart';
 
-void main() {
+const String appVersion = 'v2.1.0';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final notificationService = NotificationService();
+  await notificationService.init();
+  // 如果用户已开启推送，启动轮询
+  if (await notificationService.isEnabled()) {
+    notificationService.startPolling();
+  }
   runApp(const MyApp());
 }
 
@@ -18,14 +28,6 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   int _currentIndex = 0;
-  String? _selectedStockCode;
-
-  void _onStockSelected(String code) {
-    setState(() {
-      _selectedStockCode = code;
-      _currentIndex = 3;
-    });
-  }
 
   void _onTabChanged(int index) {
     setState(() {
@@ -37,18 +39,16 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     final pages = [
       const HomeScreen(),
-      SearchScreen(onStockSelected: _onStockSelected),
-      WatchlistScreen(onStockSelected: _onStockSelected),
-      SignalsScreen(selectedCode: _selectedStockCode),
+      const WatchlistScreen(),
+      const NewsScreen(),
       const AlertsScreen(),
     ];
 
     final titles = [
       '首页',
-      '搜索',
       '自选',
-      '信号',
-      '提醒',
+      '资讯',
+      '预警',
     ];
 
     return MaterialApp(
@@ -71,12 +71,26 @@ class _MyAppState extends State<MyApp> {
           titleMedium: TextStyle(color: Colors.white),
         ),
       ),
-      home: Scaffold(
+      home: Builder(builder: (context) => Scaffold(
         appBar: AppBar(
           title: Text(titles[_currentIndex]),
+          actions: _currentIndex == 0
+              ? [
+                  IconButton(
+                    icon: const Icon(Icons.info_outline),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const UpdateLogScreen()),
+                      );
+                    },
+                  ),
+                ]
+              : null,
         ),
         body: pages[_currentIndex],
         bottomNavigationBar: BottomNavigationBar(
+          type: BottomNavigationBarType.fixed,
           currentIndex: _currentIndex,
           onTap: _onTabChanged,
           items: const [
@@ -85,24 +99,20 @@ class _MyAppState extends State<MyApp> {
               label: '首页',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.search),
-              label: '搜索',
-            ),
-            BottomNavigationBarItem(
               icon: Icon(Icons.star),
               label: '自选',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.signal_cellular_alt),
-              label: '信号',
+              icon: Icon(Icons.article),
+              label: '资讯',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.notifications),
-              label: '提醒',
+              label: '预警',
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 }

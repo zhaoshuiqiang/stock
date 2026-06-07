@@ -42,6 +42,10 @@ class QuoteData {
   final double pb;
   final double totalMarketCap;
   final double circulatingMarketCap;
+  double mainInflow;
+  double mainOutflow;
+  double mainNetFlow;
+  double mainNetFlowRate;
   final DateTime? updateTime;
 
   QuoteData({
@@ -62,6 +66,10 @@ class QuoteData {
     this.pb = 0,
     this.totalMarketCap = 0,
     this.circulatingMarketCap = 0,
+    this.mainInflow = 0,
+    this.mainOutflow = 0,
+    this.mainNetFlow = 0,
+    this.mainNetFlowRate = 0,
     this.updateTime,
   });
 
@@ -84,6 +92,10 @@ class QuoteData {
       pb: _parseDouble(json['pb']),
       totalMarketCap: _parseDouble(json['total_market_cap']),
       circulatingMarketCap: _parseDouble(json['circulating_market_cap']),
+      mainInflow: _parseDouble(json['main_inflow']),
+      mainOutflow: _parseDouble(json['main_outflow']),
+      mainNetFlow: _parseDouble(json['main_net_flow']),
+      mainNetFlowRate: _parseDouble(json['main_net_flow_rate']),
       updateTime: json['update_time'] != null ? DateTime.tryParse(json['update_time']) : null,
     );
   }

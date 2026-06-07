@@ -35,11 +35,13 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   bool _isRealtime = false;
   String _lastUpdateTime = '';
   TabController? _tabController;
+  List<FlSpot> _realtimeSpots = [];
+  int? _selectedKlineIndex;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _loadData();
     _checkFavorite();
     _startRealtime();
@@ -77,9 +79,41 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   void _handleQuoteUpdate(QuoteData quote) {
     if (quote.code == widget.code) {
       setState(() {
-        _quote = quote;
+        // 合并数据：保留原有PE/PB/主力资金等字段，只更新价格相关字段
+        if (_quote != null) {
+          _quote = QuoteData(
+            code: _quote!.code,
+            name: _quote!.name,
+            price: quote.price,
+            change: quote.change,
+            changePct: quote.changePct,
+            open: quote.open > 0 ? quote.open : _quote!.open,
+            high: quote.high > 0 ? quote.high : _quote!.high,
+            low: quote.low > 0 ? quote.low : _quote!.low,
+            preClose: quote.preClose > 0 ? quote.preClose : _quote!.preClose,
+            volume: quote.volume > 0 ? quote.volume : _quote!.volume,
+            amount: quote.amount > 0 ? quote.amount : _quote!.amount,
+            amplitude: _quote!.amplitude,
+            turnover: _quote!.turnover,
+            pe: _quote!.pe,
+            pb: _quote!.pb,
+            totalMarketCap: _quote!.totalMarketCap,
+            circulatingMarketCap: _quote!.circulatingMarketCap,
+            mainInflow: _quote!.mainInflow,
+            mainOutflow: _quote!.mainOutflow,
+            mainNetFlow: _quote!.mainNetFlow,
+            mainNetFlowRate: _quote!.mainNetFlowRate,
+          );
+        } else {
+          _quote = quote;
+        }
         _isRealtime = true;
         _lastUpdateTime = DateFormat('HH:mm:ss').format(DateTime.now());
+        
+        _realtimeSpots.add(FlSpot(_realtimeSpots.length.toDouble(), quote.price));
+        if (_realtimeSpots.length > 30) {
+          _realtimeSpots.removeAt(0);
+        }
       });
     }
   }
@@ -91,9 +125,17 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
     try {
       final quote = await _apiClient.getRealtimeQuote(widget.code);
+      final mainFundFlow = await _apiClient.getMainFundFlow(widget.code);
       final klines = await _apiClient.getStockHistory(widget.code, days: 120);
       final calculated = calcAllIndicators(klines);
       final analysis = generateAnalysis(calculated, quote);
+
+      if (quote != null && mainFundFlow != null) {
+        quote.mainInflow = mainFundFlow.mainInflow;
+        quote.mainOutflow = mainFundFlow.mainOutflow;
+        quote.mainNetFlow = mainFundFlow.mainNetFlow;
+        quote.mainNetFlowRate = mainFundFlow.mainNetFlowRate;
+      }
 
       setState(() {
         _quote = quote;
@@ -139,6 +181,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           TabBar(
             controller: _tabController,
             tabs: const [
+              Tab(text: '实时'),
               Tab(text: 'K线'),
               Tab(text: '信号'),
               Tab(text: '分析'),
@@ -148,6 +191,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             child: TabBarView(
               controller: _tabController,
               children: [
+                _buildRealtimeChart(),
                 _buildKlineChart(),
                 _buildSignalList(),
                 _buildAnalysis(),
@@ -165,6 +209,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
   Widget _buildQuoteHeader(QuoteData quote, Color color) {
     final textTheme = Theme.of(context).textTheme;
+    final mainNetFlowColor = quote.mainNetFlow >= 0 ? Colors.red : Colors.green;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -221,7 +266,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               Column(
                 children: [
                   Text('开盘', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
-                  Text(quote.open.toStringAsFixed(2), style: textTheme.bodyMedium),
+                  Text(quote.open.toStringAsFixed(2), style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
                 ],
               ),
               Column(
@@ -239,7 +284,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               Column(
                 children: [
                   Text('昨收', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
-                  Text(quote.preClose.toStringAsFixed(2), style: textTheme.bodyMedium),
+                  Text(quote.preClose.toStringAsFixed(2), style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
                 ],
               ),
             ],
@@ -251,16 +296,189 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               Column(
                 children: [
                   Text('成交量', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
-                  Text('${(quote.volume / 10000).toStringAsFixed(0)}万', style: textTheme.bodyMedium),
+                  Text(_formatVolume(quote.volume), style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
                 ],
               ),
               Column(
                 children: [
                   Text('成交额', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
-                  Text('${(quote.amount / 10000).toStringAsFixed(0)}万', style: textTheme.bodyMedium),
+                  Text(_formatAmount(quote.amount), style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
+                ],
+              ),
+              Column(
+                children: [
+                  Text('市盈率', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text(quote.pe.toStringAsFixed(1), style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
+                ],
+              ),
+              Column(
+                children: [
+                  Text('市净率', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text(quote.pb.toStringAsFixed(2), style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
                 ],
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0f3460),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text('主力资金', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Column(
+                      children: [
+                        Text('净流入', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                        Text(
+                          '${quote.mainNetFlow >= 0 ? '+' : ''}${_formatAmount(quote.mainNetFlow)}',
+                          style: textTheme.bodyMedium?.copyWith(color: mainNetFlowColor),
+                        ),
+                      ],
+                    ),
+                    Column(
+                      children: [
+                        Text('净流入率', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                        Text(
+                          '${quote.mainNetFlowRate >= 0 ? '+' : ''}${quote.mainNetFlowRate.toStringAsFixed(2)}%',
+                          style: textTheme.bodyMedium?.copyWith(color: mainNetFlowColor),
+                        ),
+                      ],
+                    ),
+                    Column(
+                      children: [
+                        Text('主力流入', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                        Text(_formatAmount(quote.mainInflow), style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
+                      ],
+                    ),
+                    Column(
+                      children: [
+                        Text('主力流出', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                        Text(_formatAmount(quote.mainOutflow), style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRealtimeChart() {
+    if (_realtimeSpots.isEmpty) {
+      return Center(child: Text('等待实时数据...', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey)));
+    }
+
+    final prices = _realtimeSpots.map((s) => s.y).toList();
+    final minPrice = prices.reduce((a, b) => a < b ? a : b);
+    final maxPrice = prices.reduce((a, b) => a > b ? a : b);
+    final priceRange = maxPrice - minPrice;
+    // 确保Y轴范围至少有0.5的间距，避免价格不变时显示横线
+    final displayMinY = minPrice - (priceRange > 0.5 ? priceRange * 0.05 : 0.25);
+    final displayMaxY = maxPrice + (priceRange > 0.5 ? priceRange * 0.05 : 0.25);
+    final isUp = _realtimeSpots.length >= 2 && _realtimeSpots.last.y >= _realtimeSpots[_realtimeSpots.length - 2].y;
+    final color = isUp ? const Color(0xFFef5350) : const Color(0xFF26a69a);
+
+    return Container(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('实时行情', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                if (_isRealtime)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.green,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text('实时', style: TextStyle(color: Colors.white, fontSize: 10)),
+                  ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: LineChart(
+              LineChartData(
+                minY: displayMinY,
+                maxY: displayMaxY,
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10, strokeWidth: 0.5),
+                ),
+                titlesData: FlTitlesData(
+                  show: true,
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 56,
+                      getTitlesWidget: (value, meta) => Text(value.toStringAsFixed(2), style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                    ),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 24,
+                      interval: (_realtimeSpots.length / 5).ceil().toDouble(),
+                      getTitlesWidget: (value, meta) {
+                        final idx = value.toInt();
+                        if (idx < 0 || idx >= _realtimeSpots.length) return const SizedBox.shrink();
+                        return Text('${idx + 1}', style: const TextStyle(color: Colors.white38, fontSize: 9));
+                      },
+                    ),
+                  ),
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                ),
+                borderData: FlBorderData(show: false),
+                lineTouchData: LineTouchData(
+                  enabled: true,
+                  touchTooltipData: LineTouchTooltipData(
+                    tooltipPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    getTooltipItems: (touchedSpots) {
+                      return touchedSpots.map((spot) {
+                        return LineTooltipItem(
+                          '${spot.y.toStringAsFixed(2)}',
+                          TextStyle(color: color, fontSize: 12),
+                        );
+                      }).toList();
+                    },
+                  ),
+                ),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: _realtimeSpots,
+                    isCurved: true,
+                    color: color,
+                    barWidth: 2,
+                    dotData: const FlDotData(show: false),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      color: color.withOpacity(0.1),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -272,126 +490,231 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       return Center(child: Text('暂无数据', style: Theme.of(context).textTheme.bodyMedium));
     }
 
+    final chartData = _klines;
+    final prices = chartData.expand((d) => [d.high, d.low]).toList();
+    final minPrice = prices.reduce((a, b) => a < b ? a : b);
+    final maxPrice = prices.reduce((a, b) => a > b ? a : b);
+    final priceRange = maxPrice - minPrice;
+    final textTheme = Theme.of(context).textTheme;
+
+    // 选中K线的数据展示
+    Widget? selectedInfo;
+    if (_selectedKlineIndex != null && _selectedKlineIndex! < _klines.length) {
+      final k = _klines[_selectedKlineIndex!];
+      final isUp = k.close >= k.open;
+      final color = isUp ? Colors.red : Colors.green;
+      selectedInfo = Container(
+        padding: const EdgeInsets.all(8),
+        color: const Color(0xFF0f3460),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('${k.date.year}-${k.date.month.toString().padLeft(2, '0')}-${k.date.day.toString().padLeft(2, '0')}',
+                  style: textTheme.bodySmall?.copyWith(color: Colors.grey)),
+                Text('开${k.open.toStringAsFixed(2)}', style: textTheme.bodySmall?.copyWith(color: Colors.white)),
+                Text('高${k.high.toStringAsFixed(2)}', style: textTheme.bodySmall?.copyWith(color: Colors.red)),
+                Text('低${k.low.toStringAsFixed(2)}', style: textTheme.bodySmall?.copyWith(color: Colors.green)),
+                Text('收${k.close.toStringAsFixed(2)}', style: textTheme.bodySmall?.copyWith(color: color)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('量${_formatVolume(k.volume)}', style: textTheme.bodySmall?.copyWith(color: Colors.white)),
+                Text('额${_formatAmount(k.amount)}', style: textTheme.bodySmall?.copyWith(color: Colors.white)),
+                Text('涨跌${k.change >= 0 ? '+' : ''}${k.change.toStringAsFixed(2)}', style: textTheme.bodySmall?.copyWith(color: color)),
+                Text('幅${k.changePct >= 0 ? '+' : ''}${k.changePct.toStringAsFixed(2)}%', style: textTheme.bodySmall?.copyWith(color: color)),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
     return ListView(
       children: [
+        if (selectedInfo != null) selectedInfo,
         Container(
           height: 300,
-          padding: const EdgeInsets.all(8),
-          child: LineChart(
-            LineChartData(
-              gridData: FlGridData(show: true, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10)),
-              titlesData: FlTitlesData(
-                show: true,
-                leftTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    getTitlesWidget: (value, meta) => Text(value.toStringAsFixed(2), style: const TextStyle(color: Colors.white38, fontSize: 10)),
+          padding: const EdgeInsets.fromLTRB(0, 8, 8, 0),
+          child: LayoutBuilder(builder: (context, constraints) {
+              return GestureDetector(
+            onTapDown: (details) {
+              final localPos = details.localPosition;
+              final chartWidth = constraints.maxWidth - 56;
+              final barTotalWidth = chartWidth / _klines.length;
+              final index = (localPos.dx - 56) ~/ barTotalWidth;
+              if (index >= 0 && index < _klines.length) {
+                setState(() {
+                  _selectedKlineIndex = index;
+                });
+              }
+            },
+            child: Stack(
+              children: [
+                LineChart(
+                  LineChartData(
+                    minY: minPrice - priceRange * 0.05,
+                    maxY: maxPrice + priceRange * 0.05,
+                    gridData: FlGridData(show: true, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10)),
+                    titlesData: FlTitlesData(
+                      show: true,
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 56,
+                          getTitlesWidget: (value, meta) => Text(value.toStringAsFixed(2), style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                        ),
+                      ),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    ),
+                    borderData: FlBorderData(show: false),
+                    lineBarsData: [
+                      if (_klines.any((k) => k.ma5 > 0))
+                        LineChartBarData(
+                          spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.ma5)).toList(),
+                          isCurved: false,
+                          color: Colors.yellow,
+                          barWidth: 1,
+                          dotData: const FlDotData(show: false),
+                        ),
+                      if (_klines.any((k) => k.ma10 > 0))
+                        LineChartBarData(
+                          spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.ma10)).toList(),
+                          isCurved: false,
+                          color: Colors.orange,
+                          barWidth: 1,
+                          dotData: const FlDotData(show: false),
+                        ),
+                      if (_klines.any((k) => k.ma20 > 0))
+                        LineChartBarData(
+                          spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.ma20)).toList(),
+                          isCurved: false,
+                          color: Colors.purpleAccent,
+                          barWidth: 1,
+                          dotData: const FlDotData(show: false),
+                        ),
+                    ],
                   ),
                 ),
-                bottomTitles: AxisTitles(
-                  sideTitles: SideTitles(showTitles: false),
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _KlinePainter(chartData, selectedIndex: _selectedKlineIndex),
+                  ),
                 ),
-                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-              ),
-              borderData: FlBorderData(show: false),
-              lineBarsData: [
-                LineChartBarData(
-                  spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.close)).toList(),
-                  isCurved: false,
-                  color: Colors.blue,
-                  barWidth: 2,
-                ),
-                if (_klines.any((k) => k.ma5 > 0))
-                  LineChartBarData(
-                    spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.ma5)).toList(),
-                    isCurved: false,
-                    color: Colors.red,
-                    barWidth: 1.5,
-                  ),
-                if (_klines.any((k) => k.ma10 > 0))
-                  LineChartBarData(
-                    spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.ma10)).toList(),
-                    isCurved: false,
-                    color: Colors.blue,
-                    barWidth: 1.5,
-                  ),
-                if (_klines.any((k) => k.ma20 > 0))
-                  LineChartBarData(
-                    spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.ma20)).toList(),
-                    isCurved: false,
-                    color: Colors.green,
-                    barWidth: 1.5,
-                  ),
               ],
             ),
-          ),
+            );
+          }),
         ),
-        Container(
-          height: 100,
-          padding: const EdgeInsets.all(8),
-          child: LineChart(
-            LineChartData(
-              gridData: FlGridData(show: true, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10)),
-              titlesData: FlTitlesData(
-                show: true,
-                leftTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    getTitlesWidget: (value, meta) => Text(value.toStringAsFixed(2), style: const TextStyle(color: Colors.white38, fontSize: 10)),
-                  ),
-                ),
-                bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 8, bottom: 4),
+              child: Row(
+                children: [
+                  const Text('成交量', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  const SizedBox(width: 16),
+                  const Text('MACD', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  const SizedBox(width: 8),
+                  Container(width: 8, height: 8, color: Colors.red),
+                  const SizedBox(width: 4),
+                  const Text('DIF', style: TextStyle(color: Colors.white, fontSize: 10)),
+                  const SizedBox(width: 8),
+                  Container(width: 8, height: 8, color: Colors.blue),
+                  const SizedBox(width: 4),
+                  const Text('DEA', style: TextStyle(color: Colors.white, fontSize: 10)),
+                ],
               ),
-              borderData: FlBorderData(show: false),
-              lineBarsData: [
-                LineChartBarData(
-                  spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.macdDif)).toList(),
-                  isCurved: false,
-                  color: Colors.red,
-                  barWidth: 2,
-                ),
-                LineChartBarData(
-                  spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.macdDea)).toList(),
-                  isCurved: false,
-                  color: Colors.blue,
-                  barWidth: 2,
-                ),
-              ],
             ),
-          ),
+            Container(
+              height: 100,
+              padding: const EdgeInsets.all(8),
+              child: LineChart(
+                LineChartData(
+                  gridData: FlGridData(show: true, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10)),
+                  titlesData: FlTitlesData(
+                    show: true,
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (value, meta) => Text(value.toStringAsFixed(2), style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                      ),
+                    ),
+                    bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.macdDif)).toList(),
+                      isCurved: false,
+                      color: Colors.red,
+                      barWidth: 2,
+                    ),
+                    LineChartBarData(
+                      spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.macdDea)).toList(),
+                      isCurved: false,
+                      color: Colors.blue,
+                      barWidth: 2,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
-        Container(
-          height: 100,
-          padding: const EdgeInsets.all(8),
-          child: LineChart(
-            LineChartData(
-              gridData: FlGridData(show: true, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10)),
-              titlesData: FlTitlesData(
-                show: true,
-                leftTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    getTitlesWidget: (value, meta) => Text(value.toInt().toString(), style: const TextStyle(color: Colors.white38, fontSize: 10)),
-                  ),
-                ),
-                bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 8, bottom: 4),
+              child: Row(
+                children: [
+                  const Text('RSI6', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  const SizedBox(width: 8),
+                  Container(width: 8, height: 8, color: Colors.orange),
+                ],
               ),
-              borderData: FlBorderData(show: false),
-              lineBarsData: [
-                LineChartBarData(
-                  spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.rsi6)).toList(),
-                  isCurved: false,
-                  color: Colors.orange,
-                  barWidth: 2,
-                ),
-              ],
             ),
-          ),
+            Container(
+              height: 100,
+              padding: const EdgeInsets.all(8),
+              child: LineChart(
+                LineChartData(
+                  gridData: FlGridData(show: true, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10)),
+                  titlesData: FlTitlesData(
+                    show: true,
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (value, meta) => Text(value.toInt().toString(), style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                      ),
+                    ),
+                    bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.rsi6)).toList(),
+                      isCurved: false,
+                      color: Colors.orange,
+                      barWidth: 2,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -419,24 +742,26 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
     final analysis = _analysis!;
     final textTheme = Theme.of(context).textTheme;
+    final quote = _quote;
 
     return ListView(
       padding: const EdgeInsets.all(8),
       children: [
         Card(
           margin: const EdgeInsets.all(8),
+          color: const Color(0xFF16213e),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
               children: [
-                Text('综合评分', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                Text('综合评分', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
                 const SizedBox(height: 16),
                 Container(
                   width: 120,
                   height: 120,
-                  decoration: BoxDecoration(
+                  decoration: const BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Theme.of(context).cardColor,
+                    color: Color(0xFF0f3460),
                   ),
                   child: Center(
                     child: Column(
@@ -444,12 +769,12 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       children: [
                         Text(
                           analysis.score.toString(),
-                          style: textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold),
+                          style: textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white),
                         ),
                         Text(
                           analysis.recommendation,
                           style: textTheme.titleLarge?.copyWith(
-                            color: analysis.score >= 60 ? Colors.red : Colors.green,
+                            color: analysis.score >= 60 ? const Color(0xFFef5350) : const Color(0xFF26a69a),
                           ),
                         ),
                       ],
@@ -462,6 +787,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         ),
         Card(
           margin: const EdgeInsets.all(8),
+          color: const Color(0xFF16213e),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -475,7 +801,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                 ),
                 if (analysis.riskFactors.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  Text('风险因素:', style: textTheme.bodyMedium),
+                  Text('风险因素:', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
                   for (final factor in analysis.riskFactors)
                     Text('- $factor', style: textTheme.bodyMedium?.copyWith(color: Colors.red)),
                 ],
@@ -483,16 +809,47 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             ),
           ),
         ),
+        if (quote != null)
+          Card(
+            margin: const EdgeInsets.all(8),
+            color: const Color(0xFF16213e),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  Text('估值分析', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
+                  const SizedBox(height: 8),
+                  _buildValuationAnalysis(quote),
+                ],
+              ),
+            ),
+          ),
+        if (quote != null && quote.mainNetFlow != 0)
+          Card(
+            margin: const EdgeInsets.all(8),
+            color: const Color(0xFF16213e),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  Text('资金流向分析', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
+                  const SizedBox(height: 8),
+                  _buildFundFlowAnalysis(quote),
+                ],
+              ),
+            ),
+          ),
         Card(
           margin: const EdgeInsets.all(8),
+          color: const Color(0xFF16213e),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
               children: [
-                Text('操作建议:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                Text('操作建议:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
                 const SizedBox(height: 8),
                 for (final suggestion in analysis.suggestions)
-                  Text('- $suggestion', style: textTheme.bodyMedium),
+                  Text('- $suggestion', style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
               ],
             ),
           ),
@@ -500,11 +857,12 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         if (analysis.indicators.isNotEmpty)
           Card(
             margin: const EdgeInsets.all(8),
+            color: const Color(0xFF16213e),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
                 children: [
-                  Text('指标摘要:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                  Text('指标摘要:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
                   const SizedBox(height: 8),
                   for (final entry in analysis.indicators.entries)
                     Padding(
@@ -512,8 +870,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(entry.key, style: textTheme.bodyMedium),
-                          Text(entry.value.toString(), style: textTheme.bodyMedium),
+                          Text(entry.key, style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
+                          Text(entry.value.toString(), style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
                         ],
                       ),
                     ),
@@ -525,10 +883,234 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     );
   }
 
+  Widget _buildValuationAnalysis(QuoteData quote) {
+    final textTheme = Theme.of(context).textTheme;
+    final pe = quote.pe;
+    final pb = quote.pb;
+
+    String peAnalysis;
+    Color peColor;
+    if (pe <= 0) {
+      peAnalysis = '市盈率为负，可能处于亏损状态';
+      peColor = Colors.red;
+    } else if (pe < 10) {
+      peAnalysis = '市盈率偏低，估值相对便宜';
+      peColor = Colors.green;
+    } else if (pe < 20) {
+      peAnalysis = '市盈率适中，估值合理';
+      peColor = Colors.orange;
+    } else if (pe < 30) {
+      peAnalysis = '市盈率偏高，估值有溢价';
+      peColor = Colors.red;
+    } else {
+      peAnalysis = '市盈率很高，估值风险较大';
+      peColor = Colors.red;
+    }
+
+    String pbAnalysis;
+    Color pbColor;
+    if (pb < 1) {
+      pbAnalysis = '市净率低于1，股价低于净资产';
+      pbColor = Colors.green;
+    } else if (pb < 2) {
+      pbAnalysis = '市净率适中，估值合理';
+      pbColor = Colors.orange;
+    } else if (pb < 4) {
+      pbAnalysis = '市净率偏高，关注资产质量';
+      pbColor = Colors.red;
+    } else {
+      pbAnalysis = '市净率很高，泡沫风险较大';
+      pbColor = Colors.red;
+    }
+
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('市盈率(PE)', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
+            Text(pe.toStringAsFixed(1), style: textTheme.bodyMedium?.copyWith(color: peColor)),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(peAnalysis, style: textTheme.bodySmall?.copyWith(color: peColor)),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('市净率(PB)', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
+            Text(pb.toStringAsFixed(2), style: textTheme.bodyMedium?.copyWith(color: pbColor)),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(pbAnalysis, style: textTheme.bodySmall?.copyWith(color: pbColor)),
+      ],
+    );
+  }
+
+  Widget _buildFundFlowAnalysis(QuoteData quote) {
+    final textTheme = Theme.of(context).textTheme;
+    final netFlow = quote.mainNetFlow;
+    final netFlowRate = quote.mainNetFlowRate;
+    final isInflow = netFlow >= 0;
+    final color = isInflow ? const Color(0xFFef5350) : const Color(0xFF26a69a);
+
+    String flowAnalysis;
+    if (isInflow) {
+      if (netFlowRate > 5) {
+        flowAnalysis = '主力资金大幅流入，看好后市';
+      } else if (netFlowRate > 2) {
+        flowAnalysis = '主力资金持续流入，有资金关注';
+      } else {
+        flowAnalysis = '主力资金小幅流入，观望为主';
+      }
+    } else {
+      if (netFlowRate < -5) {
+        flowAnalysis = '主力资金大幅流出，谨慎观望';
+      } else if (netFlowRate < -2) {
+        flowAnalysis = '主力资金持续流出，注意风险';
+      } else {
+        flowAnalysis = '主力资金小幅流出，波动正常';
+      }
+    }
+
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('主力净流入', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
+            Text(
+              '${isInflow ? '+' : ''}${_formatAmount(netFlow)}',
+              style: textTheme.bodyMedium?.copyWith(color: color),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('净流入率', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
+            Text(
+              '${isInflow ? '+' : ''}${netFlowRate.toStringAsFixed(2)}%',
+              style: textTheme.bodyMedium?.copyWith(color: color),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(flowAnalysis, style: textTheme.bodySmall?.copyWith(color: color)),
+      ],
+    );
+  }
+
+String _formatVolume(double volumeInShou) {
+    // 腾讯API返回的成交量单位是手(1手=100股)
+    final volumeInGu = volumeInShou * 100; // 转换为股
+    if (volumeInGu >= 100000000) {
+      return '${(volumeInGu / 100000000).toStringAsFixed(2)}亿';
+    } else if (volumeInGu >= 10000) {
+      return '${(volumeInGu / 10000).toStringAsFixed(0)}万';
+    } else {
+      return '${volumeInGu.toStringAsFixed(0)}';
+    }
+  }
+
+  String _formatAmount(double amount) {
+    // amount单位是元
+    if (amount.abs() >= 100000000) {
+      return '${(amount / 100000000).toStringAsFixed(2)}亿';
+    } else if (amount.abs() >= 10000) {
+      return '${(amount / 10000).toStringAsFixed(0)}万';
+    } else {
+      return '${amount.toStringAsFixed(0)}';
+    }
+  }
+
   @override
   void dispose() {
     _tabController?.dispose();
     _wsClient.unsubscribe(widget.code);
     super.dispose();
   }
+}
+
+class _KlinePainter extends CustomPainter {
+  final List<HistoryKline> data;
+  final int? selectedIndex;
+  final Paint _upPaint = Paint()..color = const Color(0xFFef5350);
+  final Paint _downPaint = Paint()..color = const Color(0xFF26a69a);
+  final Paint _linePaint = Paint()..strokeWidth = 1;
+  final Paint _selectedPaint = Paint()..color = Colors.white.withOpacity(0.2);
+
+  _KlinePainter(this.data, {this.selectedIndex});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (data.isEmpty) return;
+
+    final prices = data.expand((d) => [d.high, d.low]).toList();
+    final minPrice = prices.reduce((a, b) => a < b ? a : b);
+    final maxPrice = prices.reduce((a, b) => a > b ? a : b);
+    final priceRange = maxPrice - minPrice;
+    final padding = 56.0;
+    final chartWidth = size.width - padding;
+    final chartHeight = size.height;
+    final barWidth = chartWidth / data.length * 0.6;
+    final gap = chartWidth / data.length * 0.4;
+
+    // 价格范围为0时（如停牌），绘制水平线
+    if (priceRange == 0) {
+      final y = chartHeight / 2;
+      for (int i = 0; i < data.length; i++) {
+        final x = padding + i * (barWidth + gap) + barWidth / 2;
+        canvas.drawLine(Offset(x, y - 1), Offset(x, y + 1), _linePaint..color = Colors.white54);
+      }
+      return;
+    }
+
+    for (int i = 0; i < data.length; i++) {
+      final d = data[i];
+      final isUp = d.close >= d.open;
+      final paint = isUp ? _upPaint : _downPaint;
+      _linePaint.color = paint.color;
+
+      final x = padding + i * (barWidth + gap) + barWidth / 2;
+      final highY = chartHeight - ((d.high - minPrice) / priceRange) * chartHeight;
+      final lowY = chartHeight - ((d.low - minPrice) / priceRange) * chartHeight;
+      final openY = chartHeight - ((d.open - minPrice) / priceRange) * chartHeight;
+      final closeY = chartHeight - ((d.close - minPrice) / priceRange) * chartHeight;
+
+      // 选中K线高亮
+      if (selectedIndex == i) {
+        canvas.drawRect(
+          Rect.fromLTWH(x - barWidth, 0, barWidth * 2, chartHeight),
+          _selectedPaint,
+        );
+      }
+
+      canvas.drawLine(Offset(x, highY), Offset(x, lowY), _linePaint);
+
+      final bodyTop = isUp ? closeY : openY;
+      final bodyBottom = isUp ? openY : closeY;
+      final bodyLeft = x - barWidth / 2;
+
+      if (isUp) {
+        canvas.drawRect(
+          Rect.fromLTWH(bodyLeft, bodyTop, barWidth, bodyBottom - bodyTop),
+          paint,
+        );
+      } else {
+        paint.style = PaintingStyle.stroke;
+        paint.strokeWidth = 1;
+        canvas.drawRect(
+          Rect.fromLTWH(bodyLeft, bodyTop, barWidth, bodyBottom - bodyTop),
+          paint,
+        );
+        paint.style = PaintingStyle.fill;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_KlinePainter oldDelegate) => oldDelegate.data != data;
 }

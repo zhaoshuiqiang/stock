@@ -4,12 +4,9 @@ import '../models/stock_models.dart';
 import 'quote_screen.dart';
 
 class SearchScreen extends StatefulWidget {
-  final Function(String)? onStockSelected;
+  final bool selectMode;
 
-  const SearchScreen({
-    super.key,
-    this.onStockSelected,
-  });
+  const SearchScreen({super.key, this.selectMode = false});
 
   @override
   State<SearchScreen> createState() => SearchScreenState();
@@ -52,16 +49,16 @@ class SearchScreenState extends State<SearchScreen> {
   }
 
   void _onStockTap(StockInfo stock) {
-    if (widget.onStockSelected != null) {
-      widget.onStockSelected!(stock.code);
+    if (widget.selectMode) {
+      Navigator.pop(context, stock);
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => QuoteScreen(code: stock.code, name: stock.name),
+        ),
+      );
     }
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => QuoteScreen(code: stock.code, name: stock.name),
-      ),
-    );
   }
 
   @override
@@ -69,82 +66,84 @@ class SearchScreenState extends State<SearchScreen> {
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
 
-    return Container(
-      color: theme.scaffoldBackgroundColor,
-      child: Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _controller,
-                  style: textTheme.bodyLarge,
-                  decoration: InputDecoration(
-                    hintText: '输入股票名称或代码',
-                    hintStyle: textTheme.bodyMedium?.copyWith(color: Colors.grey[400]),
-                    border: OutlineInputBorder(
-                      borderSide: BorderSide(color: theme.dividerColor),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('搜索'),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    style: textTheme.bodyLarge,
+                    decoration: InputDecoration(
+                      hintText: '输入股票名称或代码',
+                      hintStyle: textTheme.bodyMedium?.copyWith(color: Colors.grey[400]),
+                      border: OutlineInputBorder(
+                        borderSide: BorderSide(color: theme.dividerColor),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: theme.dividerColor),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                      filled: true,
+                      fillColor: theme.cardColor,
                     ),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: theme.dividerColor),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                    filled: true,
-                    fillColor: theme.cardColor,
+                    onSubmitted: (_) => _onSearch(),
                   ),
-                  onSubmitted: (_) => _onSearch(),
                 ),
-              ),
-              const SizedBox(width: 8),
-              ElevatedButton(
-                onPressed: _onSearch,
-                child: const Text('搜索'),
-              ),
-            ],
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: _onSearch,
+                  child: const Text('搜索'),
+                ),
+              ],
+            ),
           ),
-        ),
-        Expanded(
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _results.isEmpty
-                  ? Center(child: Text('请输入关键词搜索', style: textTheme.bodyMedium))
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(8),
-                      itemCount: _results.length,
-                      itemBuilder: (context, index) {
-                        final stock = _results[index];
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _results.isEmpty
+                    ? Center(child: Text('请输入关键词搜索', style: textTheme.bodyMedium))
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(8),
+                        itemCount: _results.length,
+                        itemBuilder: (context, index) {
+                          final stock = _results[index];
 
-                        return InkWell(
-                          onTap: () => _onStockTap(stock),
-                          child: Card(
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            color: const Color(0xFF16213e),
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(stock.name, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
-                                        Text(stock.code, style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
-                                      ],
+                          return InkWell(
+                            onTap: () => _onStockTap(stock),
+                            child: Card(
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              color: const Color(0xFF16213e),
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(stock.name, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
+                                          Text(stock.code, style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                  Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[400]),
-                                ],
+                                    Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[400]),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        );
-                      },
-                    ),
-        ),
-      ],
-    ),
+                          );
+                        },
+                      ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -18,6 +18,7 @@ class _ChartScreenState extends State<ChartScreen> {
   List<HistoryKline> _data = [];
   bool _isLoading = false;
   int _selectedRange = 120; // 60, 120, 360 (全部)
+  HistoryKline? _selectedKline;
 
   @override
   void initState() {
@@ -44,9 +45,7 @@ class _ChartScreenState extends State<ChartScreen> {
             ? Center(child: Text('暂无K线数据', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white38)))
             : Column(
                 children: [
-                  // Range selector
                   _buildRangeSelector(),
-                  // K-line chart
                   Expanded(
                     child: SingleChildScrollView(
                       child: Column(
@@ -58,11 +57,12 @@ class _ChartScreenState extends State<ChartScreen> {
                           _buildMacdChart(),
                           const SizedBox(height: 8),
                           _buildRsiChart(),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 8),
                         ],
                       ),
                     ),
                   ),
+                  _buildSelectedInfo(),
                 ],
               );
   }
@@ -116,137 +116,91 @@ class _ChartScreenState extends State<ChartScreen> {
     final maxPrice = prices.reduce((a, b) => a > b ? a : b);
     final priceRange = maxPrice - minPrice;
 
-    return Container(
-      height: 300,
-      padding: const EdgeInsets.fromLTRB(0, 8, 8, 0),
-      child: Stack(
-        children: [
-          LineChart(
-            LineChartData(
-              minY: minPrice - priceRange * 0.05,
-              maxY: maxPrice + priceRange * 0.05,
-              gridData: FlGridData(
-                show: true,
-                drawVerticalLine: false,
-                getDrawingHorizontalLine: (value) => FlLine(
-                  color: Colors.white10,
-                  strokeWidth: 0.5,
+    return GestureDetector(
+      onTapDown: (details) {
+        final containerWidth = (context.findRenderObject() as RenderBox?)?.size.width ?? 300;
+        final padding = 56.0;
+        final chartWidth = containerWidth - padding;
+        final barWidth = chartWidth / chartData.length * 0.6;
+        final gap = chartWidth / chartData.length * 0.4;
+        
+        final x = details.localPosition.dx - padding;
+        if (x >= 0) {
+          final idx = (x / (barWidth + gap)).floor();
+          if (idx >= 0 && idx < chartData.length) {
+            setState(() {
+              _selectedKline = chartData[idx];
+            });
+          }
+        }
+      },
+      child: Container(
+        height: 300,
+        padding: const EdgeInsets.fromLTRB(0, 8, 8, 0),
+        child: Stack(
+          children: [
+            LineChart(
+              LineChartData(
+                minY: minPrice - priceRange * 0.05,
+                maxY: maxPrice + priceRange * 0.05,
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  getDrawingHorizontalLine: (value) => FlLine(
+                    color: Colors.white10,
+                    strokeWidth: 0.5,
+                  ),
                 ),
-              ),
-              titlesData: FlTitlesData(
-                leftTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    reservedSize: 56,
-                    getTitlesWidget: (value, meta) => Text(
-                      value.toStringAsFixed(2),
-                      style: const TextStyle(color: Colors.white38, fontSize: 10),
+                titlesData: FlTitlesData(
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 56,
+                      getTitlesWidget: (value, meta) => Text(
+                        value.toStringAsFixed(2),
+                        style: const TextStyle(color: Colors.white38, fontSize: 10),
+                      ),
                     ),
                   ),
-                ),
-                bottomTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    reservedSize: 22,
-                    interval: (chartData.length / 4).ceil().toDouble(),
-                    getTitlesWidget: (value, meta) {
-                      final idx = value.toInt();
-                      if (idx < 0 || idx >= chartData.length) return const SizedBox.shrink();
-                      return Text(
-                        DateFormat('MM/dd').format(chartData[idx].date),
-                        style: const TextStyle(color: Colors.white38, fontSize: 9),
-                      );
-                    },
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 22,
+                      interval: (chartData.length / 4).ceil().toDouble(),
+                      getTitlesWidget: (value, meta) {
+                        final idx = value.toInt();
+                        if (idx < 0 || idx >= chartData.length) return const SizedBox.shrink();
+                        return Text(
+                          DateFormat('MM/dd').format(chartData[idx].date),
+                          style: const TextStyle(color: Colors.white38, fontSize: 9),
+                        );
+                      },
+                    ),
                   ),
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 ),
-                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                borderData: FlBorderData(show: false),
+                lineTouchData: LineTouchData(enabled: true),
+                lineBarsData: [
+                  if (chartData.any((d) => d.ma5 > 0))
+                    _maLine(chartData, (d) => d.ma5, Colors.yellow, 'MA5'),
+                  if (chartData.any((d) => d.ma10 > 0))
+                    _maLine(chartData, (d) => d.ma10, Colors.orange, 'MA10'),
+                  if (chartData.any((d) => d.ma20 > 0))
+                    _maLine(chartData, (d) => d.ma20, Colors.purpleAccent, 'MA20'),
+                ],
               ),
-              borderData: FlBorderData(show: false),
-              lineTouchData: LineTouchData(enabled: true),
-              lineBarsData: [
-                // MA5
-                if (chartData.any((d) => d.ma5 > 0))
-                  _maLine(chartData, (d) => d.ma5, Colors.yellow, 'MA5'),
-                // MA10
-                if (chartData.any((d) => d.ma10 > 0))
-                  _maLine(chartData, (d) => d.ma10, Colors.orange, 'MA10'),
-                // MA20
-                if (chartData.any((d) => d.ma20 > 0))
-                  _maLine(chartData, (d) => d.ma20, Colors.purpleAccent, 'MA20'),
-              ],
             ),
-          ),
-          // K-line candles overlay
-          Positioned.fill(
-            child: CustomPaint(
-              painter: _KlinePainter(chartData),
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _KlinePainter(chartData),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
-  }
-
-  class _KlinePainter extends CustomPainter {
-    final List<HistoryKline> data;
-    final Paint _upPaint = Paint()..color = const Color(0xFFef5350);
-    final Paint _downPaint = Paint()..color = const Color(0xFF26a69a);
-    final Paint _linePaint = Paint()..strokeWidth = 1;
-
-    _KlinePainter(this.data);
-
-    @override
-    void paint(Canvas canvas, Size size) {
-      if (data.isEmpty) return;
-
-      final prices = data.expand((d) => [d.high, d.low]).toList();
-      final minPrice = prices.reduce((a, b) => a < b ? a : b);
-      final maxPrice = prices.reduce((a, b) => a > b ? a : b);
-      final priceRange = maxPrice - minPrice;
-      final padding = 56.0;
-      final chartWidth = size.width - padding;
-      final chartHeight = size.height;
-      final barWidth = chartWidth / data.length * 0.6;
-      final gap = chartWidth / data.length * 0.4;
-
-      for (int i = 0; i < data.length; i++) {
-        final d = data[i];
-        final isUp = d.close >= d.open;
-        final paint = isUp ? _upPaint : _downPaint;
-        _linePaint.color = paint.color;
-
-        final x = padding + i * (barWidth + gap) + barWidth / 2;
-        final highY = chartHeight - ((d.high - minPrice) / priceRange) * chartHeight;
-        final lowY = chartHeight - ((d.low - minPrice) / priceRange) * chartHeight;
-        final openY = chartHeight - ((d.open - minPrice) / priceRange) * chartHeight;
-        final closeY = chartHeight - ((d.close - minPrice) / priceRange) * chartHeight;
-
-        canvas.drawLine(Offset(x, highY), Offset(x, lowY), _linePaint);
-
-        final bodyTop = isUp ? closeY : openY;
-        final bodyBottom = isUp ? openY : closeY;
-        final bodyLeft = x - barWidth / 2;
-
-        if (isUp) {
-          canvas.drawRect(
-            Rect.fromLTWH(bodyLeft, bodyTop, barWidth, bodyBottom - bodyTop),
-            paint,
-          );
-        } else {
-          paint.style = PaintingStyle.stroke;
-          paint.strokeWidth = 1;
-          canvas.drawRect(
-            Rect.fromLTWH(bodyLeft, bodyTop, barWidth, bodyBottom - bodyTop),
-            paint,
-          );
-          paint.style = PaintingStyle.fill;
-        }
-      }
-    }
-
-    @override
-    bool shouldRepaint(_KlinePainter oldDelegate) => oldDelegate.data != data;
   }
 
   LineChartBarData _maLine(
@@ -528,4 +482,163 @@ class _ChartScreenState extends State<ChartScreen> {
     }
     return vol.toInt().toString();
   }
+
+  Widget _buildSelectedInfo() {
+    if (_selectedKline == null) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        color: const Color(0xFF0f3460),
+        child: const Text('点击K线查看详情', style: TextStyle(color: Colors.grey, fontSize: 13)),
+      );
+    }
+
+    final kline = _selectedKline!;
+    final isUp = kline.close >= kline.open;
+    final color = isUp ? const Color(0xFFef5350) : const Color(0xFF26a69a);
+    final change = kline.close - kline.open;
+    final changePct = kline.open > 0 ? (change / kline.open * 100) : 0;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      color: const Color(0xFF0f3460),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            DateFormat('yyyy-MM-dd').format(kline.date),
+            style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('开盘', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                  Text(kline.open.toStringAsFixed(2), style: const TextStyle(color: Colors.white, fontSize: 13)),
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('收盘', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                  Text(kline.close.toStringAsFixed(2), style: TextStyle(color: color, fontSize: 13)),
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('最高', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                  Text(kline.high.toStringAsFixed(2), style: const TextStyle(color: Color(0xFFef5350), fontSize: 13)),
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('最低', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                  Text(kline.low.toStringAsFixed(2), style: const TextStyle(color: Color(0xFF26a69a), fontSize: 13)),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('成交量', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                  Text(_formatVolume(kline.volume), style: const TextStyle(color: Colors.white, fontSize: 13)),
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('涨跌额', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                  Text('${isUp ? '+' : ''}${change.toStringAsFixed(2)}', style: TextStyle(color: color, fontSize: 13)),
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('涨跌幅', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                  Text('${isUp ? '+' : ''}${changePct.toStringAsFixed(2)}%', style: TextStyle(color: color, fontSize: 13)),
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('换手率', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                  Text('${kline.turnover.toStringAsFixed(2)}%', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _KlinePainter extends CustomPainter {
+  final List<HistoryKline> data;
+  final Paint upPaint = Paint()..color = const Color(0xFFef5350);
+  final Paint downPaint = Paint()..color = const Color(0xFF26a69a);
+  final Paint linePaint = Paint()..strokeWidth = 1;
+
+  _KlinePainter(this.data);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (data.isEmpty) return;
+
+    final prices = data.expand((d) => [d.high, d.low]).toList();
+    final minPrice = prices.reduce((a, b) => a < b ? a : b);
+    final maxPrice = prices.reduce((a, b) => a > b ? a : b);
+    final priceRange = maxPrice - minPrice;
+    final padding = 56.0;
+    final chartWidth = size.width - padding;
+    final chartHeight = size.height;
+    final barWidth = chartWidth / data.length * 0.6;
+    final gap = chartWidth / data.length * 0.4;
+
+    for (int i = 0; i < data.length; i++) {
+      final d = data[i];
+      final isUp = d.close >= d.open;
+      final paint = isUp ? upPaint : downPaint;
+      linePaint.color = paint.color;
+
+      final x = padding + i * (barWidth + gap) + barWidth / 2;
+      final highY = chartHeight - ((d.high - minPrice) / priceRange) * chartHeight;
+      final lowY = chartHeight - ((d.low - minPrice) / priceRange) * chartHeight;
+      final openY = chartHeight - ((d.open - minPrice) / priceRange) * chartHeight;
+      final closeY = chartHeight - ((d.close - minPrice) / priceRange) * chartHeight;
+
+      canvas.drawLine(Offset(x, highY), Offset(x, lowY), linePaint);
+
+      final bodyTop = isUp ? closeY : openY;
+      final bodyBottom = isUp ? openY : closeY;
+      final bodyLeft = x - barWidth / 2;
+
+      if (isUp) {
+        canvas.drawRect(
+          Rect.fromLTWH(bodyLeft, bodyTop, barWidth, bodyBottom - bodyTop),
+          paint,
+        );
+      } else {
+        paint.style = PaintingStyle.stroke;
+        paint.strokeWidth = 1;
+        canvas.drawRect(
+          Rect.fromLTWH(bodyLeft, bodyTop, barWidth, bodyBottom - bodyTop),
+          paint,
+        );
+        paint.style = PaintingStyle.fill;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_KlinePainter oldDelegate) => oldDelegate.data != data;
 }

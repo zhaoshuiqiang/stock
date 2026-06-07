@@ -22,30 +22,46 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE watchlist (
-            code TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            added_at INTEGER NOT NULL
-          )
-        ''');
-
-        await db.execute('''
-          CREATE TABLE alerts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            code TEXT NOT NULL,
-            name TEXT NOT NULL,
-            condition_type TEXT NOT NULL,
-            threshold_value REAL NOT NULL,
-            created_at INTEGER NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            last_triggered_at INTEGER
-          )
-        ''');
+        await _createTables(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('''
+            ALTER TABLE alerts ADD COLUMN alert_type TEXT DEFAULT '';
+          ''');
+          await db.execute('''
+            ALTER TABLE alerts ADD COLUMN indicator_type TEXT DEFAULT '';
+          ''');
+        }
       },
     );
+  }
+
+  Future<void> _createTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE watchlist (
+        code TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        added_at INTEGER NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        condition_type TEXT NOT NULL,
+        threshold_value REAL NOT NULL,
+        created_at INTEGER NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_triggered_at INTEGER,
+        alert_type TEXT DEFAULT '',
+        indicator_type TEXT DEFAULT ''
+      )
+    ''');
   }
 
   Future<void> addToWatchlist(String code, String name) async {

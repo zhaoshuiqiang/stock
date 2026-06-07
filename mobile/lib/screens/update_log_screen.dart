@@ -10,6 +10,56 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.1.0',
+        'date': '2026-06-07',
+        'changes': [
+          '修复总市值/流通市值显示偏差10000倍（单位万元→元转换）',
+          '修复振幅始终显示为0的问题',
+          '修复WebSocket轮询不获取PE/PB/市值数据',
+          '修复WebSocket数据解析层级不匹配问题',
+          '添加PB/PE数据合理性校验和调试日志',
+          '修复预警对话框默认类型值不匹配的崩溃',
+          '修复K线图价格范围为0时的渲染崩溃',
+          '新增技术指标单元测试覆盖',
+        ],
+      },
+      {
+        'version': 'v2.0.9',
+        'date': '2026-06-07',
+        'changes': [
+          '修复首页股票名称乱码问题（GBK编码解码）',
+          '修复关于按钮点击无反应',
+          '修复主力流入流出数据显示为0',
+          '优化主力资金数据计算逻辑',
+        ],
+      },
+      {
+        'version': 'v2.0.8',
+        'date': '2026-06-07',
+        'changes': [
+          '修复APK版本号一直显示2.0.0的问题',
+          '修复腾讯API字段映射错误，市盈率市净率数据正常显示',
+          '替换失效的新浪主力资金API为东方财富API',
+          '修复自选页预警弹窗下拉选项初始值不匹配问题',
+          '修复HTTP轮询获取实时行情数据功能',
+          '修复K线历史数据涨跌额和涨跌幅为0的问题',
+          '修复市场情绪API类型转换错误',
+          '关于菜单移到首页右上角',
+        ],
+      },
+      {
+        'version': 'v2.0.7',
+        'date': '2026-06-07',
+        'changes': [
+          '新增实时行情图，显示最近30个价格点走势',
+          '新增估值分析和资金流向分析',
+          '新增市盈率、市净率、主力流入流出数据',
+          '优化K线图MACD和RSI子图显示',
+          '预警条件显示中文和单位',
+          '关于按钮移到首页右上角',
+        ],
+      },
+      {
         'version': 'v2.0.6',
         'date': '2026-06-07',
         'changes': [
@@ -98,7 +148,7 @@ class UpdateLogScreen extends StatelessWidget {
                   Row(
                     children: [
                       Text(
-                        update['version']!,
+                        update['version'] as String,
                         style: textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: const Color(0xFFef5350),
@@ -106,8 +156,8 @@ class UpdateLogScreen extends StatelessWidget {
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        update['date']!,
-                        style: textTheme.bodySmall?.copyWith(color: Colors.grey[400]),
+                        update['date'] as String,
+                        style: textTheme.bodySmall?.copyWith(color: Colors.grey),
                       ),
                     ],
                   ),

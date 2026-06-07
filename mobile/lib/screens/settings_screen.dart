@@ -184,7 +184,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ),
-                      const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[400]),
+                      const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
                     ],
                   ),
                 ),
@@ -192,7 +192,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 20),
             Text(
-              '版本: v2.0.6',
+              '版本: v2.1.0',
               style: textTheme.bodySmall?.copyWith(color: Colors.grey[500]),
             ),
           ],

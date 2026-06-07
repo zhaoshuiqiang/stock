@@ -15,7 +15,7 @@ class _AlertCreateDialogState extends State<AlertCreateDialog> {
   final _nameController = TextEditingController();
   final _thresholdController = TextEditingController();
 
-  String _alertType = 'price_up';
+  String _alertType = 'price_above';
   String _indicatorType = 'rsi';
 
   bool get isEditing => widget.rule != null;
@@ -26,7 +26,7 @@ class _AlertCreateDialogState extends State<AlertCreateDialog> {
     if (widget.rule != null) {
       _codeController.text = widget.rule!.code;
       _nameController.text = widget.rule!.name;
-      _thresholdController.text = widget.rule!.threshold.toString();
+      _thresholdController.text = (widget.rule!.threshold ?? widget.rule!.thresholdValue).toString();
       _alertType = widget.rule!.alertType;
       _indicatorType = widget.rule!.indicatorType.isNotEmpty
           ? widget.rule!.indicatorType
@@ -124,15 +124,15 @@ class _AlertCreateDialogState extends State<AlertCreateDialog> {
                 contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
               items: const [
-                DropdownMenuItem(value: 'price_up', child: Text('价格上涨至')),
-                DropdownMenuItem(value: 'price_down', child: Text('价格下跌至')),
-                DropdownMenuItem(value: 'pct_up', child: Text('涨幅超过')),
-                DropdownMenuItem(value: 'pct_down', child: Text('跌幅超过')),
+                DropdownMenuItem(value: 'price_above', child: Text('价格高于')),
+                DropdownMenuItem(value: 'price_below', child: Text('价格低于')),
+                DropdownMenuItem(value: 'change_above', child: Text('涨幅超过')),
+                DropdownMenuItem(value: 'change_below', child: Text('跌幅超过')),
                 DropdownMenuItem(value: 'indicator', child: Text('指标触发')),
               ],
               onChanged: (value) {
                 setState(() {
-                  _alertType = value ?? 'price_up';
+                  _alertType = value ?? 'price_above';
                 });
               },
             ),
@@ -204,11 +204,11 @@ class _AlertCreateDialogState extends State<AlertCreateDialog> {
 
   String _thresholdLabel() {
     switch (_alertType) {
-      case 'price_up':
-      case 'price_down':
+      case 'price_above':
+      case 'price_below':
         return '目标价格';
-      case 'pct_up':
-      case 'pct_down':
+      case 'change_above':
+      case 'change_below':
         return '涨跌幅(%)';
       case 'indicator':
         return '触发值';
@@ -219,11 +219,11 @@ class _AlertCreateDialogState extends State<AlertCreateDialog> {
 
   String _thresholdHint() {
     switch (_alertType) {
-      case 'price_up':
-      case 'price_down':
+      case 'price_above':
+      case 'price_below':
         return '如: 10.50';
-      case 'pct_up':
-      case 'pct_down':
+      case 'change_above':
+      case 'change_below':
         return '如: 5.0';
       case 'indicator':
         return '如: 70';

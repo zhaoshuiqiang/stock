@@ -4,6 +4,7 @@ import '../models/stock_models.dart';
 import '../analysis/indicators.dart';
 import '../analysis/signal_engine.dart';
 import '../widgets/signal_card.dart';
+import 'search_screen.dart';
 
 class SignalsScreen extends StatefulWidget {
   final String? selectedCode;
@@ -84,79 +85,102 @@ class SignalsScreenState extends State<SignalsScreen> {
 
     return _isLoading
         ? const Center(child: CircularProgressIndicator())
-        : _code == null
-            ? Center(
+        : ListView(
+            padding: const EdgeInsets.all(8),
+            children: [
+              Card(
+                margin: const EdgeInsets.all(8),
+                color: const Color(0xFF16213e),
                 child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Text('请选择一只股票查看信号分析', style: textTheme.titleMedium),
-                ),
-              )
-            : ListView(
-                padding: const EdgeInsets.all(8),
-                children: [
-                  Card(
-                    margin: const EdgeInsets.all(8),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        children: [
-                          Text(
-                            '$_name ($_code)',
-                            style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      InkWell(
+                        onTap: _showStockSearch,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0f3460),
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          const SizedBox(height: 12),
-                          if (_analysis != null)
-                            Column(
-                              children: [
-                                Text(
-                                  '综合评分: ${_analysis!.score}',
-                                  style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.search, color: Colors.grey),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _code != null ? '$_name ($_code)' : '搜索股票',
+                                  style: textTheme.bodyMedium?.copyWith(color: Colors.white),
                                 ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  '操作建议: ${_analysis!.recommendation}',
-                                  style: textTheme.titleMedium?.copyWith(
-                                    color: _analysis!.score >= 60 ? upColor : downColor,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  '风险等级: ${_analysis!.riskLevel}',
-                                  style: textTheme.bodyLarge?.copyWith(
-                                    color: _analysis!.riskLevel == '高' ? upColor : orangeColor,
-                                  ),
-                                ),
-                              ],
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (_analysis != null && _analysis!.signals.isNotEmpty)
-                    ..._analysis!.signals.map((signal) => SignalCard(signal: signal)),
-                  if (_analysis != null && _analysis!.signals.isEmpty)
-                    Card(
-                      margin: const EdgeInsets.all(8),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Center(child: Text('暂无信号', style: textTheme.bodyMedium)),
-                      ),
-                    ),
-                  if (_analysis != null && _analysis!.suggestions.isNotEmpty)
-                    Card(
-                      margin: const EdgeInsets.all(8),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          children: [
-                            Text('操作建议:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 8),
-                            ..._analysis!.suggestions.map((s) => Text('- $s', style: textTheme.bodyMedium)),
-                          ],
+                              ),
+                              const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                            ],
+                          ),
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      if (_analysis != null)
+                        Column(
+                          children: [
+                            Text(
+                              '综合评分: ${_analysis!.score}',
+                              style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '操作建议: ${_analysis!.recommendation}',
+                              style: textTheme.titleMedium?.copyWith(
+                                color: _analysis!.score >= 60 ? upColor : downColor,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '风险等级: ${_analysis!.riskLevel}',
+                              style: textTheme.bodyLarge?.copyWith(
+                                color: _analysis!.riskLevel == '高' ? upColor : orangeColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_analysis != null && _analysis!.signals.isNotEmpty)
+                ..._analysis!.signals.map((signal) => SignalCard(signal: signal)),
+              if (_analysis != null && _analysis!.signals.isEmpty)
+                Card(
+                  margin: const EdgeInsets.all(8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Center(child: Text('暂无信号', style: textTheme.bodyMedium)),
+                  ),
+                ),
+              if (_analysis != null && _analysis!.suggestions.isNotEmpty)
+                Card(
+                  margin: const EdgeInsets.all(8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      children: [
+                        Text('操作建议:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        ..._analysis!.suggestions.map((s) => Text('- $s', style: textTheme.bodyMedium)),
+                      ],
                     ),
-                ],
-              );
+                  ),
+                ),
+            ],
+          );
+  }
+
+  void _showStockSearch() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const SearchScreen(selectMode: true)),
+    );
+    if (result != null && result is StockInfo) {
+      _loadAnalysis(result.code);
+    }
   }
 }
