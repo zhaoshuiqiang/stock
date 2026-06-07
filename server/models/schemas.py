@@ -119,6 +119,20 @@ class AlertRuleResponse(BaseModel):
     created_at: datetime
 
 
+class TechnicalAnalysis(BaseModel):
+    """技术分析结果"""
+    code: str
+    name: str
+    support_levels: List[float] = []
+    resistance_levels: List[float] = []
+    nearest_support: Optional[float] = None
+    nearest_resistance: Optional[float] = None
+    dragon_retreat: Optional[dict] = None
+    fibonacci: Optional[dict] = None
+    trend_signals: dict = {}
+    chart_annotation: Optional[dict] = None
+
+
 class MarketSentiment(BaseModel):
     up_count: int
     down_count: int

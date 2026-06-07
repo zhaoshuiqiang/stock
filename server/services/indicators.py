@@ -57,6 +57,48 @@ def calc_volume_ma(df: pd.DataFrame, periods=(5, 10)) -> pd.DataFrame:
     return df
 
 
+def calc_support_resistance(df: pd.DataFrame, window: int = 20, min_touch: int = 2) -> dict:
+    """
+    支撑压力位识别（关键K线密集区）
+    方法：寻找近期低点/高点的密集成交区
+    """
+    if len(df) < window:
+        return {}
+    
+    recent = df.tail(window)
+    
+    highs = []
+    lows = []
+    for i in range(2, len(recent) - 2):
+        if (recent.iloc[i]['high'] > recent.iloc[i-1]['high']
+            and recent.iloc[i]['high'] > recent.iloc[i-2]['high']
+            and recent.iloc[i]['high'] > recent.iloc[i+1]['high']
+            and recent.iloc[i]['high'] > recent.iloc[i+2]['high']):
+            highs.append(recent.iloc[i]['high'])
+        
+        if (recent.iloc[i]['low'] < recent.iloc[i-1]['low']
+            and recent.iloc[i]['low'] < recent.iloc[i-2]['low']
+            and recent.iloc[i]['low'] < recent.iloc[i+1]['low']
+            and recent.iloc[i]['low'] < recent.iloc[i+2]['low']):
+            lows.append(recent.iloc[i]['low'])
+    
+    result = {
+        "resistance": sorted(highs, reverse=True)[:3],
+        "support": sorted(lows)[:3],
+        "current_price": round(df.iloc[-1]['close'], 2)
+    }
+    
+    current = result["current_price"]
+    if result["resistance"]:
+        nearest_resistance = min(result["resistance"], key=lambda x: abs(x - current))
+        result["nearest_resistance"] = round(nearest_resistance, 2)
+    if result["support"]:
+        nearest_support = min(result["support"], key=lambda x: abs(x - current))
+        result["nearest_support"] = round(nearest_support, 2)
+    
+    return result
+
+
 def calc_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty or len(df) < 2:
         return df

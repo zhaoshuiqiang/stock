@@ -313,6 +313,44 @@ class SignalItem {
   }
 }
 
+class TechnicalAnalysisData {
+  final String code;
+  final String name;
+  final List<double> supportLevels;
+  final List<double> resistanceLevels;
+  final double? nearestSupport;
+  final double? nearestResistance;
+  final Map<String, dynamic>? dragonRetreat;
+  final Map<String, dynamic>? fibonacci;
+  final Map<String, dynamic> trendSignals;
+
+  TechnicalAnalysisData({
+    required this.code,
+    required this.name,
+    this.supportLevels = const [],
+    this.resistanceLevels = const [],
+    this.nearestSupport,
+    this.nearestResistance,
+    this.dragonRetreat,
+    this.fibonacci,
+    this.trendSignals = const {},
+  });
+
+  factory TechnicalAnalysisData.fromJson(Map<String, dynamic> json) {
+    return TechnicalAnalysisData(
+      code: json['code'] ?? '',
+      name: json['name'] ?? '',
+      supportLevels: (json['support_levels'] as List<dynamic>?)?.map((e) => (e as num).toDouble()).toList() ?? [],
+      resistanceLevels: (json['resistance_levels'] as List<dynamic>?)?.map((e) => (e as num).toDouble()).toList() ?? [],
+      nearestSupport: json['nearest_support'] != null ? (json['nearest_support'] as num).toDouble() : null,
+      nearestResistance: json['nearest_resistance'] != null ? (json['nearest_resistance'] as num).toDouble() : null,
+      dragonRetreat: json['dragon_retreat'] as Map<String, dynamic>?,
+      fibonacci: json['fibonacci'] as Map<String, dynamic>?,
+      trendSignals: json['trend_signals'] as Map<String, dynamic>? ?? {},
+    );
+  }
+}
+
 class AnalysisResult {
   final QuoteData? quote;
   final Map<String, dynamic> indicators;

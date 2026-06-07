@@ -517,4 +517,109 @@ class ApiClient {
       return utf8.decode(bytes, allowMalformed: true);
     }
   }
+
+  Future<TechnicalAnalysisData?> getTechnicalAnalysis(String code) async {
+    final cacheKey = 'tech_analysis_$code';
+    final cached = _getCached(cacheKey);
+    if (cached != null) return cached as TechnicalAnalysisData;
+
+    try {
+      final codeWithoutPrefix = code.startsWith('sh') || code.startsWith('sz') 
+          ? code.substring(2) : code;
+      final url = '$_baseUrl/analysis/$codeWithoutPrefix';
+      final response = await _client.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = TechnicalAnalysisData.fromJson(json.decode(response.body));
+        _setCached(cacheKey, data);
+        return data;
+      }
+    } catch (e) {
+      print('Technical analysis error: $e');
+    }
+    return null;
+  }
+
+  Future<TechnicalAnalysisData?> getLevels(String code) async {
+    final cacheKey = 'tech_levels_$code';
+    final cached = _getCached(cacheKey);
+    if (cached != null) return cached as TechnicalAnalysisData;
+
+    try {
+      final codeWithoutPrefix = code.startsWith('sh') || code.startsWith('sz') 
+          ? code.substring(2) : code;
+      final url = '$_baseUrl/levels/$codeWithoutPrefix';
+      final response = await _client.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = TechnicalAnalysisData.fromJson(json.decode(response.body));
+        _setCached(cacheKey, data);
+        return data;
+      }
+    } catch (e) {
+      print('Levels error: $e');
+    }
+    return null;
+  }
+
+  Future<TechnicalAnalysisData?> getPatterns(String code) async {
+    final cacheKey = 'tech_patterns_$code';
+    final cached = _getCached(cacheKey);
+    if (cached != null) return cached as TechnicalAnalysisData;
+
+    try {
+      final codeWithoutPrefix = code.startsWith('sh') || code.startsWith('sz') 
+          ? code.substring(2) : code;
+      final url = '$_baseUrl/patterns/$codeWithoutPrefix';
+      final response = await _client.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = TechnicalAnalysisData.fromJson(json.decode(response.body));
+        _setCached(cacheKey, data);
+        return data;
+      }
+    } catch (e) {
+      print('Patterns error: $e');
+    }
+    return null;
+  }
+
+  Future<TechnicalAnalysisData?> getFibonacci(String code) async {
+    final cacheKey = 'tech_fibonacci_$code';
+    final cached = _getCached(cacheKey);
+    if (cached != null) return cached as TechnicalAnalysisData;
+
+    try {
+      final codeWithoutPrefix = code.startsWith('sh') || code.startsWith('sz') 
+          ? code.substring(2) : code;
+      final url = '$_baseUrl/fibonacci/$codeWithoutPrefix';
+      final response = await _client.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = TechnicalAnalysisData.fromJson(json.decode(response.body));
+        _setCached(cacheKey, data);
+        return data;
+      }
+    } catch (e) {
+      print('Fibonacci error: $e');
+    }
+    return null;
+  }
+
+  Future<TechnicalAnalysisData?> getTrendSignals(String code) async {
+    final cacheKey = 'tech_trend_signals_$code';
+    final cached = _getCached(cacheKey);
+    if (cached != null) return cached as TechnicalAnalysisData;
+
+    try {
+      final codeWithoutPrefix = code.startsWith('sh') || code.startsWith('sz') 
+          ? code.substring(2) : code;
+      final url = '$_baseUrl/trend-signals/$codeWithoutPrefix';
+      final response = await _client.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = TechnicalAnalysisData.fromJson(json.decode(response.body));
+        _setCached(cacheKey, data);
+        return data;
+      }
+    } catch (e) {
+      print('Trend signals error: $e');
+    }
+    return null;
+  }
 }

@@ -1,4 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { drawLevelsOverlay } from './LevelsOverlay.jsx';
+import { drawFibonacciOverlay } from './FibonacciOverlay.jsx';
 
 // 简单的移动平均线计算
 function calcMA(data, period) {
@@ -151,7 +153,7 @@ function formatAmount(num) {
   return value.toFixed(0);
 }
 
-export default function KLineChart({ history, loading }) {
+export default function KLineChart({ history, loading, techAnalysis }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -160,6 +162,10 @@ export default function KLineChart({ history, loading }) {
   // 处理缩放和滚动
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 0 });
   const [data, setData] = useState([]);
+  
+  // 技术分析开关
+  const [showLevels, setShowLevels] = useState(false);
+  const [showFibonacci, setShowFibonacci] = useState(false);
 
   useEffect(() => {
     if (history) {
@@ -487,6 +493,14 @@ export default function KLineChart({ history, loading }) {
     }
     ctx.stroke();
 
+    // ===== 技术分析叠加 =====
+    if (showLevels && techAnalysis?.support_levels) {
+      drawLevelsOverlay(ctx, techAnalysis, priceMin, priceMax, priceRange, padding, chartW, kLineH);
+    }
+    if (showFibonacci && techAnalysis?.fibonacci?.levels) {
+      drawFibonacciOverlay(ctx, techAnalysis.fibonacci.levels, priceMin, priceMax, priceRange, padding, chartW, kLineH);
+    }
+
     // ===== 鼠标交互 =====
     const handleMouseMove = (e) => {
       const rect = canvas.getBoundingClientRect();
@@ -556,7 +570,7 @@ export default function KLineChart({ history, loading }) {
       });
     }
 
-  }, [data, dimensions, visibleRange, tooltip]);
+  }, [data, dimensions, visibleRange, tooltip, showLevels, showFibonacci, techAnalysis]);
 
   useEffect(() => {
     let animationId;
@@ -601,6 +615,18 @@ export default function KLineChart({ history, loading }) {
       <div className="chart-toolbar">
         <span className="chart-title">📈 K线图</span>
         <div className="chart-controls">
+          <button 
+            className={showLevels ? 'active' : ''}
+            onClick={() => setShowLevels(!showLevels)}
+          >
+            支撑压力
+          </button>
+          <button 
+            className={showFibonacci ? 'active' : ''}
+            onClick={() => setShowFibonacci(!showFibonacci)}
+          >
+            斐波那契
+          </button>
           <button onClick={() => setVisibleRange({ start: Math.max(0, data.length - 60), end: data.length })}>
             60日
           </button>

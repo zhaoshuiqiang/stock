@@ -47,6 +47,26 @@ export async function getAnalysis(code) {
   return request(`${API_BASE}/analysis/${code}`);
 }
 
+// 获取支撑压力位
+export async function getLevels(code) {
+  return request(`${API_BASE}/levels/${code}`);
+}
+
+// 获取龙回头形态
+export async function getPatterns(code) {
+  return request(`${API_BASE}/patterns/${code}`);
+}
+
+// 获取斐波那契回撤
+export async function getFibonacci(code) {
+  return request(`${API_BASE}/fibonacci/${code}`);
+}
+
+// 获取趋势信号
+export async function getTrendSignals(code) {
+  return request(`${API_BASE}/trend-signals/${code}`);
+}
+
 // 获取自选列表
 export async function getWatchlist() {
   return request(`${API_BASE}/watchlist`);
