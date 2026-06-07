@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { createQuoteWebSocket, getWatchlist, getMarketSentiment, getAnalysis, getHistory, getQuote } from './api';
+import { createQuoteWebSocket, getWatchlist, getMarketSentiment, getAnalysis, getHistory, getQuote, getLevels, getPatterns, getFibonacci, getTrendSignals } from './api';
 import SearchBar from './components/SearchBar';
 import Watchlist from './components/Watchlist';
 import QuoteCard from './components/QuoteCard';
@@ -8,12 +8,14 @@ import KLineChart from './components/KLineChart';
 import IndicatorTable from './components/IndicatorTable';
 import SignalsPanel from './components/SignalsPanel';
 import AdvicePanel from './components/AdvicePanel';
+import TrendSignalsPanel from './components/TrendSignalsPanel';
 import AlertManager from './components/AlertManager';
 
 const TABS = [
   { key: 'kline', label: 'K线图表' },
   { key: 'indicators', label: '技术指标' },
   { key: 'signals', label: '买卖信号' },
+  { key: 'trend_signals', label: '趋势信号' },
   { key: 'advice', label: '操作建议' }
 ];
 
@@ -24,6 +26,7 @@ export default function App() {
   const [sentiment, setSentiment] = useState(null);
   const [analysis, setAnalysis] = useState(null);
   const [history, setHistory] = useState(null);
+  const [techAnalysis, setTechAnalysis] = useState(null);
   const [activeTab, setActiveTab] = useState('kline');
   const [wsConnected, setWsConnected] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -32,19 +35,16 @@ export default function App() {
 
   const wsRef = useRef(null);
 
-  // 获取应用版本
   useEffect(() => {
     if (window.electronAPI?.getVersion) {
       window.electronAPI.getVersion().then(v => setAppVersion(v));
     }
   }, []);
 
-  // 初始化 WebSocket
   useEffect(() => {
     const ws = createQuoteWebSocket(
       (data) => {
         if (data.type === 'quote' && selectedStock) {
-          // 如果收到的报价是当前选中股票，更新报价
           if (data.code === selectedStock || data.code === selectedStock.code) {
             setQuote(data);
           }
@@ -58,14 +58,11 @@ export default function App() {
     return () => ws.disconnect();
   }, []);
 
-  // 选中股票变化时更新 ws 引用
   useEffect(() => {
     if (wsRef.current.ws && selectedStock) {
-      // WebSocket 连接自动接收所有报价，我们在 onMessage 中过滤
     }
   }, [selectedStock]);
 
-  // 加载自选列表
   const loadWatchlist = useCallback(async () => {
     try {
       const data = await getWatchlist();
@@ -75,13 +72,11 @@ export default function App() {
     }
   }, []);
 
-  // 加载市场情绪
   const loadSentiment = useCallback(async () => {
     try {
       const data = await getMarketSentiment();
       setSentiment(data);
     } catch (e) {
-      // 情绪数据非关键，静默处理
     }
   }, []);
 
@@ -90,7 +85,6 @@ export default function App() {
     loadSentiment();
   }, [loadWatchlist, loadSentiment]);
 
-  // 选择股票
   const handleSelectStock = useCallback(async (stock) => {
     setSelectedStock(stock);
     setLoading(true);
@@ -98,6 +92,7 @@ export default function App() {
     setQuote(null);
     setAnalysis(null);
     setHistory(null);
+    setTechAnalysis(null);
 
     try {
       const [quoteData, historyData, analysisData] = await Promise.all([
@@ -108,6 +103,27 @@ export default function App() {
       setQuote(quoteData);
       setHistory(historyData);
       setAnalysis(analysisData);
+      
+      // Fetch technical analysis data
+      try {
+        const [levelsData, patternsData, fibonacciData, trendData] = await Promise.all([
+          getLevels(stock.code || stock),
+          getPatterns(stock.code || stock),
+          getFibonacci(stock.code || stock),
+          getTrendSignals(stock.code || stock)
+        ]);
+        setTechAnalysis({
+          support_levels: levelsData?.support_levels || [],
+          resistance_levels: levelsData?.resistance_levels || [],
+          nearest_support: levelsData?.nearest_support,
+          nearest_resistance: levelsData?.nearest_resistance,
+          dragon_retreat: patternsData?.dragon_retreat || {found: false},
+          fibonacci: fibonacciData?.fibonacci || {},
+          trend_signals: trendData?.trend_signals || {}
+        });
+      } catch (e) {
+        console.error('Failed to load technical analysis:', e);
+      }
     } catch (e) {
       setError('加载股票数据失败: ' + e.message);
     } finally {
@@ -115,14 +131,12 @@ export default function App() {
     }
   }, []);
 
-  // 刷新自选列表
   const handleWatchlistChange = useCallback(() => {
     loadWatchlist();
   }, [loadWatchlist]);
 
   return (
     <div className="app">
-      {/* 侧边栏 */}
       <aside className="sidebar">
         <div className="sidebar-header">
           <h1 className="app-title">📈 股票分析系统</h1>
@@ -141,7 +155,6 @@ export default function App() {
         <MarketSentiment sentiment={sentiment} />
       </aside>
 
-      {/* 主内容区 */}
       <main className="main-content">
         {!selectedStock ? (
           <div className="welcome">
@@ -156,10 +169,8 @@ export default function App() {
           </div>
         ) : (
           <>
-            {/* 报价卡片 */}
             <QuoteCard quote={quote} stock={selectedStock} loading={loading} />
 
-            {/* Tab 导航 */}
             <div className="tab-bar">
               {TABS.map(tab => (
                 <button
@@ -172,7 +183,6 @@ export default function App() {
               ))}
             </div>
 
-            {/* 错误提示 */}
             {error && (
               <div className="error-banner">
                 <span>⚠️ {error}</span>
@@ -180,16 +190,18 @@ export default function App() {
               </div>
             )}
 
-            {/* Tab 内容 */}
             <div className="tab-content">
               {activeTab === 'kline' && (
-                <KLineChart history={history} loading={loading} />
+                <KLineChart history={history} loading={loading} techAnalysis={techAnalysis} />
               )}
               {activeTab === 'indicators' && (
                 <IndicatorTable analysis={analysis} loading={loading} />
               )}
               {activeTab === 'signals' && (
                 <SignalsPanel analysis={analysis} loading={loading} />
+              )}
+              {activeTab === 'trend_signals' && (
+                <TrendSignalsPanel techAnalysis={techAnalysis} loading={loading} />
               )}
               {activeTab === 'advice' && (
                 <AdvicePanel analysis={analysis} loading={loading} />
@@ -199,7 +211,6 @@ export default function App() {
         )}
       </main>
 
-      {/* 底部状态栏 */}
       <footer className="status-bar">
         <div className="status-left">
           <span className={`status-dot ${wsConnected ? 'connected' : 'disconnected'}`}></span>
