@@ -597,24 +597,11 @@ Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
   final price = last.close;
 
   final supportLevels = calcSupportResistance(data);
-  final supports = supportLevels['support_levels'] as List<double>? ?? [];
-  final resistances = supportLevels['resistance_levels'] as List<double>? ?? [];
+  final supports = supportLevels['support'] as List<double>? ?? [];
+  final resistances = supportLevels['resistance'] as List<double>? ?? [];
 
-  double? nearestSupport;
-  for (final s in supports.reversed) {
-    if (s < price) {
-      nearestSupport = s;
-      break;
-    }
-  }
-
-  double? nearestResistance;
-  for (final r in resistances) {
-    if (r > price) {
-      nearestResistance = r;
-      break;
-    }
-  }
+  final nearestSupport = supports.isNotEmpty ? supports.first : null;
+  final nearestResistance = resistances.isNotEmpty ? resistances.first : null;
 
   final entryLow = nearestSupport ?? price * 0.98;
   final entryHigh = price * 1.01;

@@ -416,10 +416,12 @@ double _getMAValue(HistoryKline kline, int period) {
 Map<String, dynamic> calcSupportResistance(List<HistoryKline> data, {int window = 20}) {
   if (data.length < window) return {};
 
-  final recent = data.sublist(data.length - window);
+  final current = data.last.close;
+  final searchLen = data.length > 60 ? 60 : data.length;
+  final recent = data.sublist(data.length - searchLen);
 
-  final highs = <double>[];
-  final lows = <double>[];
+  final allHighs = <double>[];
+  final allLows = <double>[];
 
   for (int i = 2; i < recent.length - 2; i++) {
     final d = recent[i];
@@ -429,31 +431,44 @@ Map<String, dynamic> calcSupportResistance(List<HistoryKline> data, {int window 
     final next2 = recent[i + 2];
 
     if (d.high > prev1.high && d.high > prev2.high && d.high > next1.high && d.high > next2.high) {
-      highs.add(d.high);
+      allHighs.add(d.high);
     }
 
     if (d.low < prev1.low && d.low < prev2.low && d.low < next1.low && d.low < next2.low) {
-      lows.add(d.low);
+      allLows.add(d.low);
     }
   }
 
-  final resistance = highs.length > 3 ? highs.sublist(0, 3) : highs;
-  final support = lows.length > 3 ? lows.sublist(0, 3) : lows;
+  // 阻力位：仅保留高于当前价的水平，按升序排列（最近的在前）
+  final resistance = allHighs.where((h) => h > current).toList()..sort();
+  // 支撑位：仅保留低于当前价的水平，按降序排列（最近的在前）
+  final support = allLows.where((l) => l < current).toList()..sort((a, b) => b.compareTo(a));
+
+  final resistanceResult = resistance.length > 3 ? resistance.sublist(0, 3) : resistance;
+  final supportResult = support.length > 3 ? support.sublist(0, 3) : support;
+
+  // 兜底：如果找不到阻力位（股价创区间新高），用区间最高点作为参考
+  if (resistanceResult.isEmpty && allHighs.isNotEmpty) {
+    final maxHigh = allHighs.reduce((a, b) => a > b ? a : b);
+    if (maxHigh > 0) resistanceResult.add(maxHigh);
+  }
+  // 兜底：如果找不到支撑位（股价创区间新低），用区间最低点作为参考
+  if (supportResult.isEmpty && allLows.isNotEmpty) {
+    final minLow = allLows.reduce((a, b) => a < b ? a : b);
+    if (minLow > 0) supportResult.add(minLow);
+  }
 
   final result = <String, dynamic>{
-    'resistance': resistance,
-    'support': support,
-    'current_price': data.last.close,
+    'resistance': resistanceResult,
+    'support': supportResult,
+    'current_price': current,
   };
 
-  final current = data.last.close;
-  if (resistance.isNotEmpty) {
-    final nearestResistance = resistance.reduce((a, b) => (a - current).abs() < (b - current).abs() ? a : b);
-    result['nearest_resistance'] = nearestResistance;
+  if (resistanceResult.isNotEmpty) {
+    result['nearest_resistance'] = resistanceResult.first;
   }
-  if (support.isNotEmpty) {
-    final nearestSupport = support.reduce((a, b) => (a - current).abs() < (b - current).abs() ? a : b);
-    result['nearest_support'] = nearestSupport;
+  if (supportResult.isNotEmpty) {
+    result['nearest_support'] = supportResult.first;
   }
 
   return result;
