@@ -285,6 +285,9 @@ class ApiClient {
           final item = data[i] as Map<String, dynamic>;
           final close = _parseDouble(item['close']);
           final open = _parseDouble(item['open']);
+          final high = _parseDouble(item['high']);
+          final low = _parseDouble(item['low']);
+          final volume = _parseDouble(item['volume']);
           double preClose = open;
           if (i > 0) {
             preClose = _parseDouble(data[i - 1]['close']);
@@ -292,14 +295,25 @@ class ApiClient {
           final change = close - preClose;
           final changePct = preClose > 0 ? (change / preClose) * 100 : 0.0;
           
+          // 新浪K线API不返回amount字段，使用估算公式计算：
+          // 成交额 ≈ 成交量(手) × 100 × 均价
+          // 均价 = (开盘 + 最高 + 最低 + 收盘) / 4
+          double amount = _parseDouble(item['amount']);
+          if (amount == 0 && volume > 0) {
+            final avgPrice = (open + high + low + close) / 4;
+            if (avgPrice > 0) {
+              amount = volume * 100 * avgPrice;
+            }
+          }
+          
           results.add(HistoryKline(
             date: DateTime.tryParse(item['day'] ?? '') ?? DateTime.now(),
             open: open,
-            high: _parseDouble(item['high']),
-            low: _parseDouble(item['low']),
+            high: high,
+            low: low,
             close: close,
-            volume: _parseDouble(item['volume']),
-            amount: _parseDouble(item['amount']),
+            volume: volume,
+            amount: amount,
             change: change,
             changePct: changePct,
           ));
