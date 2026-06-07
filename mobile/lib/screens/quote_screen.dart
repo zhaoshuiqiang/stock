@@ -10,6 +10,7 @@ import '../analysis/signal_engine.dart';
 import '../storage/database_service.dart';
 import '../widgets/signal_card.dart';
 import '../widgets/technical_indicators_panel.dart';
+import '../widgets/strategy_panel.dart';
 
 const _kChartLeftReservedSize = 42.0;
 
@@ -42,12 +43,13 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   List<FlSpot> _realtimeSpots = [];
   int? _selectedKlineIndex;
   bool _showFibonacci = false;
+  bool _showBoll = false;
   Map<String, dynamic>? _techAnalysis;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     _loadData();
     _checkFavorite();
     _startRealtime();
@@ -200,6 +202,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               Tab(text: '实时'),
               Tab(text: 'K线'),
               Tab(text: '信号'),
+              Tab(text: '战法'),
               Tab(text: '分析'),
               Tab(text: '指标'),
             ],
@@ -211,6 +214,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                 _buildRealtimeChart(),
                 _buildKlineChart(),
                 _buildSignalList(),
+                StrategyPanel(klines: _klines, signals: _analysis?.signals ?? []),
                 _buildAnalysis(),
                 TechnicalIndicatorsPanel(klines: _klines),
               ],
@@ -657,6 +661,32 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       ),
     );
 
+    Widget bollToggle = Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            _showBoll = !_showBoll;
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: _showBoll ? const Color(0xFF00BCD4) : const Color(0xFF16213e),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _showBoll ? const Color(0xFF00BCD4) : Colors.white24),
+          ),
+          child: Text(
+            'BOLL',
+            style: TextStyle(
+              color: _showBoll ? Colors.white : Colors.white54,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ),
+    );
+
     // 选中K线的数据展示
     Widget? selectedInfo;
     if (_selectedKlineIndex != null && _selectedKlineIndex! < _klines.length) {
@@ -704,6 +734,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               fibonacciToggle,
+              bollToggle,
             ],
           ),
         ),
@@ -784,6 +815,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       fibonacciLevels: _techAnalysis?['fibonacci']?['levels'],
                       minPrice: minPrice,
                       maxPrice: maxPrice,
+                      showBoll: _showBoll,
                     ),
                   ),
                 ),
@@ -792,6 +824,85 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             ),
             );
           }),
+        ),
+        Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 8, bottom: 4),
+              child: Row(
+                children: [
+                  const Text('成交量', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  const SizedBox(width: 16),
+                  Container(width: 8, height: 2, color: Colors.yellow),
+                  const SizedBox(width: 4),
+                  const Text('MA5', style: TextStyle(color: Colors.white, fontSize: 10)),
+                  const SizedBox(width: 8),
+                  Container(width: 8, height: 2, color: Colors.cyan),
+                  const SizedBox(width: 4),
+                  const Text('MA10', style: TextStyle(color: Colors.white, fontSize: 10)),
+                ],
+              ),
+            ),
+            Container(
+              height: 80,
+              padding: const EdgeInsets.all(8),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _VolumeHistogramPainter(_klines),
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: _kChartLeftReservedSize),
+                      child: LineChart(
+                        LineChartData(
+                          minY: 0,
+                          gridData: const FlGridData(show: false),
+                          titlesData: FlTitlesData(
+                            show: true,
+                            leftTitles: AxisTitles(
+                              sideTitles: SideTitles(
+                                showTitles: true,
+                                reservedSize: _kChartLeftReservedSize,
+                                getTitlesWidget: (value, meta) => Text(
+                                  _formatVolume(value),
+                                  style: const TextStyle(color: Colors.white38, fontSize: 9),
+                                ),
+                              ),
+                            ),
+                            bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                          ),
+                          borderData: FlBorderData(show: false),
+                          lineBarsData: [
+                            if (_klines.any((k) => k.volMa5 > 0))
+                              LineChartBarData(
+                                spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.volMa5)).toList(),
+                                isCurved: false,
+                                color: Colors.yellow,
+                                barWidth: 1,
+                                dotData: const FlDotData(show: false),
+                              ),
+                            if (_klines.any((k) => k.volMa10 > 0))
+                              LineChartBarData(
+                                spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.volMa10)).toList(),
+                                isCurved: false,
+                                color: Colors.cyan,
+                                barWidth: 1,
+                                dotData: const FlDotData(show: false),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
         Column(
           children: [
@@ -941,6 +1052,99 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             ),
           ],
         ),
+        Builder(builder: (_) {
+          final kdjData = _klines.where((k) => k.k > 0).toList();
+          if (kdjData.isEmpty) return const SizedBox.shrink();
+          final jValues = kdjData.map((k) => k.j).toList();
+          final minJ = jValues.reduce((a, b) => a < b ? a : b);
+          final maxJ = jValues.reduce((a, b) => a > b ? a : b);
+          final kdjMinY = minJ < 0 ? minJ - 5 : 0.0;
+          final kdjMaxY = maxJ > 100 ? maxJ + 5 : 100.0;
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(left: 8, bottom: 4),
+                child: Row(
+                  children: [
+                    const Text('KDJ', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    const SizedBox(width: 8),
+                    Container(width: 8, height: 8, color: Colors.deepOrange),
+                    const SizedBox(width: 4),
+                    const Text('K', style: TextStyle(color: Colors.white, fontSize: 10)),
+                    const SizedBox(width: 8),
+                    Container(width: 8, height: 8, color: Colors.cyan),
+                    const SizedBox(width: 4),
+                    const Text('D', style: TextStyle(color: Colors.white, fontSize: 10)),
+                    const SizedBox(width: 8),
+                    Container(width: 8, height: 8, color: Colors.purpleAccent),
+                    const SizedBox(width: 4),
+                    const Text('J', style: TextStyle(color: Colors.white, fontSize: 10)),
+                  ],
+                ),
+              ),
+              Container(
+                height: 100,
+                padding: const EdgeInsets.all(8),
+                child: LineChart(
+                  LineChartData(
+                    minY: kdjMinY,
+                    maxY: kdjMaxY,
+                    gridData: FlGridData(
+                      show: true,
+                      drawVerticalLine: false,
+                      getDrawingHorizontalLine: (value) {
+                        if (value == 20 || value == 80) {
+                          return const FlLine(color: Colors.white24, strokeWidth: 1, dashArray: [5, 5]);
+                        }
+                        if (value == 50) {
+                          return const FlLine(color: Colors.white12, strokeWidth: 0.5, dashArray: [2, 4]);
+                        }
+                        return FlLine(color: Colors.white10, strokeWidth: 0.5);
+                      },
+                    ),
+                    titlesData: FlTitlesData(
+                      show: true,
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: _kChartLeftReservedSize,
+                          getTitlesWidget: (value, meta) => Text(value.toInt().toString(), style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                        ),
+                      ),
+                      bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    ),
+                    borderData: FlBorderData(show: false),
+                    lineBarsData: [
+                      LineChartBarData(
+                        spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.k)).toList(),
+                        isCurved: false,
+                        color: Colors.deepOrange,
+                        barWidth: 1,
+                        dotData: const FlDotData(show: false),
+                      ),
+                      LineChartBarData(
+                        spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.d)).toList(),
+                        isCurved: false,
+                        color: Colors.cyan,
+                        barWidth: 1,
+                        dotData: const FlDotData(show: false),
+                      ),
+                      LineChartBarData(
+                        spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.j)).toList(),
+                        isCurved: false,
+                        color: Colors.purpleAccent,
+                        barWidth: 1,
+                        dotData: const FlDotData(show: false),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        }),
       ],
     );
   }
@@ -1104,6 +1308,117 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               ),
             ),
           ),
+        if (analysis.tradeLevels != null && analysis.tradeLevels!.isNotEmpty)
+          Card(
+            margin: const EdgeInsets.all(8),
+            color: const Color(0xFF16213e),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('交易计划', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
+                  const SizedBox(height: 12),
+                  _buildTradeLevelRow('入场区间',
+                      '${(analysis.tradeLevels!['entry_low'] as double).toStringAsFixed(2)} - ${(analysis.tradeLevels!['entry_high'] as double).toStringAsFixed(2)}',
+                      Colors.white),
+                  const SizedBox(height: 6),
+                  _buildTradeLevelRow('目标价位',
+                      '${(analysis.tradeLevels!['target'] as double).toStringAsFixed(2)}',
+                      const Color(0xFFef5350)),
+                  const SizedBox(height: 6),
+                  _buildTradeLevelRow('止损价位',
+                      '${(analysis.tradeLevels!['stop_loss'] as double).toStringAsFixed(2)}',
+                      const Color(0xFF26a69a)),
+                  const SizedBox(height: 6),
+                  _buildTradeLevelRow('盈亏比',
+                      '${(analysis.tradeLevels!['risk_reward_ratio'] as double).toStringAsFixed(1)}:1',
+                      (analysis.tradeLevels!['risk_reward_ratio'] as double) >= 2 ? const Color(0xFFef5350) : Colors.orange),
+                ],
+              ),
+            ),
+          ),
+        if (analysis.confluenceDetails.isNotEmpty)
+          Card(
+            margin: const EdgeInsets.all(8),
+            color: const Color(0xFF16213e),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('多指标共振', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
+                      Text(
+                        '看多 ${analysis.confluenceScore}/8',
+                        style: TextStyle(
+                          color: analysis.confluenceScore >= 5 ? const Color(0xFFef5350) : analysis.confluenceScore >= 3 ? Colors.orange : const Color(0xFF26a69a),
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: analysis.confluenceScore / 8,
+                      backgroundColor: const Color(0xFF26a69a).withOpacity(0.3),
+                      valueColor: AlwaysStoppedAnimation(
+                        analysis.confluenceScore >= 5 ? const Color(0xFFef5350) : Colors.orange,
+                      ),
+                      minHeight: 8,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: analysis.confluenceDetails.map((d) {
+                      final name = d['name'] as String;
+                      final bull = d['bull'] as bool;
+                      final bear = d['bear'] as bool;
+                      final weighted = d['weighted'] as bool? ?? false;
+                      Color color;
+                      String label;
+                      if (bull) {
+                        color = const Color(0xFFef5350);
+                        label = '$name ✓${weighted ? " ×2" : ""}';
+                      } else if (bear) {
+                        color = const Color(0xFF26a69a);
+                        label = '$name ✗';
+                      } else {
+                        color = Colors.white38;
+                        label = '$name —';
+                      }
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: color.withOpacity(0.4)),
+                        ),
+                        child: Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildTradeLevelRow(String label, String value, Color valueColor) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+        Text(value, style: TextStyle(color: valueColor, fontSize: 14, fontWeight: FontWeight.bold)),
       ],
     );
   }
@@ -1263,11 +1578,23 @@ class _KlinePainter extends CustomPainter {
   final Map<String, double>? fibonacciLevels;
   final double minPrice;
   final double maxPrice;
-  
+  final bool showBoll;
+
   final Paint _upPaint = Paint()..color = const Color(0xFFef5350);
   final Paint _downPaint = Paint()..color = const Color(0xFF26a69a);
   final Paint _linePaint = Paint()..strokeWidth = 1;
   final Paint _selectedPaint = Paint()..color = Colors.white.withOpacity(0.2);
+  final Paint _bollUpperPaint = Paint()
+    ..color = const Color(0xFF00BCD4)
+    ..strokeWidth = 1
+    ..style = PaintingStyle.stroke;
+  final Paint _bollMidPaint = Paint()
+    ..color = Colors.white54
+    ..strokeWidth = 0.8
+    ..style = PaintingStyle.stroke;
+  final Paint _bollFillPaint = Paint()
+    ..color = const Color(0xFF00BCD4).withOpacity(0.05)
+    ..style = PaintingStyle.fill;
 
   _KlinePainter(
     this.data, {
@@ -1277,6 +1604,7 @@ class _KlinePainter extends CustomPainter {
     this.fibonacciLevels,
     required this.minPrice,
     required this.maxPrice,
+    this.showBoll = false,
   });
 
   @override
@@ -1368,6 +1696,60 @@ class _KlinePainter extends CustomPainter {
         paint.style = PaintingStyle.fill;
       }
     }
+
+    if (showBoll) {
+      _drawBollBands(canvas, size, padding, chartWidth, chartHeight, priceRange, barWidth, gap);
+    }
+  }
+
+  void _drawBollBands(Canvas canvas, Size size, double padding, double chartWidth,
+      double chartHeight, double priceRange, double barWidth, double gap) {
+    if (priceRange == 0) return;
+
+    final upperPath = Path();
+    final midPath = Path();
+    final lowerPath = Path();
+    final fillPath = Path();
+    var started = false;
+
+    for (int i = 0; i < data.length; i++) {
+      final d = data[i];
+      if (d.bollUpper == 0) continue;
+
+      final x = padding + i * (barWidth + gap) + barWidth / 2;
+      final upperY = chartHeight - ((d.bollUpper - minPrice) / priceRange) * chartHeight;
+      final midY = chartHeight - ((d.bollMid - minPrice) / priceRange) * chartHeight;
+      final lowerY = chartHeight - ((d.bollLower - minPrice) / priceRange) * chartHeight;
+
+      if (!started) {
+        upperPath.moveTo(x, upperY);
+        midPath.moveTo(x, midY);
+        lowerPath.moveTo(x, lowerY);
+        fillPath.moveTo(x, upperY);
+        started = true;
+      } else {
+        upperPath.lineTo(x, upperY);
+        midPath.lineTo(x, midY);
+        lowerPath.lineTo(x, lowerY);
+        fillPath.lineTo(x, upperY);
+      }
+    }
+
+    if (!started) return;
+
+    for (int i = data.length - 1; i >= 0; i--) {
+      final d = data[i];
+      if (d.bollLower == 0) continue;
+      final x = padding + i * (barWidth + gap) + barWidth / 2;
+      final lowerY = chartHeight - ((d.bollLower - minPrice) / priceRange) * chartHeight;
+      fillPath.lineTo(x, lowerY);
+    }
+    fillPath.close();
+
+    canvas.drawPath(fillPath, _bollFillPaint);
+    canvas.drawPath(upperPath, _bollUpperPaint);
+    canvas.drawPath(midPath, _bollMidPaint);
+    canvas.drawPath(lowerPath, _bollUpperPaint);
   }
 
   void _drawDashedLine(Canvas canvas, Offset start, Offset end, Color color) {
@@ -1438,12 +1820,13 @@ class _KlinePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_KlinePainter oldDelegate) => 
-    oldDelegate.data != data || 
+  bool shouldRepaint(_KlinePainter oldDelegate) =>
+    oldDelegate.data != data ||
     oldDelegate.selectedIndex != selectedIndex ||
-    oldDelegate.supportLevels != supportLevels || 
-    oldDelegate.resistanceLevels != resistanceLevels || 
-    oldDelegate.fibonacciLevels != fibonacciLevels;
+    oldDelegate.supportLevels != supportLevels ||
+    oldDelegate.resistanceLevels != resistanceLevels ||
+    oldDelegate.fibonacciLevels != fibonacciLevels ||
+    oldDelegate.showBoll != showBoll;
 }
 
 class _MacdHistogramPainter extends CustomPainter {
@@ -1492,4 +1875,43 @@ class _MacdHistogramPainter extends CustomPainter {
   @override
   bool shouldRepaint(_MacdHistogramPainter oldDelegate) =>
       oldDelegate.data != data || oldDelegate.macdAbsMax != macdAbsMax;
+}
+
+class _VolumeHistogramPainter extends CustomPainter {
+  final List<HistoryKline> data;
+
+  final Paint _upPaint = Paint()..color = const Color(0xFFef5350);
+  final Paint _downPaint = Paint()..color = const Color(0xFF26a69a);
+
+  _VolumeHistogramPainter(this.data);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (data.isEmpty) return;
+
+    double maxVol = 0;
+    for (final d in data) {
+      if (d.volume > maxVol) maxVol = d.volume;
+    }
+    if (maxVol == 0) return;
+
+    final barTotalWidth = size.width / data.length;
+    final barWidth = barTotalWidth * 0.6;
+
+    for (int i = 0; i < data.length; i++) {
+      final d = data[i];
+      if (d.volume == 0) continue;
+      final x = i * barTotalWidth + barTotalWidth / 2;
+      final h = (d.volume / maxVol) * size.height;
+      final paint = d.close >= d.open ? _upPaint : _downPaint;
+
+      canvas.drawRect(
+        Rect.fromLTWH(x - barWidth / 2, size.height - h, barWidth, h),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_VolumeHistogramPainter oldDelegate) => oldDelegate.data != data;
 }

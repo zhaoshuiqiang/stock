@@ -360,6 +360,9 @@ class AnalysisResult {
   final String riskLevel;
   final List<String> riskFactors;
   final List<String> suggestions;
+  final Map<String, dynamic>? tradeLevels;
+  final int confluenceScore;
+  final List<Map<String, dynamic>> confluenceDetails;
 
   AnalysisResult({
     this.quote,
@@ -370,6 +373,9 @@ class AnalysisResult {
     this.riskLevel = '中等',
     this.riskFactors = const [],
     this.suggestions = const [],
+    this.tradeLevels,
+    this.confluenceScore = 0,
+    this.confluenceDetails = const [],
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {

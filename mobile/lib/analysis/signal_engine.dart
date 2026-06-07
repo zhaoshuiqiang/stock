@@ -385,8 +385,258 @@ List<SignalItem> detectSignals(List<HistoryKline> data) {
     }
   }
 
+  signals.addAll(_detectMacdDivergence(data));
+  signals.addAll(_detectVolumePriceDivergence(data));
+  signals.addAll(_detectBollSqueezeBreakout(data));
+
   signals.sort((a, b) => b.strength.compareTo(a.strength));
   return signals;
+}
+
+List<int> _findLocalPeaks(List<HistoryKline> data, {required bool findHighs, int minSeparation = 5}) {
+  final peaks = <int>[];
+  for (int i = 2; i < data.length - 2; i++) {
+    final val = findHighs ? data[i].high : data[i].low;
+    final prev1 = findHighs ? data[i - 1].high : data[i - 1].low;
+    final prev2 = findHighs ? data[i - 2].high : data[i - 2].low;
+    final next1 = findHighs ? data[i + 1].high : data[i + 1].low;
+    final next2 = findHighs ? data[i + 2].high : data[i + 2].low;
+
+    if (findHighs) {
+      if (val > prev1 && val > prev2 && val > next1 && val > next2) {
+        if (peaks.isEmpty || i - peaks.last >= minSeparation) {
+          peaks.add(i);
+        }
+      }
+    } else {
+      if (val < prev1 && val < prev2 && val < next1 && val < next2) {
+        if (peaks.isEmpty || i - peaks.last >= minSeparation) {
+          peaks.add(i);
+        }
+      }
+    }
+  }
+  return peaks;
+}
+
+List<SignalItem> _detectMacdDivergence(List<HistoryKline> data) {
+  final signals = <SignalItem>[];
+  if (data.length < 30) return signals;
+
+  final last = data[data.length - 1];
+  final searchRange = data.sublist(data.length - 30);
+
+  final highPeaks = _findLocalPeaks(searchRange, findHighs: true, minSeparation: 5);
+  if (highPeaks.length >= 2) {
+    final p1 = highPeaks[highPeaks.length - 2];
+    final p2 = highPeaks[highPeaks.length - 1];
+    if (searchRange[p2].high > searchRange[p1].high &&
+        searchRange[p2].macdDif < searchRange[p1].macdDif) {
+      signals.add(SignalItem(
+        type: 'sell',
+        indicator: 'MACD',
+        signal: 'MACD顶背离',
+        description: '股价创新高(${searchRange[p2].high.toStringAsFixed(2)})但DIF未创新高(${searchRange[p2].macdDif.toStringAsFixed(2)}<${searchRange[p1].macdDif.toStringAsFixed(2)})，上涨动能衰竭',
+        strength: 85,
+        timestamp: last.date,
+      ));
+    }
+  }
+
+  final lowPeaks = _findLocalPeaks(searchRange, findHighs: false, minSeparation: 5);
+  if (lowPeaks.length >= 2) {
+    final p1 = lowPeaks[lowPeaks.length - 2];
+    final p2 = lowPeaks[lowPeaks.length - 1];
+    if (searchRange[p2].low < searchRange[p1].low &&
+        searchRange[p2].macdDif > searchRange[p1].macdDif) {
+      signals.add(SignalItem(
+        type: 'buy',
+        indicator: 'MACD',
+        signal: 'MACD底背离',
+        description: '股价创新低(${searchRange[p2].low.toStringAsFixed(2)})但DIF未创新低(${searchRange[p2].macdDif.toStringAsFixed(2)}>${searchRange[p1].macdDif.toStringAsFixed(2)})，下跌动能减弱',
+        strength: 85,
+        timestamp: last.date,
+      ));
+    }
+  }
+
+  return signals;
+}
+
+List<SignalItem> _detectVolumePriceDivergence(List<HistoryKline> data) {
+  final signals = <SignalItem>[];
+  if (data.length < 15) return signals;
+
+  final last = data[data.length - 1];
+  final avg10Vol = data.sublist(data.length - 10).map((d) => d.volume).reduce((a, b) => a + b) / 10;
+  final avg3Vol = data.sublist(data.length - 3).map((d) => d.volume).reduce((a, b) => a + b) / 3;
+
+  if (avg3Vol > avg10Vol * 1.5) {
+    final priceChange3d = (last.close / data[data.length - 4].close - 1) * 100;
+    if (priceChange3d.abs() < 2) {
+      signals.add(SignalItem(
+        type: 'sell',
+        indicator: '量价',
+        signal: '放量滞涨',
+        description: '近3日均量是10日均量的${(avg3Vol / avg10Vol).toStringAsFixed(1)}倍，但涨幅仅${priceChange3d.toStringAsFixed(1)}%，主力可能在出货',
+        strength: 75,
+        timestamp: last.date,
+      ));
+    }
+  }
+
+  if (data.length >= 6) {
+    final priceChange5d = (last.close / data[data.length - 6].close - 1) * 100;
+    if (priceChange5d > 3) {
+      var volDeclining = true;
+      for (int i = data.length - 1; i > data.length - 5; i--) {
+        if (data[i].volume >= data[i - 1].volume) {
+          volDeclining = false;
+          break;
+        }
+      }
+      if (volDeclining) {
+        signals.add(SignalItem(
+          type: 'sell',
+          indicator: '量价',
+          signal: '缩量上涨',
+          description: '近5日涨幅${priceChange5d.toStringAsFixed(1)}%但量能持续萎缩，上涨动力不足',
+          strength: 70,
+          timestamp: last.date,
+        ));
+      }
+    }
+  }
+
+  if (data.length >= 13) {
+    final priceChange10d = (last.close / data[data.length - 11].close - 1) * 100;
+    if (priceChange10d < -10) {
+      final recent3Change = (last.close / data[data.length - 4].close - 1) * 100;
+      if (recent3Change.abs() < 1 && avg3Vol < avg10Vol * 0.5) {
+        signals.add(SignalItem(
+          type: 'buy',
+          indicator: '量价',
+          signal: '缩量止跌',
+          description: '前期跌幅${priceChange10d.toStringAsFixed(1)}%后量能萎缩至均量的${(avg3Vol / avg10Vol * 100).toStringAsFixed(0)}%，价格企稳，抛压减弱',
+          strength: 65,
+          timestamp: last.date,
+        ));
+      }
+    }
+  }
+
+  return signals;
+}
+
+List<SignalItem> _detectBollSqueezeBreakout(List<HistoryKline> data) {
+  final signals = <SignalItem>[];
+  if (data.length < 25) return signals;
+
+  final last = data[data.length - 1];
+  if (last.bollMid == 0) return signals;
+
+  final bandwidths = <double>[];
+  for (int i = data.length - 20; i < data.length; i++) {
+    final d = data[i];
+    if (d.bollMid > 0) {
+      bandwidths.add((d.bollUpper - d.bollLower) / d.bollMid * 100);
+    }
+  }
+  if (bandwidths.length < 10) return signals;
+
+  final currentBw = bandwidths.last;
+  final minBw = bandwidths.reduce((a, b) => a < b ? a : b);
+
+  var contracting = true;
+  for (int i = bandwidths.length - 1; i > bandwidths.length - 6 && i > 0; i--) {
+    if (bandwidths[i] >= bandwidths[i - 1]) {
+      contracting = false;
+      break;
+    }
+  }
+
+  if (currentBw <= minBw * 1.1 && contracting) {
+    signals.add(SignalItem(
+      type: 'buy',
+      indicator: 'BOLL',
+      signal: '布林带收口蓄势',
+      description: '布林带宽度收窄至${currentBw.toStringAsFixed(1)}%，连续5日递减，即将选择方向突破',
+      strength: 60,
+      timestamp: last.date,
+    ));
+
+    final avgVol = data.sublist(data.length - 10).map((d) => d.volume).reduce((a, b) => a + b) / 10;
+    if (last.close > last.bollUpper && last.volume > avgVol * 1.5) {
+      signals.add(SignalItem(
+        type: 'buy',
+        indicator: 'BOLL',
+        signal: '布林带放量突破上轨',
+        description: '收口后放量突破布林带上轨(${last.bollUpper.toStringAsFixed(2)})，向上突破确认',
+        strength: 80,
+        timestamp: last.date,
+      ));
+    } else if (last.close < last.bollLower) {
+      signals.add(SignalItem(
+        type: 'sell',
+        indicator: 'BOLL',
+        signal: '布林带跌破下轨',
+        description: '收口后跌破布林带下轨(${last.bollLower.toStringAsFixed(2)})，向下突破',
+        strength: 80,
+        timestamp: last.date,
+      ));
+    }
+  }
+
+  return signals;
+}
+
+Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
+  if (data.isEmpty) return {};
+
+  final last = data[data.length - 1];
+  final price = last.close;
+
+  final supportLevels = calcSupportResistance(data);
+  final supports = supportLevels['support_levels'] as List<double>? ?? [];
+  final resistances = supportLevels['resistance_levels'] as List<double>? ?? [];
+
+  double? nearestSupport;
+  for (final s in supports.reversed) {
+    if (s < price) {
+      nearestSupport = s;
+      break;
+    }
+  }
+
+  double? nearestResistance;
+  for (final r in resistances) {
+    if (r > price) {
+      nearestResistance = r;
+      break;
+    }
+  }
+
+  final entryLow = nearestSupport ?? price * 0.98;
+  final entryHigh = price * 1.01;
+  final target = nearestResistance ?? price * 1.1;
+  final stopLoss = last.ma60 > 0
+      ? ([entryLow * 0.98, last.ma60 * 0.97].reduce((a, b) => a > b ? a : b))
+      : entryLow * 0.98;
+
+  final entryMid = (entryLow + entryHigh) / 2;
+  final reward = target - entryMid;
+  final risk = entryMid - stopLoss;
+  final riskRewardRatio = risk > 0 ? reward / risk : 0.0;
+
+  return {
+    'entry_low': entryLow,
+    'entry_high': entryHigh,
+    'target': target,
+    'stop_loss': stopLoss,
+    'risk_reward_ratio': riskRewardRatio,
+    'has_support': nearestSupport != null,
+    'has_resistance': nearestResistance != null,
+  };
 }
 
 AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
@@ -570,6 +820,55 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
     }
   }
 
+  // 多指标共振评分（7维度）
+  final confluenceDetails = <Map<String, dynamic>>[];
+  int bullCount = 0;
+
+  // 1. MA趋势
+  final maBull = last.ma5 > last.ma10 && last.ma10 > last.ma20;
+  final maBear = last.ma5 < last.ma10 && last.ma10 < last.ma20;
+  confluenceDetails.add({'name': 'MA', 'bull': maBull, 'bear': maBear});
+  if (maBull) bullCount++;
+
+  // 2. MACD方向
+  final macdBull = last.macdDif > last.macdDea && last.macdHist > 0;
+  final macdBear = last.macdDif < last.macdDea && last.macdHist < 0;
+  confluenceDetails.add({'name': 'MACD', 'bull': macdBull, 'bear': macdBear});
+  if (macdBull) bullCount++;
+
+  // 3. RSI区间
+  final rsiBull = last.rsi6 > 60;
+  final rsiBear = last.rsi6 < 40 && last.rsi6 > 0;
+  confluenceDetails.add({'name': 'RSI', 'bull': rsiBull, 'bear': rsiBear});
+  if (rsiBull) bullCount++;
+
+  // 4. KDJ信号
+  final kdjBull = last.k > last.d && last.k < 80;
+  final kdjBear = last.k < last.d && last.k > 20;
+  confluenceDetails.add({'name': 'KDJ', 'bull': kdjBull, 'bear': kdjBear});
+  if (kdjBull) bullCount++;
+
+  // 5. BOLL位置
+  final bollBull = last.bollMid > 0 && last.close > last.bollMid;
+  final bollBear = last.bollMid > 0 && last.close < last.bollMid;
+  confluenceDetails.add({'name': 'BOLL', 'bull': bollBull, 'bear': bollBear});
+  if (bollBull) bullCount++;
+
+  // 6. 量价配合
+  final avgVol = data.length >= 5 ? data.sublist(data.length - 5).map((d) => d.volume).reduce((a, b) => a + b) / 5 : 0.0;
+  final volBull = last.volume > avgVol && last.close > last.open;
+  final volBear = last.volume > avgVol && last.close < last.open;
+  confluenceDetails.add({'name': '量价', 'bull': volBull, 'bear': volBear});
+  if (volBull) bullCount++;
+
+  // 7. 背离信号（权重×2）
+  final hasBottomDivergence = signals.any((s) => s.signal.contains('底背离'));
+  final hasTopDivergence = signals.any((s) => s.signal.contains('顶背离'));
+  confluenceDetails.add({'name': '背离', 'bull': hasBottomDivergence, 'bear': hasTopDivergence, 'weighted': true});
+  if (hasBottomDivergence) bullCount += 2;
+
+  final tradeLevels = calcTradeLevels(data);
+
   return AnalysisResult(
     signals: signals,
     indicators: indicators,
@@ -578,5 +877,8 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
     riskLevel: riskLevel,
     riskFactors: riskFactors,
     suggestions: suggestions,
+    tradeLevels: tradeLevels.isNotEmpty ? tradeLevels : null,
+    confluenceScore: bullCount,
+    confluenceDetails: confluenceDetails,
   );
 }
