@@ -78,6 +78,140 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     }
   }
 
+  void _showStockSearchDialog() async {
+    final controller = TextEditingController();
+    List<StockInfo> searchResults = [];
+    List<WatchlistItem> watchlist = [];
+    bool searching = false;
+
+    watchlist = await _dbService.getWatchlist();
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> doSearch(String keyword) async {
+              if (keyword.isEmpty) {
+                setDialogState(() { searchResults = []; searching = false; });
+                return;
+              }
+              setDialogState(() { searching = true; });
+              try {
+                final results = await _apiClient.searchStocks(keyword);
+                setDialogState(() { searchResults = results; searching = false; });
+              } catch (_) {
+                setDialogState(() { searching = false; });
+              }
+            }
+
+            void switchStock(String code, String name) {
+              Navigator.of(dialogContext).pop();
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => QuoteScreen(code: code, name: name),
+                ),
+              );
+            }
+
+            return Dialog(
+              backgroundColor: const Color(0xFF1a1a2e),
+              insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 48),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: controller,
+                      autofocus: true,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: '输入股票代码或名称',
+                        hintStyle: const TextStyle(color: Colors.white38),
+                        prefixIcon: const Icon(Icons.search, color: Colors.white54),
+                        suffixIcon: searching
+                            ? const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: const Color(0xFF0f3460),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      onChanged: (v) => doSearch(v),
+                      onSubmitted: (v) => doSearch(v),
+                    ),
+                    const SizedBox(height: 12),
+                    if (searchResults.isEmpty && !searching) ...[
+                      if (watchlist.isNotEmpty) ...[
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text('自选股', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                        ),
+                        const SizedBox(height: 6),
+                        Flexible(
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: watchlist.length,
+                            itemBuilder: (_, i) {
+                              final item = watchlist[i];
+                              final isCurrent = item.code == widget.code;
+                              return ListTile(
+                                dense: true,
+                                leading: Icon(
+                                  isCurrent ? Icons.radio_button_checked : Icons.radio_button_off,
+                                  color: isCurrent ? const Color(0xFFef5350) : Colors.white38,
+                                  size: 20,
+                                ),
+                                title: Text(item.name, style: TextStyle(
+                                  color: isCurrent ? Colors.white54 : Colors.white,
+                                  fontSize: 14,
+                                )),
+                                subtitle: Text(item.code, style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                                onTap: isCurrent ? null : () => switchStock(item.code, item.name),
+                              );
+                            },
+                          ),
+                        ),
+                      ] else
+                        const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Text('输入关键词搜索股票', style: TextStyle(color: Colors.white38)),
+                          ),
+                        ),
+                    ] else
+                      Flexible(
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: searchResults.length,
+                          itemBuilder: (_, i) {
+                            final stock = searchResults[i];
+                            return ListTile(
+                              dense: true,
+                              title: Text(stock.name, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                              subtitle: Text(stock.code, style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                              onTap: () => switchStock(stock.code, stock.name),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _startRealtime() {
     _wsClient.onQuoteUpdate = _handleQuoteUpdate;
     _wsClient.connect();
@@ -184,6 +318,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       appBar: AppBar(
         title: Text('${widget.name} (${widget.code})'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: _showStockSearchDialog,
+          ),
           IconButton(
             icon: Icon(
               _isFavorite ? Icons.favorite : Icons.favorite_border,
