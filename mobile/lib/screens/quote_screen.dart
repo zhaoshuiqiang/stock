@@ -496,6 +496,104 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               ),
             ),
           ),
+          _buildMainFundFlowBar(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMainFundFlowBar() {
+    final quote = _quote;
+    if (quote == null) return const SizedBox.shrink();
+
+    final inflow = quote.mainInflow.abs();
+    final outflow = quote.mainOutflow.abs();
+    final total = inflow + outflow;
+    if (total == 0) return const SizedBox.shrink();
+
+    final inflowRatio = inflow / total;
+    final outflowRatio = outflow / total;
+    final netFlow = quote.mainNetFlow;
+    final isBuyDominant = netFlow >= 0;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0f3460),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('主力买卖力度', style: TextStyle(color: Colors.grey, fontSize: 12)),
+              Text(
+                '${isBuyDominant ? '买入' : '卖出'}主导 ${(inflowRatio * 100).toStringAsFixed(1)}%',
+                style: TextStyle(
+                  color: isBuyDominant ? const Color(0xFFef5350) : const Color(0xFF26a69a),
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: (inflowRatio * 1000).round().clamp(1, 1000),
+                  child: Container(
+                    height: 20,
+                    color: const Color(0xFFef5350),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '${(inflowRatio * 100).toStringAsFixed(0)}%',
+                      style: const TextStyle(color: Colors.white, fontSize: 10),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: (outflowRatio * 1000).round().clamp(1, 1000),
+                  child: Container(
+                    height: 20,
+                    color: const Color(0xFF26a69a),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '${(outflowRatio * 100).toStringAsFixed(0)}%',
+                      style: const TextStyle(color: Colors.white, fontSize: 10),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '流入 ${_formatAmount(inflow)}',
+                style: const TextStyle(color: Color(0xFFef5350), fontSize: 11),
+              ),
+              Text(
+                '净流量 ${netFlow >= 0 ? "+" : ""}${_formatAmount(netFlow)}',
+                style: TextStyle(
+                  color: netFlow >= 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a),
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                '流出 ${_formatAmount(outflow)}',
+                style: const TextStyle(color: Color(0xFF26a69a), fontSize: 11),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -691,8 +789,6 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               padding: const EdgeInsets.only(left: 8, bottom: 4),
               child: Row(
                 children: [
-                  const Text('成交量', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  const SizedBox(width: 16),
                   const Text('MACD', style: TextStyle(color: Colors.grey, fontSize: 12)),
                   const SizedBox(width: 8),
                   Container(width: 8, height: 8, color: Colors.red),
@@ -702,45 +798,76 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                   Container(width: 8, height: 8, color: Colors.blue),
                   const SizedBox(width: 4),
                   const Text('DEA', style: TextStyle(color: Colors.white, fontSize: 10)),
+                  const SizedBox(width: 8),
+                  Container(width: 8, height: 8, color: const Color(0xFFef5350)),
+                  const SizedBox(width: 4),
+                  const Text('MACD柱', style: TextStyle(color: Colors.white, fontSize: 10)),
                 ],
               ),
             ),
-            Container(
-              height: 100,
-              padding: const EdgeInsets.all(8),
-              child: LineChart(
-                LineChartData(
-                  gridData: FlGridData(show: true, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10)),
-                  titlesData: FlTitlesData(
-                    show: true,
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) => Text(value.toStringAsFixed(2), style: const TextStyle(color: Colors.white38, fontSize: 10)),
+            Builder(builder: (_) {
+              double macdAbsMax = 0;
+              for (final d in _klines) {
+                if (d.macdDif.abs() > macdAbsMax) macdAbsMax = d.macdDif.abs();
+                if (d.macdDea.abs() > macdAbsMax) macdAbsMax = d.macdDea.abs();
+                if (d.macdHist.abs() > macdAbsMax) macdAbsMax = d.macdHist.abs();
+              }
+              if (macdAbsMax == 0) macdAbsMax = 0.01;
+              final paddedMax = macdAbsMax * 1.1;
+              return Container(
+                height: 100,
+                padding: const EdgeInsets.all(8),
+                child: Stack(
+                  children: [
+                    LineChart(
+                      LineChartData(
+                        minY: -paddedMax,
+                        maxY: paddedMax,
+                        gridData: FlGridData(show: true, drawVerticalLine: false, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10, strokeWidth: 0.5)),
+                        titlesData: FlTitlesData(
+                          show: true,
+                          leftTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              reservedSize: 42,
+                              getTitlesWidget: (value, meta) => Text(value.toStringAsFixed(2), style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                            ),
+                          ),
+                          bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        ),
+                        borderData: FlBorderData(show: false),
+                        lineBarsData: [
+                          LineChartBarData(
+                            spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.macdDif)).toList(),
+                            isCurved: false,
+                            color: Colors.red,
+                            barWidth: 1,
+                            dotData: const FlDotData(show: false),
+                          ),
+                          LineChartBarData(
+                            spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.macdDea)).toList(),
+                            isCurved: false,
+                            color: Colors.blue,
+                            barWidth: 1,
+                            dotData: const FlDotData(show: false),
+                          ),
+                        ],
                       ),
                     ),
-                    bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  ),
-                  borderData: FlBorderData(show: false),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.macdDif)).toList(),
-                      isCurved: false,
-                      color: Colors.red,
-                      barWidth: 2,
-                    ),
-                    LineChartBarData(
-                      spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.macdDea)).toList(),
-                      isCurved: false,
-                      color: Colors.blue,
-                      barWidth: 2,
+                    Positioned.fill(
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 42),
+                        child: CustomPaint(
+                          painter: _MacdHistogramPainter(_klines, macdAbsMax: macdAbsMax),
+                        ),
+                      ),
                     ),
                   ],
                 ),
-              ),
-            ),
+              );
+            }),
           ],
         ),
         Column(
@@ -752,6 +879,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                   const Text('RSI6', style: TextStyle(color: Colors.grey, fontSize: 12)),
                   const SizedBox(width: 8),
                   Container(width: 8, height: 8, color: Colors.orange),
+                  const SizedBox(width: 16),
+                  const Text('超买70', style: TextStyle(color: Colors.white24, fontSize: 10)),
+                  const SizedBox(width: 8),
+                  const Text('超卖30', style: TextStyle(color: Colors.white24, fontSize: 10)),
                 ],
               ),
             ),
@@ -760,12 +891,24 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               padding: const EdgeInsets.all(8),
               child: LineChart(
                 LineChartData(
-                  gridData: FlGridData(show: true, getDrawingHorizontalLine: (value) => FlLine(color: Colors.white10)),
+                  minY: 0,
+                  maxY: 100,
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    getDrawingHorizontalLine: (value) {
+                      if (value == 30 || value == 70) {
+                        return const FlLine(color: Colors.white24, strokeWidth: 1, dashArray: [5, 5]);
+                      }
+                      return FlLine(color: Colors.white10, strokeWidth: 0.5);
+                    },
+                  ),
                   titlesData: FlTitlesData(
                     show: true,
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
+                        reservedSize: 32,
                         getTitlesWidget: (value, meta) => Text(value.toInt().toString(), style: const TextStyle(color: Colors.white38, fontSize: 10)),
                       ),
                     ),
@@ -779,7 +922,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       spots: _klines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.rsi6)).toList(),
                       isCurved: false,
                       color: Colors.orange,
-                      barWidth: 2,
+                      barWidth: 1,
+                      dotData: const FlDotData(show: false),
                     ),
                   ],
                 ),
@@ -1290,4 +1434,54 @@ class _KlinePainter extends CustomPainter {
     oldDelegate.supportLevels != supportLevels || 
     oldDelegate.resistanceLevels != resistanceLevels || 
     oldDelegate.fibonacciLevels != fibonacciLevels;
+}
+
+class _MacdHistogramPainter extends CustomPainter {
+  final List<HistoryKline> data;
+  final double macdAbsMax;
+
+  final Paint _upPaint = Paint()..color = const Color(0xFFef5350);
+  final Paint _downPaint = Paint()..color = const Color(0xFF26a69a);
+  final Paint _axisPaint = Paint()
+    ..color = Colors.white24
+    ..strokeWidth = 0.5;
+
+  _MacdHistogramPainter(this.data, {required this.macdAbsMax});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (data.isEmpty) return;
+
+    final absMax = macdAbsMax == 0 ? 0.01 : macdAbsMax;
+    final barTotalWidth = size.width / data.length;
+    final barWidth = barTotalWidth * 0.6;
+    final zeroY = size.height / 2;
+    final halfHeight = size.height / 2;
+
+    canvas.drawLine(Offset(0, zeroY), Offset(size.width, zeroY), _axisPaint);
+
+    for (int i = 0; i < data.length; i++) {
+      final hist = data[i].macdHist;
+      if (hist == 0) continue;
+      final x = i * barTotalWidth + barTotalWidth / 2;
+      final h = (hist / absMax) * halfHeight;
+      final paint = hist >= 0 ? _upPaint : _downPaint;
+
+      if (hist >= 0) {
+        canvas.drawRect(
+          Rect.fromLTWH(x - barWidth / 2, zeroY - h, barWidth, h),
+          paint,
+        );
+      } else {
+        canvas.drawRect(
+          Rect.fromLTWH(x - barWidth / 2, zeroY, barWidth, h.abs()),
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_MacdHistogramPainter oldDelegate) =>
+      oldDelegate.data != data || oldDelegate.macdAbsMax != macdAbsMax;
 }
