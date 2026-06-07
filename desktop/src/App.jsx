@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { createQuoteWebSocket, getWatchlist, getMarketSentiment, getAnalysis, getHistory, getQuote, getLevels, getPatterns, getFibonacci, getTrendSignals } from './api';
+import { createQuoteWebSocket, getWatchlist, getMarketSentiment, getAnalysis, getHistory, getQuote, getLevels, getPatterns, getFibonacci } from './api';
 import SearchBar from './components/SearchBar';
 import Watchlist from './components/Watchlist';
 import QuoteCard from './components/QuoteCard';
@@ -8,14 +8,12 @@ import KLineChart from './components/KLineChart';
 import IndicatorTable from './components/IndicatorTable';
 import SignalsPanel from './components/SignalsPanel';
 import AdvicePanel from './components/AdvicePanel';
-import TrendSignalsPanel from './components/TrendSignalsPanel';
 import AlertManager from './components/AlertManager';
 
 const TABS = [
   { key: 'kline', label: 'K线图表' },
   { key: 'indicators', label: '技术指标' },
   { key: 'signals', label: '买卖信号' },
-  { key: 'trend_signals', label: '趋势信号' },
   { key: 'advice', label: '操作建议' }
 ];
 
@@ -106,11 +104,10 @@ export default function App() {
       
       // Fetch technical analysis data
       try {
-        const [levelsData, patternsData, fibonacciData, trendData] = await Promise.all([
+        const [levelsData, patternsData, fibonacciData] = await Promise.all([
           getLevels(stock.code || stock),
           getPatterns(stock.code || stock),
-          getFibonacci(stock.code || stock),
-          getTrendSignals(stock.code || stock)
+          getFibonacci(stock.code || stock)
         ]);
         setTechAnalysis({
           support_levels: levelsData?.support_levels || [],
@@ -118,8 +115,7 @@ export default function App() {
           nearest_support: levelsData?.nearest_support,
           nearest_resistance: levelsData?.nearest_resistance,
           dragon_retreat: patternsData?.dragon_retreat || {found: false},
-          fibonacci: fibonacciData?.fibonacci || {},
-          trend_signals: trendData?.trend_signals || {}
+          fibonacci: fibonacciData?.fibonacci || {}
         });
       } catch (e) {
         console.error('Failed to load technical analysis:', e);
@@ -199,9 +195,6 @@ export default function App() {
               )}
               {activeTab === 'signals' && (
                 <SignalsPanel analysis={analysis} loading={loading} />
-              )}
-              {activeTab === 'trend_signals' && (
-                <TrendSignalsPanel techAnalysis={techAnalysis} loading={loading} />
               )}
               {activeTab === 'advice' && (
                 <AdvicePanel analysis={analysis} loading={loading} />

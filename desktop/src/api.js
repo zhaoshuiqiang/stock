@@ -62,11 +62,6 @@ export async function getFibonacci(code) {
   return request(`${API_BASE}/fibonacci/${code}`);
 }
 
-// 获取趋势信号
-export async function getTrendSignals(code) {
-  return request(`${API_BASE}/trend-signals/${code}`);
-}
-
 // 获取自选列表
 export async function getWatchlist() {
   return request(`${API_BASE}/watchlist`);

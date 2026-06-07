@@ -37,6 +37,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   TabController? _tabController;
   List<FlSpot> _realtimeSpots = [];
   int? _selectedKlineIndex;
+  bool _showFibonacci = false;
+  Map<String, dynamic>? _techAnalysis;
 
   @override
   void initState() {
@@ -137,10 +139,20 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         quote.mainNetFlowRate = mainFundFlow.mainNetFlowRate;
       }
 
+      // 计算支撑压力位和斐波那契
+      final tech = <String, dynamic>{};
+      final sr = calcSupportResistance(calculated);
+      tech['support_levels'] = sr['support'] ?? [];
+      tech['resistance_levels'] = sr['resistance'] ?? [];
+      if (_showFibonacci) {
+        tech['fibonacci'] = calcFibonacci(calculated);
+      }
+
       setState(() {
         _quote = quote;
         _klines = calculated;
         _analysis = analysis;
+        _techAnalysis = tech;
       });
     } catch (e) {
       print('Load data failed: $e');
@@ -388,7 +400,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     final maxPrice = prices.reduce((a, b) => a > b ? a : b);
     final priceRange = maxPrice - minPrice;
     // 确保Y轴范围至少有0.5的间距，避免价格不变时显示横线
-    final displayMinY = minPrice - (priceRange > 0.5 ? priceRange * 0.05 : 0.25);
+    final displayMinY = minPrice - (priceRange > 0.5 ? priceRange * 00.05 : 0.25);
     final displayMaxY = maxPrice + (priceRange > 0.5 ? priceRange * 0.05 : 0.25);
     final isUp = _realtimeSpots.length >= 2 && _realtimeSpots.last.y >= _realtimeSpots[_realtimeSpots.length - 2].y;
     final color = isUp ? const Color(0xFFef5350) : const Color(0xFF26a69a);
@@ -497,6 +509,42 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     final priceRange = maxPrice - minPrice;
     final textTheme = Theme.of(context).textTheme;
 
+    // 斐波那契切换按钮
+    Widget fibonacciToggle = Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            _showFibonacci = !_showFibonacci;
+            if (_showFibonacci && _klines.isNotEmpty) {
+              final fib = calcFibonacci(_klines);
+              if (_techAnalysis != null) {
+                _techAnalysis!['fibonacci'] = fib;
+              } else {
+                _techAnalysis = {'fibonacci': fib};
+              }
+            }
+            _loadData();
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: _showFibonacci ? const Color(0xFF26a69a) : const Color(0xFF16213e),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _showFibonacci ? const Color(0xFF26a69a) : Colors.white24),
+          ),
+          child: Text(
+            '斐波那契',
+            style: TextStyle(
+              color: _showFibonacci ? Colors.white : Colors.white54,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ),
+    );
+
     // 选中K线的数据展示
     Widget? selectedInfo;
     if (_selectedKlineIndex != null && _selectedKlineIndex! < _klines.length) {
@@ -537,6 +585,16 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     return ListView(
       children: [
         if (selectedInfo != null) selectedInfo,
+        // 斐波那契按钮行
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              fibonacciToggle,
+            ],
+          ),
+        ),
         Container(
           height: 300,
           padding: const EdgeInsets.fromLTRB(0, 8, 8, 0),
@@ -606,9 +664,18 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                 ),
                 Positioned.fill(
                   child: CustomPaint(
-                    painter: _KlinePainter(chartData, selectedIndex: _selectedKlineIndex),
+                    painter: _KlinePainter(
+                      chartData,
+                      selectedIndex: _selectedKlineIndex,
+                      supportLevels: _techAnalysis?['support_levels'] ?? [],
+                      resistanceLevels: _techAnalysis?['resistance_levels'] ?? [],
+                      fibonacciLevels: _techAnalysis?['fibonacci']?['levels'],
+                      minPrice: minPrice,
+                      maxPrice: maxPrice,
+                    ),
                   ),
                 ),
+
               ],
             ),
             );
@@ -1033,26 +1100,59 @@ String _formatVolume(double volumeInShou) {
 class _KlinePainter extends CustomPainter {
   final List<HistoryKline> data;
   final int? selectedIndex;
+  final List<double> supportLevels;
+  final List<double> resistanceLevels;
+  final Map<String, double>? fibonacciLevels;
+  final double minPrice;
+  final double maxPrice;
+  
   final Paint _upPaint = Paint()..color = const Color(0xFFef5350);
   final Paint _downPaint = Paint()..color = const Color(0xFF26a69a);
   final Paint _linePaint = Paint()..strokeWidth = 1;
   final Paint _selectedPaint = Paint()..color = Colors.white.withOpacity(0.2);
 
-  _KlinePainter(this.data, {this.selectedIndex});
+  _KlinePainter(
+    this.data, {
+    this.selectedIndex,
+    this.supportLevels = const [],
+    this.resistanceLevels = const [],
+    this.fibonacciLevels,
+    required this.minPrice,
+    required this.maxPrice,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     if (data.isEmpty) return;
 
-    final prices = data.expand((d) => [d.high, d.low]).toList();
-    final minPrice = prices.reduce((a, b) => a < b ? a : b);
-    final maxPrice = prices.reduce((a, b) => a > b ? a : b);
     final priceRange = maxPrice - minPrice;
     final padding = 56.0;
     final chartWidth = size.width - padding;
     final chartHeight = size.height;
     final barWidth = chartWidth / data.length * 0.6;
     final gap = chartWidth / data.length * 0.4;
+
+    // 绘制支撑位（绿色虚线）
+    for (final level in supportLevels) {
+      final y = chartHeight - ((level - minPrice) / priceRange) * chartHeight;
+      _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), const Color(0xFF26a69a));
+    }
+
+    // 绘制阻力位（红色虚线）
+    for (final level in resistanceLevels) {
+      final y = chartHeight - ((level - minPrice) / priceRange) * chartHeight;
+      _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), const Color(0xFFef5350));
+    }
+
+    // 绘制斐波那契回撤位
+    if (fibonacciLevels != null) {
+      for (final entry in fibonacciLevels!.entries) {
+        final level = entry.value;
+        final y = chartHeight - ((level - minPrice) / priceRange) * chartHeight;
+        final isGolden = entry.key == '61.8%';
+        _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), isGolden ? const Color(0xFFFFD700) : Colors.white54);
+      }
+    }
 
     // 价格范围为0时（如停牌），绘制水平线
     if (priceRange == 0) {
@@ -1107,6 +1207,30 @@ class _KlinePainter extends CustomPainter {
     }
   }
 
+  void _drawDashedLine(Canvas canvas, Offset start, Offset end, Color color) {
+    const dashWidth = 4.0;
+    const dashSpace = 3.0;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+    final total = end.dx - start.dx;
+    var offset = 0.0;
+    while (offset < total) {
+      canvas.drawLine(
+        Offset(start.dx + offset, start.dy),
+        Offset(start.dx + offset + dashWidth, start.dy),
+        paint,
+      );
+      offset += dashWidth + dashSpace;
+    }
+  }
+
   @override
-  bool shouldRepaint(_KlinePainter oldDelegate) => oldDelegate.data != data;
+  bool shouldRepaint(_KlinePainter oldDelegate) => 
+    oldDelegate.data != data || 
+    oldDelegate.selectedIndex != selectedIndex ||
+    oldDelegate.supportLevels != supportLevels || 
+    oldDelegate.resistanceLevels != resistanceLevels || 
+    oldDelegate.fibonacciLevels != fibonacciLevels;
 }
