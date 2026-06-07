@@ -18,6 +18,10 @@ class WatchlistScreenState extends State<WatchlistScreen> {
   List<WatchlistItem> _watchlist = [];
   List<QuoteData> _quotes = [];
   bool _isLoading = true;
+  
+  // 排序相关状态
+  String _sortBy = 'default'; // 'default', 'change_pct'
+  bool _sortAscending = false; // false=降序(从高到低), true=升序(从低到高)
 
   @override
   void initState() {
@@ -75,6 +79,57 @@ class WatchlistScreenState extends State<WatchlistScreen> {
     );
   }
 
+  // 切换排序方式
+  void _toggleSort() {
+    setState(() {
+      if (_sortBy == 'change_pct') {
+        // 如果已经是涨跌幅排序，切换升序/降序
+        _sortAscending = !_sortAscending;
+      } else {
+        // 切换到涨跌幅排序，默认降序（从高到低）
+        _sortBy = 'change_pct';
+        _sortAscending = false;
+      }
+    });
+  }
+
+  // 获取排序后的股票列表
+  List<Map<String, dynamic>> _getSortedWatchlist() {
+    // 将watchlist和quotes组合成map列表
+    final items = <Map<String, dynamic>>[];
+    
+    for (var i = 0; i < _watchlist.length; i++) {
+      final item = _watchlist[i];
+      final codeWithPrefix = _apiClient.addMarketPrefix(item.code);
+      final quote = _quotes.firstWhere(
+        (q) => q.code == codeWithPrefix,
+        orElse: () => QuoteData.empty(),
+      );
+      
+      items.add({
+        'item': item,
+        'quote': quote,
+        'codeWithPrefix': codeWithPrefix,
+      });
+    }
+    
+    // 根据排序规则排序
+    if (_sortBy == 'change_pct') {
+      items.sort((a, b) {
+        final changeA = a['quote'].changePct;
+        final changeB = b['quote'].changePct;
+        
+        if (_sortAscending) {
+          return changeA.compareTo(changeB); // 升序：从低到高
+        } else {
+          return changeB.compareTo(changeA); // 降序：从高到低
+        }
+      });
+    }
+    
+    return items;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -120,6 +175,75 @@ class WatchlistScreenState extends State<WatchlistScreen> {
                   ],
                 ),
               ),
+              // 排序按钮行
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Text(
+                      '共 ${_watchlist.length} 只股票',
+                      style: textTheme.bodyMedium?.copyWith(color: Colors.grey),
+                    ),
+                    const Spacer(),
+                    // 排序按钮
+                    InkWell(
+                      onTap: _toggleSort,
+                      borderRadius: BorderRadius.circular(4),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _sortBy == 'change_pct' 
+                              ? const Color(0xFF0f3460) 
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: _sortBy == 'change_pct' 
+                                ? Colors.blue 
+                                : Colors.grey.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.sort,
+                              size: 16,
+                              color: _sortBy == 'change_pct' 
+                                  ? Colors.blue 
+                                  : Colors.grey,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _sortBy == 'change_pct' 
+                                  ? '涨跌幅' 
+                                  : '默认排序',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: _sortBy == 'change_pct' 
+                                    ? Colors.blue 
+                                    : Colors.grey,
+                                fontWeight: _sortBy == 'change_pct' 
+                                    ? FontWeight.bold 
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            if (_sortBy == 'change_pct') ...[
+                              const SizedBox(width: 4),
+                              Icon(
+                                _sortAscending 
+                                    ? Icons.arrow_upward 
+                                    : Icons.arrow_downward,
+                                size: 14,
+                                color: Colors.blue,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               if (_watchlist.isEmpty)
                 Center(
                   child: Padding(
@@ -134,10 +258,11 @@ class WatchlistScreenState extends State<WatchlistScreen> {
                   ),
                 )
               else
-                ..._watchlist.map((item) {
-                  final codeWithPrefix = _apiClient.addMarketPrefix(item.code);
-                  final quote = _quotes.firstWhere((q) => q.code == codeWithPrefix, orElse: () => QuoteData.empty());
-                  final isUp = quote.change >= 0;
+                ..._getSortedWatchlist().map((data) {
+                  final item = data['item'] as WatchlistItem;
+                  final quote = data['quote'] as QuoteData;
+                  final codeWithPrefix = data['codeWithPrefix'] as String;
+                  final isUp = quote.changePct >= 0;
                   final color = isUp ? upColor : downColor;
 
                   return Card(
@@ -165,7 +290,7 @@ class WatchlistScreenState extends State<WatchlistScreen> {
                               Text(quote.price.toStringAsFixed(2), style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
                               Text(
                                 '${isUp ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
-                                style: textTheme.bodyMedium?.copyWith(color: color),
+                                style: textTheme.bodyMedium?.copyWith(color: color, fontWeight: FontWeight.bold),
                               ),
                             ],
                           ),
