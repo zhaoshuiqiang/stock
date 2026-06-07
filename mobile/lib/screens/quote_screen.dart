@@ -11,6 +11,8 @@ import '../storage/database_service.dart';
 import '../widgets/signal_card.dart';
 import '../widgets/technical_indicators_panel.dart';
 
+const _kChartLeftReservedSize = 42.0;
+
 class QuoteScreen extends StatefulWidget {
   final String code;
   final String name;
@@ -551,10 +553,14 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                     height: 20,
                     color: const Color(0xFFef5350),
                     alignment: Alignment.center,
-                    child: Text(
-                      '${(inflowRatio * 100).toStringAsFixed(0)}%',
-                      style: const TextStyle(color: Colors.white, fontSize: 10),
-                    ),
+                    child: inflowRatio >= 0.05
+                        ? Text(
+                            '${(inflowRatio * 100).toStringAsFixed(0)}%',
+                            style: const TextStyle(color: Colors.white, fontSize: 10),
+                            overflow: TextOverflow.clip,
+                            softWrap: false,
+                          )
+                        : null,
                   ),
                 ),
                 Expanded(
@@ -563,10 +569,14 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                     height: 20,
                     color: const Color(0xFF26a69a),
                     alignment: Alignment.center,
-                    child: Text(
-                      '${(outflowRatio * 100).toStringAsFixed(0)}%',
-                      style: const TextStyle(color: Colors.white, fontSize: 10),
-                    ),
+                    child: outflowRatio >= 0.05
+                        ? Text(
+                            '${(outflowRatio * 100).toStringAsFixed(0)}%',
+                            style: const TextStyle(color: Colors.white, fontSize: 10),
+                            overflow: TextOverflow.clip,
+                            softWrap: false,
+                          )
+                        : null,
                   ),
                 ),
               ],
@@ -829,7 +839,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                           leftTitles: AxisTitles(
                             sideTitles: SideTitles(
                               showTitles: true,
-                              reservedSize: 42,
+                              reservedSize: _kChartLeftReservedSize,
                               getTitlesWidget: (value, meta) => Text(value.toStringAsFixed(2), style: const TextStyle(color: Colors.white38, fontSize: 10)),
                             ),
                           ),
@@ -858,7 +868,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                     ),
                     Positioned.fill(
                       child: Padding(
-                        padding: const EdgeInsets.only(left: 42),
+                        padding: const EdgeInsets.only(left: _kChartLeftReservedSize),
                         child: CustomPaint(
                           painter: _MacdHistogramPainter(_klines, macdAbsMax: macdAbsMax),
                         ),
@@ -908,7 +918,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
-                        reservedSize: 32,
+                        reservedSize: _kChartLeftReservedSize,
                         getTitlesWidget: (value, meta) => Text(value.toInt().toString(), style: const TextStyle(color: Colors.white38, fontSize: 10)),
                       ),
                     ),
@@ -1452,11 +1462,9 @@ class _MacdHistogramPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (data.isEmpty) return;
 
-    final absMax = macdAbsMax == 0 ? 0.01 : macdAbsMax;
     final barTotalWidth = size.width / data.length;
     final barWidth = barTotalWidth * 0.6;
     final zeroY = size.height / 2;
-    final halfHeight = size.height / 2;
 
     canvas.drawLine(Offset(0, zeroY), Offset(size.width, zeroY), _axisPaint);
 
@@ -1464,7 +1472,7 @@ class _MacdHistogramPainter extends CustomPainter {
       final hist = data[i].macdHist;
       if (hist == 0) continue;
       final x = i * barTotalWidth + barTotalWidth / 2;
-      final h = (hist / absMax) * halfHeight;
+      final h = (hist / macdAbsMax) * zeroY;
       final paint = hist >= 0 ? _upPaint : _downPaint;
 
       if (hist >= 0) {
