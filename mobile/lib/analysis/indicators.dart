@@ -412,3 +412,226 @@ double _getMAValue(HistoryKline kline, int period) {
       return 0;
   }
 }
+
+Map<String, dynamic> calcSupportResistance(List<HistoryKline> data, {int window = 20}) {
+  if (data.length < window) return {};
+
+  final recent = data.sublist(data.length - window);
+
+  final highs = <double>[];
+  final lows = <double>[];
+
+  for (int i = 2; i < recent.length - 2; i++) {
+    final d = recent[i];
+    final prev1 = recent[i - 1];
+    final prev2 = recent[i - 2];
+    final next1 = recent[i + 1];
+    final next2 = recent[i + 2];
+
+    if (d.high > prev1.high && d.high > prev2.high && d.high > next1.high && d.high > next2.high) {
+      highs.add(d.high);
+    }
+
+    if (d.low < prev1.low && d.low < prev2.low && d.low < next1.low && d.low < next2.low) {
+      lows.add(d.low);
+    }
+  }
+
+  final resistance = highs.length > 3 ? highs.sublist(0, 3) : highs;
+  final support = lows.length > 3 ? lows.sublist(0, 3) : lows;
+
+  final result = <String, dynamic>{
+    'resistance': resistance,
+    'support': support,
+    'current_price': data.last.close,
+  };
+
+  final current = data.last.close;
+  if (resistance.isNotEmpty) {
+    final nearestResistance = resistance.reduce((a, b) => (a - current).abs() < (b - current).abs() ? a : b);
+    result['nearest_resistance'] = nearestResistance;
+  }
+  if (support.isNotEmpty) {
+    final nearestSupport = support.reduce((a, b) => (a - current).abs() < (b - current).abs() ? a : b);
+    result['nearest_support'] = nearestSupport;
+  }
+
+  return result;
+}
+
+Map<String, dynamic> calcFibonacci(List<HistoryKline> data, {int window = 20}) {
+  if (data.length < window) return {};
+
+  final recent = data.sublist(data.length - window);
+  final swingLow = recent.map((d) => d.low).reduce((a, b) => a < b ? a : b);
+  final swingHigh = recent.map((d) => d.high).reduce((a, b) => a > b ? a : b);
+
+  final levels = <String, double>{};
+  const ratios = [0.236, 0.382, 0.5, 0.618, 0.786];
+  for (final ratio in ratios) {
+    levels['${(ratio * 100).toStringAsFixed(1)}%'] = swingLow + (swingHigh - swingLow) * (1 - ratio);
+  }
+
+  String currentPosition = '无';
+  for (final ratio in ratios.reversed) {
+    final levelPrice = swingLow + (swingHigh - swingLow) * (1 - ratio);
+    if (data.last.close >= levelPrice) {
+      currentPosition = '${(ratio * 100).toStringAsFixed(1)}阻力位上方';
+      break;
+    }
+  }
+
+  return {
+    'swing_high': swingHigh,
+    'swing_low': swingLow,
+    'levels': levels,
+    'current_position': currentPosition,
+  };
+}
+
+Map<String, dynamic> detectDragonRetreat(List<HistoryKline> data) {
+  if (data.length < 20) return {'found': false};
+
+  final recent20 = data.sublist(data.length - 20);
+  final low20 = recent20.map((d) => d.low).reduce((a, b) => a < b ? a : b);
+  final high20 = recent20.map((d) => d.high).reduce((a, b) => a > b ? a : b);
+  final risePct = (high20 - low20) / low20 * 100;
+
+  if (risePct < 15) return {'found': false};
+
+  int peakIdx = 0;
+  double peakHigh = recent20[0].high;
+  for (int i = 1; i < recent20.length; i++) {
+    if (recent20[i].high > peakHigh) {
+      peakHigh = recent20[i].high;
+      peakIdx = i;
+    }
+  }
+
+  final afterPeak = data.sublist(data.length - 20 + peakIdx + 1);
+  if (afterPeak.isEmpty) return {'found': false};
+
+  final pullbackLow = afterPeak.map((d) => d.low).reduce((a, b) => a < b ? a : b);
+  final peakPrice = peakHigh;
+  final pullbackPct = (peakPrice - pullbackLow) / peakPrice * 100;
+
+  if (pullbackPct < 10 || pullbackPct > 40) return {'found': false};
+
+  int pullbackDays = 0;
+  for (final d in afterPeak) {
+    if (d.low <= pullbackLow) pullbackDays++;
+  }
+  if (pullbackDays < 3 || pullbackDays > 10) return {'found': false};
+
+  final last = data.last;
+
+  final peakCloseIdx = data.length - 20 + peakIdx;
+  final peakClose = peakCloseIdx >= 0 && peakCloseIdx < data.length ? data[peakCloseIdx].close : peakPrice;
+  if (last.close <= peakClose * 0.95) return {'found': false};
+
+  final pullbackVolAvg = afterPeak.map((d) => d.volume).reduce((a, b) => a + b) / afterPeak.length;
+  if (pullbackVolAvg > 0 && last.volume < pullbackVolAvg * 1.5) return {'found': false};
+
+  if (last.close <= pullbackLow * 1.03) return {'found': false};
+
+  String level;
+  if (pullbackPct >= 20 && last.volume > pullbackVolAvg * 2) {
+    level = '强势';
+  } else if (pullbackPct >= 15 && last.volume > pullbackVolAvg * 1.5) {
+    level = '一般';
+  } else {
+    level = '弱势';
+  }
+
+  return {
+    'found': true,
+    'level': level,
+    'start_index': data.length - 20,
+    'peak_index': data.length - 20 + peakIdx,
+    'pullback_pct': double.parse(pullbackPct.toStringAsFixed(2)),
+  };
+}
+
+Map<String, dynamic> detectTrendSignals(List<HistoryKline> data) {
+  if (data.length < 20) return {'stabilization': <String>[], 'top': <String>[], 'bottom': <String>[]};
+
+  final last = data.last;
+  final prev = data[data.length - 2];
+  final prevPrev = data[data.length - 3];
+
+  final result = <String, dynamic>{
+    'stabilization': <String>[],
+    'top': <String>[],
+    'bottom': <String>[],
+  };
+
+  final body = (last.open - last.close).abs().toDouble();
+  final bodyValue = body == 0 ? 0.01 : body;
+
+  if (prev.close < prev.open && last.close > last.open) {
+    result['stabilization'].add('止跌阳线');
+  }
+
+  if (last.volMa5 > 0 && prev.volMa5 > 0) {
+    if (last.volume > prev.volume && prev.volume > prevPrev.volume) {
+      result['stabilization'].add('缩量反弹');
+    }
+  }
+
+  for (final ma in [5, 10]) {
+    final maValue = ma == 5 ? last.ma5 : last.ma10;
+    if (maValue > 0 && (last.close - maValue).abs() / maValue < 0.01 && last.close > last.open) {
+      result['stabilization'].add('回踩MA$ma企稳');
+    }
+  }
+
+  if (data[data.length - 3].rsi6 < 30 && last.rsi6 > 35) {
+    result['stabilization'].add('RSI超卖回升');
+  }
+
+  final upperShadow = last.high - (last.open > last.close ? last.open : last.close);
+  if (upperShadow >= 2 * bodyValue && last.ma5 > 0 && last.close > last.ma5) {
+    result['top'].add('高位长上影线');
+  }
+
+  if (last.volMa5 > 0) {
+    if (last.volume > last.volMa5 * 1.5 && last.high < prev.high && last.close < (last.high + last.low) / 2) {
+      result['top'].add('高位放量滞涨');
+    }
+  }
+
+if (last.macdHist != 0 && data.length >= 3) {
+    double maxHigh20 = data[data.length - 3].high;
+    double maxMacd20 = data[data.length - 3].macdHist;
+    for (int i = data.length - 20; i < data.length - 3; i++) {
+      if (i >= 0) {
+        if (data[i].high > maxHigh20) maxHigh20 = data[i].high;
+        if (data[i].macdHist > maxMacd20) maxMacd20 = data[i].macdHist;
+      }
+    }
+    if (last.high >= maxHigh20 && last.macdHist < maxMacd20) {
+      result['top'].add('MACD顶背离');
+    }
+  }
+
+  final lowerShadow = (last.open < last.close ? last.open : last.close) - last.low;
+  if (lowerShadow >= 2 * bodyValue && last.ma5 > 0 && last.close < last.ma5) {
+    result['bottom'].add('低位长下影线');
+  }
+
+  if (last.volMa5 > 0) {
+    if (last.volume > last.volMa5 * 1.2 && prev.volume < last.volMa5 * 0.8 && last.close > last.open) {
+      result['bottom'].add('放量止跌');
+    }
+  }
+
+  if (data[data.length - 3].k < 20 && last.k > last.d && prev.k <= prev.d) {
+    result['bottom'].add('KDJ超卖金叉');
+  }
+
+  if (last.close < prev.close && last.volMa5 > 0 && last.volume < last.volMa5 * 0.7) {
+    result['bottom'].add('价跌量缩（空头衰竭）');
+  }
+
+  return result;
+}

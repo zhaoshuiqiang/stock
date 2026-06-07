@@ -3,6 +3,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
+import '../analysis/indicators.dart';
 
 class ChartScreen extends StatefulWidget {
   final String code;
@@ -19,6 +20,8 @@ class _ChartScreenState extends State<ChartScreen> {
   bool _isLoading = false;
   int _selectedRange = 120; // 60, 120, 360 (全部)
   HistoryKline? _selectedKline;
+  bool _showFibonacci = false;
+  Map<String, dynamic>? _techAnalysis;
 
   @override
   void initState() {
@@ -30,8 +33,17 @@ class _ChartScreenState extends State<ChartScreen> {
     setState(() => _isLoading = true);
     final data = await _api.getStockHistory(widget.code, days: _selectedRange);
     if (mounted) {
+      final processedData = calcAllIndicators(data);
+      final tech = <String, dynamic>{};
+      final sr = calcSupportResistance(processedData);
+      tech['support_levels'] = sr['support'] ?? [];
+      tech['resistance_levels'] = sr['resistance'] ?? [];
+      if (_showFibonacci) {
+        tech['fibonacci'] = calcFibonacci(processedData);
+      }
       setState(() {
-        _data = data;
+        _data = processedData;
+        _techAnalysis = tech;
         _isLoading = false;
       });
     }
@@ -78,6 +90,8 @@ class _ChartScreenState extends State<ChartScreen> {
           _rangeButton('120天', 120),
           const SizedBox(width: 12),
           _rangeButton('全部', 360),
+          const SizedBox(width: 12),
+          _toggleButton('斐波那契', _showFibonacci),
         ],
       ),
     );
@@ -101,6 +115,39 @@ class _ChartScreenState extends State<ChartScreen> {
           style: TextStyle(
             color: isSelected ? Colors.white : Colors.white54,
             fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _toggleButton(String label, bool isActive) {
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          if (label == '斐波那契') {
+            _showFibonacci = !_showFibonacci;
+            if (_showFibonacci && _data.isNotEmpty) {
+              final fib = calcFibonacci(_data);
+              if (_techAnalysis != null) {
+                _techAnalysis!['fibonacci'] = fib;
+              }
+            }
+          }
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isActive ? const Color(0xFF26a69a) : const Color(0xFF16213e),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: isActive ? const Color(0xFF26a69a) : Colors.white24),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isActive ? Colors.white : Colors.white54,
+            fontSize: 12,
           ),
         ),
       ),
@@ -192,11 +239,18 @@ class _ChartScreenState extends State<ChartScreen> {
                 ],
               ),
             ),
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _KlinePainter(chartData),
-              ),
-            ),
+Positioned.fill(
+               child: CustomPaint(
+                 painter: _KlinePainter(
+                   chartData,
+                   supportLevels: _techAnalysis?['support_levels'] ?? [],
+                   resistanceLevels: _techAnalysis?['resistance_levels'] ?? [],
+                   fibonacciLevels: _techAnalysis?['fibonacci']?['levels'],
+                   minPrice: minPrice,
+                   maxPrice: maxPrice,
+                 ),
+               ),
+             ),
           ],
         ),
       ),
@@ -585,39 +639,68 @@ class _ChartScreenState extends State<ChartScreen> {
 
 class _KlinePainter extends CustomPainter {
   final List<HistoryKline> data;
+  final List<double> supportLevels;
+  final List<double> resistanceLevels;
+  final Map<String, double>? fibonacciLevels;
+  final double minPrice;
+  final double maxPrice;
+
   final Paint upPaint = Paint()..color = const Color(0xFFef5350);
   final Paint downPaint = Paint()..color = const Color(0xFF26a69a);
   final Paint linePaint = Paint()..strokeWidth = 1;
 
-  _KlinePainter(this.data);
+  _KlinePainter(
+    this.data, {
+    this.supportLevels = const [],
+    this.resistanceLevels = const [],
+    this.fibonacciLevels,
+    required this.minPrice,
+    required this.maxPrice,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     if (data.isEmpty) return;
 
-    final prices = data.expand((d) => [d.high, d.low]).toList();
-    final minPrice = prices.reduce((a, b) => a < b ? a : b);
-    final maxPrice = prices.reduce((a, b) => a > b ? a : b);
-    final priceRange = maxPrice - minPrice;
     final padding = 56.0;
     final chartWidth = size.width - padding;
-    final chartHeight = size.height;
     final barWidth = chartWidth / data.length * 0.6;
     final gap = chartWidth / data.length * 0.4;
+    final priceRange = maxPrice - minPrice;
+
+    if (priceRange <= 0) return;
+
+    for (final level in resistanceLevels) {
+      final y = size.height - ((level - minPrice) / priceRange) * size.height;
+      _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), const Color(0xFFef5350));
+    }
+
+    for (final level in supportLevels) {
+      final y = size.height - ((level - minPrice) / priceRange) * size.height;
+      _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), const Color(0xFF26a69a));
+    }
+
+    if (fibonacciLevels != null) {
+      for (final entry in fibonacciLevels!.entries) {
+        final level = entry.value;
+        final y = size.height - ((level - minPrice) / priceRange) * size.height;
+        final isGolden = entry.key == '61.8%';
+        _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), isGolden ? const Color(0xFFFFD700) : Colors.white54);
+      }
+    }
 
     for (int i = 0; i < data.length; i++) {
       final d = data[i];
       final isUp = d.close >= d.open;
       final paint = isUp ? upPaint : downPaint;
-      linePaint.color = paint.color;
 
       final x = padding + i * (barWidth + gap) + barWidth / 2;
-      final highY = chartHeight - ((d.high - minPrice) / priceRange) * chartHeight;
-      final lowY = chartHeight - ((d.low - minPrice) / priceRange) * chartHeight;
-      final openY = chartHeight - ((d.open - minPrice) / priceRange) * chartHeight;
-      final closeY = chartHeight - ((d.close - minPrice) / priceRange) * chartHeight;
+      final highY = size.height - ((d.high - minPrice) / priceRange) * size.height;
+      final lowY = size.height - ((d.low - minPrice) / priceRange) * size.height;
+      final openY = size.height - ((d.open - minPrice) / priceRange) * size.height;
+      final closeY = size.height - ((d.close - minPrice) / priceRange) * size.height;
 
-      canvas.drawLine(Offset(x, highY), Offset(x, lowY), linePaint);
+      canvas.drawLine(Offset(x, highY), Offset(x, lowY), paint);
 
       final bodyTop = isUp ? closeY : openY;
       final bodyBottom = isUp ? openY : closeY;
@@ -640,6 +723,25 @@ class _KlinePainter extends CustomPainter {
     }
   }
 
+  void _drawDashedLine(Canvas canvas, Offset start, Offset end, Color color) {
+    const dashWidth = 4.0;
+    const dashSpace = 3.0;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+    final total = end.dx - start.dx;
+    var offset = 0.0;
+    while (offset < total) {
+      canvas.drawLine(
+        Offset(start.dx + offset, start.dy),
+        Offset(start.dx + offset + dashWidth, start.dy),
+        paint,
+      );
+      offset += dashWidth + dashSpace;
+    }
+  }
+
   @override
-  bool shouldRepaint(_KlinePainter oldDelegate) => oldDelegate.data != data;
+  bool shouldRepaint(_KlinePainter oldDelegate) => oldDelegate.data != data || oldDelegate.supportLevels != supportLevels || oldDelegate.resistanceLevels != resistanceLevels || oldDelegate.fibonacciLevels != fibonacciLevels;
 }
