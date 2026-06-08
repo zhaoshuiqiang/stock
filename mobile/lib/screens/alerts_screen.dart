@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
+import '../core/app_version.dart';
 import '../widgets/alert_dialog.dart';
 import 'update_log_screen.dart';
 
@@ -26,7 +27,7 @@ class _AboutDialog extends StatelessWidget {
         children: [
           Text('股票分析助手', style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
           const SizedBox(height: 12),
-          Text('版本号: v2.1.0', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
+          Text('版本号: v${AppVersion.version}', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
           const SizedBox(height: 8),
           InkWell(
             onTap: () {

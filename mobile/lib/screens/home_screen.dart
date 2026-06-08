@@ -263,34 +263,34 @@ class HomeScreenState extends State<HomeScreen> {
                 child: Center(child: Text('暂无自选股，请先添加自选', style: TextStyle(color: Colors.white54))),
               )
             else ...[
-              if (_opportunities.any((o) => o.recommendation == '买入' || o.recommendation == '增持'))
+              if (_opportunities.any((o) => o.recommendation == '强烈买入' || o.recommendation == '买入'))
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text('看多机会', style: TextStyle(color: const Color(0xFFef5350), fontSize: 13, fontWeight: FontWeight.w600)),
                 ),
               ..._opportunities
-                  .where((o) => o.recommendation == '买入' || o.recommendation == '增持')
+                  .where((o) => o.recommendation == '强烈买入' || o.recommendation == '买入')
                   .map((o) => _buildOpportunityItem(o, textTheme)),
-              if (_opportunities.any((o) => o.recommendation == '买入' || o.recommendation == '增持') &&
-                  _opportunities.any((o) => o.recommendation == '减持' || o.recommendation == '卖出'))
+              if (_opportunities.any((o) => o.recommendation == '强烈买入' || o.recommendation == '买入') &&
+                  _opportunities.any((o) => o.recommendation == '卖出' || o.recommendation == '强烈卖出'))
                 const Divider(color: Colors.white12, height: 16),
-              if (_opportunities.any((o) => o.recommendation == '减持' || o.recommendation == '卖出'))
+              if (_opportunities.any((o) => o.recommendation == '卖出' || o.recommendation == '强烈卖出'))
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text('风险提示', style: TextStyle(color: const Color(0xFF26a69a), fontSize: 13, fontWeight: FontWeight.w600)),
                 ),
               ..._opportunities
-                  .where((o) => o.recommendation == '减持' || o.recommendation == '卖出')
+                  .where((o) => o.recommendation == '卖出' || o.recommendation == '强烈卖出')
                   .map((o) => _buildOpportunityItem(o, textTheme)),
-              if (_opportunities.any((o) => o.recommendation == '持有'))
+              if (_opportunities.any((o) => o.recommendation == '观望'))
                 const Divider(color: Colors.white12, height: 16),
-              if (_opportunities.any((o) => o.recommendation == '持有'))
+              if (_opportunities.any((o) => o.recommendation == '观望'))
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text('中性观望', style: TextStyle(color: Colors.orange, fontSize: 13, fontWeight: FontWeight.w600)),
                 ),
               ..._opportunities
-                  .where((o) => o.recommendation == '持有')
+                  .where((o) => o.recommendation == '观望')
                   .map((o) => _buildOpportunityItem(o, textTheme)),
             ],
           ],
@@ -300,9 +300,9 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildOpportunityItem(_StockOpportunity o, TextTheme textTheme) {
-    final recColor = o.recommendation == '买入' || o.recommendation == '增持'
+    final recColor = o.recommendation == '强烈买入' || o.recommendation == '买入'
         ? const Color(0xFFef5350)
-        : o.recommendation == '减持' || o.recommendation == '卖出'
+        : o.recommendation == '卖出' || o.recommendation == '强烈卖出'
             ? const Color(0xFF26a69a)
             : Colors.orange;
 

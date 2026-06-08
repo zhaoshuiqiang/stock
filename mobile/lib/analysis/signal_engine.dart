@@ -631,11 +631,13 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
     return AnalysisResult(
       signals: [],
       indicators: {},
-      recommendation: '持有',
+      recommendation: '观望',
       score: 50,
       riskLevel: '中等',
-      riskFactors: [],
-      suggestions: [],
+      riskFactors: ['数据不足'],
+      suggestions: ['等待更多数据'],
+      reasons: ['数据不足，无法生成有效建议'],
+      opportunities: [],
     );
   }
 
@@ -643,64 +645,135 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
   final signals = detectSignals(data);
   final indicators = getIndicatorSummary(data);
 
-  int buyScore = 0;
-  int sellScore = 0;
   final buySignals = signals.where((s) => s.type == 'buy').toList();
   final sellSignals = signals.where((s) => s.type == 'sell').toList();
 
-  for (final signal in buySignals) {
-    buyScore += signal.strength;
+  // ========== 多维加权评分 ==========
+
+  // 1. 信号评分 (0-40分)
+  int buyCount = buySignals.length;
+  int sellCount = sellSignals.length;
+  double signalScore = (buyCount - sellCount) * 8.0 + 20;
+  signalScore = signalScore.clamp(0.0, 40.0);
+
+  // 2. 趋势强度评分 (0-20分) - 基于均线排列
+  double trendScore = 0;
+  if (last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0) {
+    if (last.ma5 > last.ma10 && last.ma10 > last.ma20) {
+      trendScore = 20; // 完美多头排列
+    } else if (last.ma5 > last.ma10) {
+      trendScore = 12;
+    } else if (last.ma5 > last.ma20) {
+      trendScore = 8;
+    } else {
+      trendScore = 3;
+    }
   }
-  for (final signal in sellSignals) {
-    sellScore += signal.strength;
+  // 空头排列惩罚
+  if (last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0) {
+    if (last.ma5 < last.ma10 && last.ma10 < last.ma20) {
+      trendScore = 0;
+    }
   }
 
-  final netScore = buyScore - sellScore;
-  const baseScore = 50;
-  int finalScore = baseScore + (netScore ~/ 5);
-  finalScore = finalScore.clamp(0, 100);
+  // 3. 动量评分 (0-20分) - 基于RSI
+  double momentumScore = 10; // 中性
+  if (last.rsi6 > 0) {
+    if (last.rsi6 < 30) {
+      momentumScore = 16; // 超卖=潜在反弹
+    } else if (last.rsi6 < 40) {
+      momentumScore = 13;
+    } else if (last.rsi6 < 60) {
+      momentumScore = 10;
+    } else if (last.rsi6 < 70) {
+      momentumScore = 7;
+    } else {
+      momentumScore = 3; // 超买=潜在回调
+    }
+  }
 
+  // 4. 量价确认评分 (0-20分)
+  double volumeScore = 10; // 中性
+  if (last.volMa5 > 0) {
+    final volRatio = last.volume / last.volMa5;
+    if (last.close >= last.open) {
+      // 价涨量增=看多
+      if (volRatio > 1.5) {
+        volumeScore = 18;
+      } else if (volRatio > 1.0) {
+        volumeScore = 14;
+      } else {
+        volumeScore = 8; // 价涨量缩=弱势
+      }
+    } else {
+      // 价跌量增=看空
+      if (volRatio > 1.5) {
+        volumeScore = 3;
+      } else if (volRatio > 1.0) {
+        volumeScore = 6;
+      } else {
+        volumeScore = 10; // 价跌量缩=空方减弱
+      }
+    }
+  }
+
+  // 总分
+  final totalScore = (signalScore + trendScore + momentumScore + volumeScore).round().clamp(0, 100);
+
+  // ========== 5级推荐 ==========
   String recommendation;
-  if (finalScore >= 75) {
+  if (totalScore >= 80) {
+    recommendation = '强烈买入';
+  } else if (totalScore >= 65) {
     recommendation = '买入';
-  } else if (finalScore >= 60) {
-    recommendation = '增持';
-  } else if (finalScore >= 40) {
-    recommendation = '持有';
-  } else if (finalScore >= 25) {
-    recommendation = '减持';
-  } else {
+  } else if (totalScore >= 40) {
+    recommendation = '观望';
+  } else if (totalScore >= 25) {
     recommendation = '卖出';
+  } else {
+    recommendation = '强烈卖出';
   }
 
-  String riskLevel;
-  // 风险等级基于风险因子数量，而非评分值
-  // 评分高=看多信号强，并不等于风险高；真正的风险来自指标异常和基本面
+  // ========== 推荐理由 ==========
+  final reasons = <String>[];
+  if (buyCount > sellCount + 1) reasons.add('多个买入信号共振');
+  if (sellCount > buyCount + 1) reasons.add('多个卖出信号共振');
+  if (last.ma5 > last.ma10 && last.ma10 > last.ma20 && last.ma5 > 0) reasons.add('均线多头排列');
+  if (last.ma5 < last.ma10 && last.ma10 < last.ma20 && last.ma5 > 0) reasons.add('均线空头排列');
+  if (last.rsi6 > 70) reasons.add('RSI超买区域');
+  if (last.rsi6 < 30 && last.rsi6 > 0) reasons.add('RSI超卖区域');
+  if (last.volume > last.volMa5 * 1.5 && last.volMa5 > 0) reasons.add('成交量显著放大');
+  if (last.close >= last.open && last.volume < last.volMa5 * 0.7 && last.volMa5 > 0) reasons.add('上涨缩量，动能不足');
+
+  // ========== 风险因子 ==========
   final riskFactors = <String>[];
 
-  // 技术指标风险因子
+  // 技术风险
+  if (last.rsi6 > 70) riskFactors.add('RSI超买(${last.rsi6.toStringAsFixed(1)})，回调风险');
+  if (last.rsi6 < 30 && last.rsi6 > 0) riskFactors.add('RSI超卖(${last.rsi6.toStringAsFixed(1)})，可能继续探底');
+  if (last.close > last.bollUpper && last.bollUpper > 0) riskFactors.add('价格突破布林上轨，短期过热');
+  if (last.close < last.bollLower && last.bollLower > 0) riskFactors.add('价格跌破布林下轨，波动加剧');
+  if (last.close < last.ma20 && last.ma20 > 0) riskFactors.add('价格低于20日均线，趋势偏弱');
+
+  // 量价风险
+  if (last.close < last.open && last.volume > last.volMa5 * 1.5 && last.volMa5 > 0) {
+    riskFactors.add('放量下跌，抛压较大');
+  }
+  if (last.close >= last.open && last.volume < last.volMa5 * 0.7 && last.volMa5 > 0) {
+    riskFactors.add('上涨缩量，量价背离');
+  }
+
+  // 趋势风险
+  if (last.ma5 > 0 && last.ma10 > 0 && last.ma5 < last.ma10 && data.length >= 2) {
+    final prev = data[data.length - 2];
+    if (prev.ma5 >= prev.ma10) {
+      riskFactors.add('MA5下穿MA10死叉，短期趋势转弱');
+    }
+  }
+
+  // 振幅风险
   if (last.amplitude > 5) {
-    riskFactors.add('当日振幅较大（${last.amplitude.toStringAsFixed(1)}%），短期波动剧烈');
-  }
-  if (last.rsi6 > 80) {
-    riskFactors.add('RSI超买风险（RSI6=${last.rsi6.toStringAsFixed(1)}）');
-  } else if (last.rsi6 > 70) {
-    riskFactors.add('RSI偏高（RSI6=${last.rsi6.toStringAsFixed(1)}），接近超买区');
-  }
-  if (last.rsi6 < 20 && last.rsi6 > 0) {
-    riskFactors.add('RSI超卖风险（RSI6=${last.rsi6.toStringAsFixed(1)}）');
-  }
-  if (last.j > 100) {
-    riskFactors.add('KDJ超买风险（J=${last.j.toStringAsFixed(1)}）');
-  }
-  if (last.j < 0) {
-    riskFactors.add('KDJ超卖风险（J=${last.j.toStringAsFixed(1)}）');
-  }
-  if (last.bollUpper > 0 && last.close > last.bollUpper) {
-    riskFactors.add('股价突破布林带上轨，短期超买');
-  }
-  if (last.bollLower > 0 && last.close < last.bollLower) {
-    riskFactors.add('股价跌破布林带下轨，短期超卖');
+    riskFactors.add('当日振幅较大(${last.amplitude.toStringAsFixed(1)}%)，短期波动剧烈');
   }
 
   // 短期涨跌幅风险
@@ -725,15 +798,17 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
     }
   }
 
-  // 基本面风险因子（来自quote数据）
+  // KDJ风险
+  if (last.j > 100) riskFactors.add('KDJ超买风险(J=${last.j.toStringAsFixed(1)})');
+  if (last.j < 0) riskFactors.add('KDJ超卖风险(J=${last.j.toStringAsFixed(1)})');
+
+  // 基本面风险因子
   if (quote != null) {
+    if (quote.pe > 60) riskFactors.add('市盈率偏高(${quote.pe.toStringAsFixed(1)})，估值风险');
     if (quote.turnover > 15) {
       riskFactors.add('换手率${quote.turnover.toStringAsFixed(1)}%，投机氛围浓厚');
     } else if (quote.turnover < 1 && quote.turnover > 0) {
       riskFactors.add('换手率仅${quote.turnover.toStringAsFixed(1)}%，流动性不足');
-    }
-    if (quote.pe > 100) {
-      riskFactors.add('动态市盈率${quote.pe.toStringAsFixed(1)}倍，估值偏高');
     }
     if (quote.changePct > 5) {
       riskFactors.add('当日涨幅${quote.changePct.toStringAsFixed(2)}%，追高需谨慎');
@@ -742,19 +817,34 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
     }
   }
 
-  final riskCount = riskFactors.length;
-  if (riskCount >= 3) {
+  // ========== 风险等级 ==========
+  String riskLevel;
+  if (riskFactors.length >= 3 || riskFactors.any((f) => f.contains('超买') || f.contains('过热'))) {
     riskLevel = '高';
-  } else if (riskCount >= 2) {
-    riskLevel = '中高';
-  } else if (riskCount >= 1) {
+  } else if (riskFactors.isNotEmpty) {
     riskLevel = '中等';
   } else {
     riskLevel = '低';
   }
 
+  // ========== 机会识别 ==========
+  final opportunities = <Map<String, String>>[];
+  for (final signal in buySignals.take(3)) {
+    String risk = '中等';
+    if (signal.signal.contains('RSI') || signal.signal.contains('超卖')) risk = '中高';
+    if (signal.signal.contains('金叉')) risk = '中等';
+    if (signal.signal.contains('放量')) risk = '中低';
+    if (signal.signal.contains('底背离')) risk = '中等';
+    if (signal.signal.contains('跌破下轨')) risk = '中高';
+    opportunities.add({
+      'name': signal.signal,
+      'description': signal.description,
+      'risk': risk,
+    });
+  }
+
+  // ========== 操作建议 ==========
   final suggestions = <String>[];
-  // 获取近期低点作为止损参考
   double recentLow = last.low;
   if (data.length >= 10) {
     final recent10 = data.sublist(data.length - 10);
@@ -762,40 +852,40 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
   }
   final stopLossRef = last.ma20 > 0 ? last.ma20 : recentLow;
 
-  if (recommendation == '买入') {
-    if (buySignals.length >= 3 && finalScore >= 80) {
-      suggestions.add('多项技术指标共振发出买入信号，信号较强');
-      suggestions.add('可考虑分批建仓，首批仓位控制在30%以内');
+  if (recommendation == '强烈买入') {
+    suggestions.add('多项技术指标强烈共振偏多，但需结合基本面和大盘环境综合判断');
+    suggestions.add('可考虑分批建仓，首批仓位控制在30%以内，确认趋势后逐步加仓');
+    suggestions.add('建议止损位设在${stopLossRef.toStringAsFixed(2)}附近（MA20/近期低点下方）');
+  } else if (recommendation == '买入') {
+    if (buySignals.length >= 3 && totalScore >= 70) {
+      suggestions.add('多项技术指标共振偏多，但需结合基本面和大盘环境综合判断');
+      suggestions.add('可考虑分批建仓，首批仓位控制在20%以内，确认趋势后逐步加仓');
     } else {
-      suggestions.add('技术面偏多，可轻仓关注');
-      suggestions.add('建议先试探性建仓10-20%，确认趋势后加仓');
+      suggestions.add('技术面偏多，可轻仓关注，但不宜追高');
+      suggestions.add('建议先试探性建仓10%，确认支撑有效后再考虑加仓');
     }
-    suggestions.add('建议止损位设在${stopLossRef.toStringAsFixed(2)}附近（近期低点/MA20下方）');
+    suggestions.add('建议止损位设在${stopLossRef.toStringAsFixed(2)}附近（MA20/近期低点下方）');
     if (quote != null && quote.pe > 0 && quote.pe < 15) {
       suggestions.add('动态市盈率${quote.pe.toStringAsFixed(1)}倍，估值较低，具有一定安全边际');
     }
-  } else if (recommendation == '增持') {
-    suggestions.add('技术面偏多，可适当加仓');
-    suggestions.add('关注关键阻力位的突破情况，放量突破可加仓');
-    suggestions.add('止损位参考${stopLossRef.toStringAsFixed(2)}，跌破则减仓');
-  } else if (recommendation == '持有') {
+  } else if (recommendation == '观望') {
     suggestions.add('技术面中性，多空信号均衡，建议继续观察');
     suggestions.add('保持现有仓位，等待方向明确后再做决策');
     if (quote != null && quote.pe > 50) {
       suggestions.add('当前估值偏高（PE=${quote.pe.toStringAsFixed(1)}），注意仓位控制');
     }
-  } else if (recommendation == '减持') {
-    suggestions.add('技术面偏弱，建议适当减仓至30%以下');
-    suggestions.add('关注支撑位${recentLow.toStringAsFixed(2)}的防守情况');
+  } else if (recommendation == '卖出') {
+    suggestions.add('技术面偏弱，建议适当减仓，降低风险敞口');
+    suggestions.add('关注支撑位${recentLow.toStringAsFixed(2)}的防守情况，跌破则加速减仓');
     if (quote != null && quote.pe > 0 && quote.pb > 0 && quote.pb < 1) {
-      suggestions.add('市净率${quote.pb.toStringAsFixed(2)}倍破净，可能存在安全边际，不宜过度恐慌');
+      suggestions.add('市净率${quote.pb.toStringAsFixed(2)}倍破净，可能存在安全边际，不宜恐慌性抛售');
     }
   } else {
-    suggestions.add('技术面显示卖出信号较强，建议及时止盈或止损');
+    suggestions.add('技术面偏空信号较强，建议及时止损或止盈，规避风险');
     if (sellSignals.length >= 3) {
-      suggestions.add('多项指标共振发出卖出信号，建议清仓观望');
+      suggestions.add('多项指标共振偏空，建议大幅减仓观望');
     } else {
-      suggestions.add('建议分批减仓，避免踏空反弹');
+      suggestions.add('建议分批减仓，避免一次性清仓');
     }
     suggestions.add('等待调整结束（如RSI回到50附近、MACD金叉）后再考虑入场');
   }
@@ -807,7 +897,10 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
     }
   }
 
-  // 多指标共振评分（7维度）
+  // 免责声明
+  suggestions.add('以上分析基于历史数据和技术指标，仅供参考，不构成投资建议，投资有风险，决策需谨慎');
+
+  // ========== 多指标共振评分（7维度） ==========
   final confluenceDetails = <Map<String, dynamic>>[];
   int bullCount = 0;
 
@@ -860,12 +953,14 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
     signals: signals,
     indicators: indicators,
     recommendation: recommendation,
-    score: finalScore,
+    score: totalScore,
     riskLevel: riskLevel,
     riskFactors: riskFactors,
     suggestions: suggestions,
     tradeLevels: tradeLevels.isNotEmpty ? tradeLevels : null,
     confluenceScore: bullCount,
     confluenceDetails: confluenceDetails,
+    reasons: reasons,
+    opportunities: opportunities,
   );
 }

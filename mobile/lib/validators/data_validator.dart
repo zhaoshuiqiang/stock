@@ -1,0 +1,200 @@
+import '../models/stock_models.dart';
+
+enum DataAnomalyType { zeroPrice, extremeChange, zeroVolume, negativeValue, staleData }
+
+class DataAnomaly {
+  final DataAnomalyType type;
+  final String field;
+  final String description;
+  final double severity; // 0.0-1.0
+
+  DataAnomaly({
+    required this.type,
+    required this.field,
+    required this.description,
+    required this.severity,
+  });
+}
+
+class DataValidationResult {
+  final bool isValid;
+  final List<DataAnomaly> anomalies;
+
+  DataValidationResult({required this.isValid, required this.anomalies});
+
+  bool get hasWarnings => anomalies.any((a) => a.severity < 0.8);
+  bool get hasErrors => anomalies.any((a) => a.severity >= 0.8);
+}
+
+class DataValidator {
+  /// Validate quote data
+  static DataValidationResult validateQuote(QuoteData quote) {
+    final anomalies = <DataAnomaly>[];
+
+    // Zero price check
+    if (quote.price <= 0) {
+      anomalies.add(DataAnomaly(
+        type: DataAnomalyType.zeroPrice,
+        field: 'price',
+        description: '价格为0或负值，数据可能异常',
+        severity: 1.0,
+      ));
+    }
+
+    // Extreme change check (non-ST: >20%, ST: >10%)
+    final isST = quote.name.contains('ST');
+    final changeLimit = isST ? 10.0 : 20.0;
+    if (quote.changePct.abs() > changeLimit) {
+      anomalies.add(DataAnomaly(
+        type: DataAnomalyType.extremeChange,
+        field: 'changePct',
+        description: '涨跌幅${quote.changePct.toStringAsFixed(2)}%超出正常范围',
+        severity: 0.7,
+      ));
+    }
+
+    // Zero volume during trading hours
+    if (quote.volume <= 0) {
+      anomalies.add(DataAnomaly(
+        type: DataAnomalyType.zeroVolume,
+        field: 'volume',
+        description: '成交量为0',
+        severity: 0.5,
+      ));
+    }
+
+    // Negative values check
+    if (quote.high < 0 || quote.low < 0 || quote.open < 0) {
+      anomalies.add(DataAnomaly(
+        type: DataAnomalyType.negativeValue,
+        field: 'high/low/open',
+        description: '价格数据存在负值',
+        severity: 1.0,
+      ));
+    }
+
+    // High > Low sanity check
+    if (quote.high > 0 && quote.low > 0 && quote.high < quote.low) {
+      anomalies.add(DataAnomaly(
+        type: DataAnomalyType.negativeValue,
+        field: 'high/low',
+        description: '最高价低于最低价，数据异常',
+        severity: 1.0,
+      ));
+    }
+
+    return DataValidationResult(
+      isValid: !anomalies.any((a) => a.severity >= 1.0),
+      anomalies: anomalies,
+    );
+  }
+
+  /// Validate K-line data
+  static DataValidationResult validateKlines(List<HistoryKline> klines) {
+    final anomalies = <DataAnomaly>[];
+
+    for (int i = 0; i < klines.length; i++) {
+      final k = klines[i];
+
+      // Negative price check
+      if (k.open < 0 || k.high < 0 || k.low < 0 || k.close < 0) {
+        anomalies.add(DataAnomaly(
+          type: DataAnomalyType.negativeValue,
+          field: 'kline[$i]',
+          description: 'K线数据存在负值: ${k.date}',
+          severity: 1.0,
+        ));
+      }
+
+      // High < Low check
+      if (k.high < k.low) {
+        anomalies.add(DataAnomaly(
+          type: DataAnomalyType.negativeValue,
+          field: 'kline[$i]',
+          description: '最高价低于最低价: ${k.date}',
+          severity: 1.0,
+        ));
+      }
+    }
+
+    return DataValidationResult(
+      isValid: !anomalies.any((a) => a.severity >= 1.0),
+      anomalies: anomalies,
+    );
+  }
+
+  /// Check K-line data continuity (detect missing trading days)
+  static List<DateTime> findMissingTradingDays(List<HistoryKline> klines) {
+    if (klines.length < 2) return [];
+
+    final missingDays = <DateTime>[];
+    final dates = klines.map((k) => DateTime(k.date.year, k.date.month, k.date.day)).toSet();
+
+    // Check from first to last date
+    final first = dates.reduce((a, b) => a.isBefore(b) ? a : b);
+    final last = dates.reduce((a, b) => a.isAfter(b) ? a : b);
+
+    var current = first;
+    while (current.isBefore(last)) {
+      current = current.add(const Duration(days: 1));
+      // Skip weekends
+      if (current.weekday == DateTime.saturday || current.weekday == DateTime.sunday) continue;
+      // Skip known Chinese holidays (simplified - just check major ones)
+      if (_isChineseHoliday(current)) continue;
+
+      if (!dates.contains(current)) {
+        missingDays.add(current);
+      }
+    }
+
+    return missingDays;
+  }
+
+  static bool _isChineseHoliday(DateTime date) {
+    // Simplified Chinese holiday check - major holidays only
+    // Spring Festival, National Day, etc. would need a proper calendar
+    // For now, just check month/day patterns
+    final md = '${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    // New Year's Day
+    if (md == '01-01') return true;
+    // Labor Day
+    if (md == '05-01') return true;
+    // National Day
+    if (md.startsWith('10-') && int.parse(md.split('-')[1]) <= 7) return true;
+    return false;
+  }
+
+  /// Check price reasonability
+  static DataValidationResult validateKlinePrices(List<HistoryKline> klines) {
+    final anomalies = <DataAnomaly>[];
+
+    for (int i = 0; i < klines.length; i++) {
+      final k = klines[i];
+
+      // Extreme price movement (>30% in a single day for non-ST)
+      if (k.changePct.abs() > 30) {
+        anomalies.add(DataAnomaly(
+          type: DataAnomalyType.extremeChange,
+          field: 'kline[$i].changePct',
+          description: '日涨跌幅${k.changePct.toStringAsFixed(2)}%异常: ${k.date}',
+          severity: 0.8,
+        ));
+      }
+
+      // Zero volume with price change
+      if (k.volume <= 0 && k.close != k.open) {
+        anomalies.add(DataAnomaly(
+          type: DataAnomalyType.zeroVolume,
+          field: 'kline[$i].volume',
+          description: '成交量为0但价格有变化: ${k.date}',
+          severity: 0.9,
+        ));
+      }
+    }
+
+    return DataValidationResult(
+      isValid: !anomalies.any((a) => a.severity >= 1.0),
+      anomalies: anomalies,
+    );
+  }
+}

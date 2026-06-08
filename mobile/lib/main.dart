@@ -7,7 +7,7 @@ import 'package:stock_analyzer/screens/alerts_screen.dart';
 import 'package:stock_analyzer/screens/update_log_screen.dart';
 import 'package:stock_analyzer/services/notification_service.dart';
 
-const String appVersion = 'v2.3.0';
+const String appVersion = 'v2.4.0';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

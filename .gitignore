@@ -1,16 +1,12 @@
 __pycache__/
 *.py[cod]
-*$py.class
 *.so
 *.egg-info/
 dist/
 build/
-.eggs/
 venv/
 .env
 *.log
-.venv/
-.pytest_cache/
 .DS_Store
 Thumbs.db
 
@@ -18,18 +14,12 @@ Thumbs.db
 .idea/
 .vscode/
 *.iml
-*.ipr
-*.iws
 
 android-sdk/
 gradle-*/
 *.zip
 *.apk
 *.jar
-
-node_modules/
-npm-debug.log*
-yarn-error.log*
 
 mobile/build/
 mobile/.dart_tool/
@@ -42,9 +32,6 @@ mobile/windows/
 mobile/linux/
 mobile/web/
 
-server/__pycache__/
-server/.venv/
-server/db/*.db
-
 .trae/
 .streamlit/
+.kilo/

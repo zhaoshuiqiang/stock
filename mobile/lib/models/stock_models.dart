@@ -1,3 +1,17 @@
+enum DataConfidence { high, medium, low }
+
+class ValidatedQuoteData {
+  final QuoteData quote;
+  final DataConfidence confidence;
+  final String? validationNote;
+
+  ValidatedQuoteData({
+    required this.quote,
+    this.confidence = DataConfidence.high,
+    this.validationNote,
+  });
+}
+
 class StockInfo {
   final String code;
   final String name;
@@ -363,6 +377,8 @@ class AnalysisResult {
   final Map<String, dynamic>? tradeLevels;
   final int confluenceScore;
   final List<Map<String, dynamic>> confluenceDetails;
+  final List<String> reasons;
+  final List<Map<String, String>> opportunities;
 
   AnalysisResult({
     this.quote,
@@ -376,6 +392,8 @@ class AnalysisResult {
     this.tradeLevels,
     this.confluenceScore = 0,
     this.confluenceDetails = const [],
+    this.reasons = const [],
+    this.opportunities = const [],
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {
@@ -397,6 +415,10 @@ class AnalysisResult {
       riskLevel: json['risk_level'] ?? json['risk'] ?? '中等',
       riskFactors: json['risk_factors'] != null ? List<String>.from(json['risk_factors']) : [],
       suggestions: json['suggestions'] != null ? List<String>.from(json['suggestions']) : [],
+      reasons: json['reasons'] != null ? List<String>.from(json['reasons']) : [],
+      opportunities: json['opportunities'] != null
+          ? (json['opportunities'] as List).map((e) => Map<String, String>.from(e as Map)).toList()
+          : [],
     );
   }
 }

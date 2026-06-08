@@ -1,6 +1,6 @@
 name: stock_analyzer
 description: 增强型股票分析系统 - Android客户端
-version: 2.2.0
+version: 2.5.0
 publish_to: 'none'
 
 environment:
@@ -10,7 +10,6 @@ dependencies:
   flutter:
     sdk: flutter
   http: ^1.2.0
-  web_socket_channel: ^2.4.0
   fl_chart: ^0.68.0
   intl: ^0.19.0
   shared_preferences: ^2.2.0
