@@ -15,7 +15,7 @@ class StrategyPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (klines.isEmpty) {
-      return Center(child: Text('暂无数据', style: Theme.of(context).textTheme.bodyMedium));
+      return const Center(child: Text('暂无分析数据', style: TextStyle(color: Colors.white54)));
     }
 
     final strategies = evaluateStrategies(klines, signals);

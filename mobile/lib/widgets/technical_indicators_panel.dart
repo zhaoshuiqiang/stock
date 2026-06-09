@@ -17,8 +17,8 @@ class TechnicalIndicatorsPanel extends StatelessWidget {
     if (klines.length < 20) {
       return const Center(
         child: Text(
-          '数据不足，需要至少20根K线',
-          style: TextStyle(color: Colors.grey),
+          '暂无分析数据',
+          style: TextStyle(color: Colors.white54),
         ),
       );
     }

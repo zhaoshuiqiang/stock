@@ -43,15 +43,18 @@ class ApiClient {
         if (dataStr.contains(';')) {
           final groups = dataStr.split(';');
           for (final group in groups) {
+            if (group.trim().isEmpty) continue;
             final parts = group.split(',');
-            if (parts.length >= 4) {
-              // Sina API format: suggest_name,category,code,market,full_name,...
-              // parts[0] = matched text (could be code or name)
+            if (parts.length >= 5) {
+              // Sina API actual format (type=111):
+              // sh600446,111,sh600446,sh600446,金证股份,,金证股份,99,1,,,
+              // parts[0] = matched text (with prefix), parts[1] = category
+              // parts[2] = code (may have prefix), parts[3] = market+code (may have prefix)
               // parts[4] = full stock name (always the real name)
-              final name = parts.length >= 5 ? parts[4] : parts[0];
-              final rawCode = parts[2];
-              final market = parts[3];
-              final code = market.isNotEmpty ? '$market$rawCode' : addMarketPrefix(rawCode);
+              final name = parts[4].isNotEmpty ? parts[4] : parts[0];
+              // Strip any existing sh/sz prefix from code field
+              final rawCode = parts[2].replaceAll(RegExp(r'^(sh|sz|SH|SZ)'), '');
+              final code = addMarketPrefix(rawCode);
               results.add(StockInfo(
                 code: code,
                 name: name,
@@ -61,12 +64,13 @@ class ApiClient {
           }
         } else {
           final parts = dataStr.split(',');
-          for (var i = 0; i < parts.length; i += 4) {
-            if (i + 3 < parts.length) {
-              final name = i + 4 < parts.length ? parts[i + 4] : parts[i];
-              final rawCode = parts[i + 2];
-              final market = parts[i + 3];
-              final code = market.isNotEmpty ? '$market$rawCode' : addMarketPrefix(rawCode);
+          // Same format but without semicolons - step by actual field count
+          // Each entry has: matched,category,code,marketCode,fullName,...
+          for (var i = 0; i < parts.length; i += 5) {
+            if (i + 4 < parts.length) {
+              final name = parts[i + 4].isNotEmpty ? parts[i + 4] : parts[i];
+              final rawCode = parts[i + 2].replaceAll(RegExp(r'^(sh|sz|SH|SZ)'), '');
+              final code = addMarketPrefix(rawCode);
               results.add(StockInfo(
                 code: code,
                 name: name,
@@ -85,12 +89,14 @@ class ApiClient {
           // Deduplicate by code
           if (seen.contains(stock.code)) continue;
           seen.add(stock.code);
-          // Ensure name is not empty
-          final name = stock.name.isEmpty ? stock.code : stock.name;
+          // Ensure name is not empty; use raw code (without prefix) as fallback
+          final name = stock.name.isEmpty ? stock.code.substring(2) : stock.name;
+          final rawCode = stock.code.substring(2);
+          final display = (name == rawCode) ? rawCode : '$name($rawCode)';
           filtered.add(StockInfo(
             code: stock.code,
             name: name,
-            display: '$name(${stock.code.substring(2)})',
+            display: display,
           ));
         }
 
@@ -491,6 +497,82 @@ class ApiClient {
       _setCached(cacheKey, results, duration: const Duration(seconds: 60));
       return results;
     }
+
+    // 新浪K线接口失败时，尝试东方财富备用接口
+    print('[Kline] Sina failed for $code, trying EastMoney fallback...');
+    try {
+      final emResult = await _fetchStockHistoryFromEastMoney(code, days);
+      if (emResult.isNotEmpty) {
+        _setCached(cacheKey, emResult, duration: const Duration(seconds: 60));
+        return emResult;
+      }
+    } catch (e) {
+      print('[Kline] EastMoney fallback also failed for $code: $e');
+    }
+    return [];
+  }
+
+  Future<List<HistoryKline>> _fetchStockHistoryFromEastMoney(String code, int days) async {
+    // 东方财富K线API
+    String secid;
+    if (code.startsWith('sh')) {
+      secid = '1.${code.substring(2)}';
+    } else if (code.startsWith('sz')) {
+      secid = '0.${code.substring(2)}';
+    } else {
+      secid = code;
+    }
+
+    final url = Uri.parse(
+        'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=$secid&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=$days');
+    final response = await _httpGet(url, headers: {
+      'User-Agent': 'Mozilla/5.0',
+    }, timeout: const Duration(seconds: 15));
+
+    if (response != null) {
+      final body = response.body;
+      final data = json.decode(body) as Map<String, dynamic>;
+      final klines = data['data']?['klines'] as List?;
+      if (klines == null || klines.isEmpty) return [];
+
+      final results = <HistoryKline>[];
+      for (int i = 0; i < klines.length; i++) {
+        final line = klines[i].toString();
+        final parts = line.split(',');
+        if (parts.length >= 7) {
+          final close = _parseDouble(parts[2]);
+          final open = _parseDouble(parts[1]);
+          final high = _parseDouble(parts[3]);
+          final low = _parseDouble(parts[4]);
+          final volume = _parseDouble(parts[5]) / 100; // 手
+          final amount = _parseDouble(parts[6]);
+
+          double preClose = open;
+          if (i > 0) {
+            final prevLine = klines[i - 1].toString();
+            final prevParts = prevLine.split(',');
+            if (prevParts.length >= 3) {
+              preClose = _parseDouble(prevParts[2]);
+            }
+          }
+          final change = close - preClose;
+          final changePct = preClose > 0 ? (change / preClose) * 100 : 0.0;
+
+          results.add(HistoryKline(
+            date: DateTime.tryParse(parts[0]) ?? DateTime.now(),
+            open: open,
+            high: high,
+            low: low,
+            close: close,
+            volume: volume,
+            amount: amount,
+            change: change,
+            changePct: changePct,
+          ));
+        }
+      }
+      return results;
+    }
     return [];
   }
 
@@ -697,7 +779,7 @@ class ApiClient {
     if (cached != null) return cached as List<SectorInfo>;
 
     final url = Uri.parse(
-      'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=5&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
+      'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=15&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
     );
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
@@ -740,7 +822,7 @@ class ApiClient {
     if (cached != null) return cached as List<QuoteData>;
 
     final url = Uri.parse(
-      'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&fltt=2&invl=2&fid=f3&fs=b:$sectorCode+f:!50&fields=f12,f14,f2,f3,f4,f15,f16,f17,f5,f6',
+      'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=15&po=1&np=1&fltt=2&invl=2&fid=f3&fs=b:$sectorCode+f:!50&fields=f12,f14,f2,f3,f4,f15,f16,f17,f5,f6',
     );
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',

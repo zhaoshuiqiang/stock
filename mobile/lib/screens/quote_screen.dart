@@ -407,8 +407,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       final quote = await _apiClient.getRealtimeQuote(widget.code);
       final mainFundFlow = await _apiClient.getMainFundFlow(widget.code);
       final klines = await _apiClient.getStockHistory(widget.code, days: 120);
+      print('[_loadData] quote=${quote?.name} price=${quote?.price}, klines=${klines.length}');
       final calculated = calcAllIndicators(klines);
       final analysis = generateAnalysis(calculated, quote);
+      print('[_loadData] calculated=${calculated.length}, analysis.score=${analysis.score}, signals=${analysis.signals.length}');
 
       if (quote != null && mainFundFlow != null) {
         quote.mainInflow = mainFundFlow.mainInflow;
@@ -449,8 +451,9 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           _timeshareLoadFailed = true;
         }
       });
-    } catch (e) {
-      print('Load data failed: $e');
+    } catch (e, stackTrace) {
+      print('Load data failed for ${widget.code}: $e');
+      print('Stack trace: $stackTrace');
     } finally {
       setState(() {
         _isLoading = false;
@@ -1082,9 +1085,20 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   }
 
   Widget _buildKlineChart() {
-    if (_klines.isEmpty) {
-      return Center(child: Text('暂无数据', style: Theme.of(context).textTheme.bodyMedium));
-    }
+    if (_klines.isEmpty)
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('K线数据加载失败', style: TextStyle(color: Colors.white54, fontSize: 16)),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: _loadData,
+              child: const Text('点击重试'),
+            ),
+          ],
+        ),
+      );
 
     // Downsample klines for display when there are too many data points
     final displayKlines = _klines.length > 200 ? _downsampleKlines(_klines, 200) : _klines;
@@ -1620,9 +1634,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   }
 
   Widget _buildSignalList() {
-    if (_analysis == null || _analysis!.signals.isEmpty) {
-      return Center(child: Text('暂无信号', style: Theme.of(context).textTheme.bodyMedium));
-    }
+    if (_analysis == null || _analysis!.signals.isEmpty)
+      return Center(
+        child: Text('暂无分析数据', style: TextStyle(color: Colors.white54)),
+      );
 
     return ListView.builder(
       padding: const EdgeInsets.all(8),

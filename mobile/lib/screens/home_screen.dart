@@ -99,7 +99,7 @@ class HomeScreenState extends State<HomeScreen> {
                         if (_sectors.isEmpty)
                           const Text('暂无板块数据', style: TextStyle(color: Colors.white38))
                         else
-                          ..._sectors.map((sector) => _buildSectorItem(sector)),
+                          ..._sectors.take(10).map((sector) => _buildSectorItem(sector)),
                       ],
                     ),
                   ),

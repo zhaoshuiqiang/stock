@@ -279,7 +279,7 @@ class WatchlistScreenState extends State<WatchlistScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(item.name, style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
-                                  Text(item.code, style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
+                                  Text(item.code.substring(2), style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
                                 ],
                               ),
                             ),
