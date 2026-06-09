@@ -22,7 +22,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -33,6 +33,27 @@ class DatabaseService {
           ''');
           await db.execute('''
             ALTER TABLE alerts ADD COLUMN indicator_type TEXT DEFAULT '';
+          ''');
+        }
+        if (oldVersion < 3) {
+          await db.execute('''
+            CREATE TABLE archive_records (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              code TEXT NOT NULL,
+              name TEXT NOT NULL,
+              price REAL NOT NULL,
+              change_pct REAL NOT NULL,
+              score INTEGER NOT NULL,
+              recommendation TEXT NOT NULL,
+              risk_level TEXT NOT NULL,
+              buy_signal_count INTEGER NOT NULL DEFAULT 0,
+              sell_signal_count INTEGER NOT NULL DEFAULT 0,
+              active_strategy_count INTEGER NOT NULL DEFAULT 0,
+              confluence_score INTEGER NOT NULL DEFAULT 0,
+              trade_levels_json TEXT,
+              top_signals TEXT DEFAULT '',
+              archived_at INTEGER NOT NULL
+            )
           ''');
         }
       },
@@ -60,6 +81,26 @@ class DatabaseService {
         last_triggered_at INTEGER,
         alert_type TEXT DEFAULT '',
         indicator_type TEXT DEFAULT ''
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE archive_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        price REAL NOT NULL,
+        change_pct REAL NOT NULL,
+        score INTEGER NOT NULL,
+        recommendation TEXT NOT NULL,
+        risk_level TEXT NOT NULL,
+        buy_signal_count INTEGER NOT NULL DEFAULT 0,
+        sell_signal_count INTEGER NOT NULL DEFAULT 0,
+        active_strategy_count INTEGER NOT NULL DEFAULT 0,
+        confluence_score INTEGER NOT NULL DEFAULT 0,
+        trade_levels_json TEXT,
+        top_signals TEXT DEFAULT '',
+        archived_at INTEGER NOT NULL
       )
     ''');
   }
@@ -202,6 +243,29 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  Future<int> addArchive(ArchiveRecord record) async {
+    final db = await database;
+    return await db.insert('archive_records', record.toMap());
+  }
+
+  Future<List<ArchiveRecord>> getArchives() async {
+    final db = await database;
+    final result = await db.query('archive_records', orderBy: 'archived_at DESC');
+    return result.map((row) => ArchiveRecord.fromMap(row)).toList();
+  }
+
+  Future<ArchiveRecord?> getArchiveById(int id) async {
+    final db = await database;
+    final result = await db.query('archive_records', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (result.isEmpty) return null;
+    return ArchiveRecord.fromMap(result.first);
+  }
+
+  Future<void> deleteArchive(int id) async {
+    final db = await database;
+    await db.delete('archive_records', where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> closeDb() async {

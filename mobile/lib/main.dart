@@ -3,6 +3,8 @@ import 'package:stock_analyzer/core/navigator_key.dart';
 import 'package:stock_analyzer/screens/home_screen.dart';
 import 'package:stock_analyzer/screens/watchlist_screen.dart';
 import 'package:stock_analyzer/screens/news_screen.dart';
+import 'package:stock_analyzer/screens/opportunity_screen.dart';
+import 'package:stock_analyzer/screens/archive_screen.dart';
 import 'package:stock_analyzer/screens/alerts_screen.dart';
 import 'package:stock_analyzer/screens/update_log_screen.dart';
 import 'package:stock_analyzer/services/notification_service.dart';
@@ -41,15 +43,17 @@ class _MyAppState extends State<MyApp> {
     final pages = [
       const HomeScreen(),
       const WatchlistScreen(),
+      const OpportunityScreen(),
       const NewsScreen(),
-      const AlertsScreen(),
+      const ArchiveScreen(),
     ];
 
     final titles = [
       '首页',
       '自选',
+      '机会',
       '资讯',
-      '预警',
+      '留档',
     ];
 
     return MaterialApp(
@@ -79,6 +83,15 @@ class _MyAppState extends State<MyApp> {
           actions: _currentIndex == 0
               ? [
                   IconButton(
+                    icon: const Icon(Icons.notifications_outlined),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const AlertsScreen()),
+                      );
+                    },
+                  ),
+                  IconButton(
                     icon: const Icon(Icons.info_outline),
                     onPressed: () {
                       Navigator.push(
@@ -105,12 +118,16 @@ class _MyAppState extends State<MyApp> {
               label: '自选',
             ),
             BottomNavigationBarItem(
+              icon: Icon(Icons.trending_up),
+              label: '机会',
+            ),
+            BottomNavigationBarItem(
               icon: Icon(Icons.article),
               label: '资讯',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.notifications),
-              label: '预警',
+              icon: Icon(Icons.bookmark),
+              label: '留档',
             ),
           ],
         ),

@@ -33,10 +33,12 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   final ApiClient _apiClient = ApiClient();
   final DatabaseService _dbService = DatabaseService();
   Timer? _pollingTimer;
+  Timer? _analysisRefreshTimer;
   QuoteData? _quote;
   List<HistoryKline> _klines = [];
   AnalysisResult? _analysis;
   bool _isLoading = true;
+  bool _isAnalysisRefreshing = false;
   bool _isFavorite = false;
   bool _isRealtime = false;
   bool _isMarketOpen = true;
@@ -54,6 +56,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   bool _showFibonacci = false;
   bool _showBoll = false;
   Map<String, dynamic>? _techAnalysis;
+  bool _timeshareLoadFailed = false;
 
   @override
   void initState() {
@@ -223,6 +226,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
   void _startRealtime() {
     _isMarketOpen = TradingSession.isInTradingSession();
+    int pollCount = 0;
     _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
       if (!TradingSession.isInTradingSession()) {
         if (_isMarketOpen || _isRealtime) {
@@ -238,11 +242,67 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         return;
       }
       _isMarketOpen = true;
+      pollCount++;
+
+      // 每30秒（第6次轮询）刷新完整分时数据，填补轮询可能遗漏的数据点
+      if (pollCount % 6 == 0) {
+        final timeshareResult = await _apiClient.getTimeshareData(widget.code, bypassCache: true);
+        if (timeshareResult != null && mounted) {
+          setState(() {
+            final apiPrices = timeshareResult['prices'] ?? {};
+            final apiAvgs = timeshareResult['avgs'] ?? {};
+            // API数据作为基础，轮询数据覆盖同一分钟槽位
+            _timeshareData = {...apiPrices, ..._timeshareData};
+            _timeshareAvgData = {...apiAvgs, ..._timeshareAvgData};
+            _timeshareLoadFailed = false;
+          });
+        }
+      }
+
       final quote = await _apiClient.getRealtimeQuote(widget.code);
       if (quote != null) {
         _handleQuoteUpdate(quote);
       }
     });
+
+    // 分析模块独立刷新定时器：30秒周期
+    _analysisRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _refreshAnalysis();
+    });
+  }
+
+  Future<void> _refreshAnalysis() async {
+    if (!TradingSession.isInTradingSession()) return;
+
+    setState(() { _isAnalysisRefreshing = true; });
+
+    try {
+      // Fetch fresh klines bypassing cache
+      final klines = await _apiClient.getStockHistory(widget.code, days: 120, bypassCache: true);
+      if (klines.isEmpty) return;
+
+      final calculated = calcAllIndicators(klines);
+      final analysis = generateAnalysis(calculated, _quote);
+
+      // Recalculate tech analysis
+      final tech = <String, dynamic>{};
+      final sr = calcSupportResistance(calculated);
+      tech['support_levels'] = sr['support'] ?? [];
+      tech['resistance_levels'] = sr['resistance'] ?? [];
+      if (_showFibonacci) {
+        tech['fibonacci'] = calcFibonacci(calculated);
+      }
+
+      setState(() {
+        _klines = calculated;
+        _analysis = analysis;
+        _techAnalysis = tech;
+        _isAnalysisRefreshing = false;
+      });
+    } catch (e) {
+      print('Refresh analysis failed: $e');
+      setState(() { _isAnalysisRefreshing = false; });
+    }
   }
 
   void _handleQuoteUpdate(QuoteData quote) {
@@ -369,6 +429,12 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       // 加载分时线历史数据（盘后也能显示全天走势）
       final timeshareResult = await _apiClient.getTimeshareData(widget.code);
 
+      // 判断是否在交易时段
+      final now = DateTime.now();
+      final isWeekday = now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
+      final totalMin = now.hour * 60 + now.minute;
+      final isTradingHour = isWeekday && totalMin >= (9 * 60 + 30) && totalMin <= 15 * 60;
+
       setState(() {
         _quote = quote;
         _klines = calculated;
@@ -377,6 +443,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         if (timeshareResult != null) {
           _timeshareData = timeshareResult['prices'] ?? {};
           _timeshareAvgData = timeshareResult['avgs'] ?? {};
+          _timeshareLoadFailed = false;
+        } else if (isTradingHour) {
+          // 交易时段分时数据加载失败，设置降级标志
+          _timeshareLoadFailed = true;
         }
       });
     } catch (e) {
@@ -430,6 +500,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               Tab(text: '指标'),
             ],
           ),
+          if (_isAnalysisRefreshing)
+            const LinearProgressIndicator(minHeight: 2),
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -701,6 +773,9 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     final preClose = _quote?.preClose ?? 0;
     final currentPrice = _quote?.price ?? 0;
 
+    if (_timeshareData.isEmpty && _timeshareLoadFailed) {
+      return Center(child: Text('分时历史数据加载失败，仅显示实时数据', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey)));
+    }
     if (_timeshareData.isEmpty) {
       return Center(child: Text('暂无分时数据', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey)));
     }
@@ -2014,6 +2089,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   void dispose() {
     _tabController?.dispose();
     _pollingTimer?.cancel();
+    _analysisRefreshTimer?.cancel();
     _timeshareData.clear();
     _timeshareAvgData.clear();
     _analysis = null;

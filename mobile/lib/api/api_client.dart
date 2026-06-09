@@ -391,16 +391,18 @@ class ApiClient {
     );
   }
 
-  Future<List<HistoryKline>> getStockHistory(String code, {int days = 120}) async {
+  Future<List<HistoryKline>> getStockHistory(String code, {int days = 120, bool bypassCache = false}) async {
     final cacheKey = 'history_${code}_$days';
 
-    // Check cache first
-    final cached = _getCached(cacheKey);
-    if (cached != null) return cached as List<HistoryKline>;
+    // Check cache first (skip if bypassCache is true)
+    if (!bypassCache) {
+      final cached = _getCached(cacheKey);
+      if (cached != null) return cached as List<HistoryKline>;
 
-    // Check if request is already in flight
-    if (_inFlightRequests.containsKey(cacheKey)) {
-      return _inFlightRequests[cacheKey] as Future<List<HistoryKline>>;
+      // Check if request is already in flight
+      if (_inFlightRequests.containsKey(cacheKey)) {
+        return _inFlightRequests[cacheKey] as Future<List<HistoryKline>>;
+      }
     }
 
     // Make the request
@@ -675,10 +677,12 @@ class ApiClient {
 
   /// 获取分时线数据（东方财富接口，盘后也可获取全天走势）
   /// 返回: Map<int, double> 分钟偏移量->价格, Map<int, double> 分钟偏移量->均价
-  Future<Map<String, Map<int, double>>?> getTimeshareData(String code) async {
+  Future<Map<String, Map<int, double>>?> getTimeshareData(String code, {bool bypassCache = false}) async {
     final cacheKey = 'timeshare_$code';
-    final cached = _getCached(cacheKey);
-    if (cached != null) return cached as Map<String, Map<int, double>>;
+    if (!bypassCache) {
+      final cached = _getCached(cacheKey);
+      if (cached != null) return cached as Map<String, Map<int, double>>;
+    }
 
     String secid;
     if (code.startsWith('sh')) {
@@ -760,7 +764,12 @@ class ApiClient {
         'avgs': avgMap,
         'preClose': {0: preClose},
       };
-      _setCached(cacheKey, result, duration: const Duration(seconds: 10));
+      // 交易时段(9:30-15:00工作日)缩短缓存至5秒，其他时段10秒
+      final now = DateTime.now();
+      final isWeekday = now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
+      final totalMin = now.hour * 60 + now.minute;
+      final isTradingHour = isWeekday && totalMin >= (9 * 60 + 30) && totalMin <= 15 * 60;
+      _setCached(cacheKey, result, duration: isTradingHour ? const Duration(seconds: 5) : const Duration(seconds: 10));
       return result;
     }
     return null;

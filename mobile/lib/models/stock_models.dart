@@ -571,3 +571,79 @@ class MarketSentiment {
 
   double get upRatio => total > 0 ? upCount / total : 0;
 }
+
+class ArchiveRecord {
+  final int? id;
+  final String code;
+  final String name;
+  final double price;
+  final double changePct;
+  final int score;
+  final String recommendation;
+  final String riskLevel;
+  final int buySignalCount;
+  final int sellSignalCount;
+  final int activeStrategyCount;
+  final int confluenceScore;
+  final String? tradeLevelsJson;
+  final String topSignals;
+  final DateTime archivedAt;
+
+  ArchiveRecord({
+    this.id,
+    required this.code,
+    required this.name,
+    required this.price,
+    required this.changePct,
+    required this.score,
+    required this.recommendation,
+    required this.riskLevel,
+    required this.buySignalCount,
+    required this.sellSignalCount,
+    required this.activeStrategyCount,
+    required this.confluenceScore,
+    this.tradeLevelsJson,
+    this.topSignals = '',
+    required this.archivedAt,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'code': code,
+      'name': name,
+      'price': price,
+      'change_pct': changePct,
+      'score': score,
+      'recommendation': recommendation,
+      'risk_level': riskLevel,
+      'buy_signal_count': buySignalCount,
+      'sell_signal_count': sellSignalCount,
+      'active_strategy_count': activeStrategyCount,
+      'confluence_score': confluenceScore,
+      'trade_levels_json': tradeLevelsJson,
+      'top_signals': topSignals,
+      'archived_at': archivedAt.millisecondsSinceEpoch,
+    };
+  }
+
+  factory ArchiveRecord.fromMap(Map<String, dynamic> map) {
+    return ArchiveRecord(
+      id: map['id'] as int?,
+      code: map['code'] as String,
+      name: map['name'] as String,
+      price: map['price'] as double,
+      changePct: map['change_pct'] as double,
+      score: map['score'] as int,
+      recommendation: map['recommendation'] as String,
+      riskLevel: map['risk_level'] as String,
+      buySignalCount: map['buy_signal_count'] as int,
+      sellSignalCount: map['sell_signal_count'] as int,
+      activeStrategyCount: map['active_strategy_count'] as int,
+      confluenceScore: map['confluence_score'] as int,
+      tradeLevelsJson: map['trade_levels_json'] as String?,
+      topSignals: map['top_signals'] as String? ?? '',
+      archivedAt: DateTime.fromMillisecondsSinceEpoch(map['archived_at'] as int),
+    );
+  }
+}
