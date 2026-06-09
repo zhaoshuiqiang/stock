@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+锘縤mport 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -21,7 +21,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
   @override
   void initState() {
     super.initState();
-    _pageTitle = widget.title ?? '资讯详情';
+    _pageTitle = widget.title ?? '璧勮璇︽儏';
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
@@ -78,7 +78,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.open_in_browser),
-            tooltip: '在浏览器中打开',
+            tooltip: '鍦ㄦ祻瑙堝櫒涓墦寮�',
             onPressed: _openInBrowser,
           ),
         ],
@@ -92,7 +92,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 children: [
                   Icon(Icons.error_outline, size: 48, color: Colors.grey[600]),
                   const SizedBox(height: 16),
-                  Text('页面加载失败', style: TextStyle(color: Colors.grey[500])),
+                  Text('椤甸潰鍔犺浇澶辫触', style: TextStyle(color: Colors.grey[500])),
                   const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -106,13 +106,13 @@ class _WebViewScreenState extends State<WebViewScreen> {
                           _controller.reload();
                         },
                         icon: const Icon(Icons.refresh),
-                        label: const Text('重试'),
+                        label: const Text('閲嶈瘯'),
                       ),
                       const SizedBox(width: 12),
                       OutlinedButton.icon(
                         onPressed: _openInBrowser,
                         icon: const Icon(Icons.open_in_browser),
-                        label: const Text('在浏览器中打开'),
+                        label: const Text('鍦ㄦ祻瑙堝櫒涓墦寮�'),
                       ),
                     ],
                   ),
@@ -130,3 +130,4 @@ class _WebViewScreenState extends State<WebViewScreen> {
     );
   }
 }
+

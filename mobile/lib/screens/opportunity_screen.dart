@@ -54,6 +54,8 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
   final DatabaseService _dbService = DatabaseService();
   List<_StockOpportunity> _opportunities = [];
   bool _isLoading = true;
+  int _completedCount = 0;
+  int _totalCount = 0;
   Timer? _refreshTimer;
 
   @override
@@ -74,6 +76,7 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
   Future<void> _loadOpportunities() async {
     setState(() {
       _isLoading = true;
+      _completedCount = 0;
     });
 
     try {
@@ -82,19 +85,52 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
         setState(() {
           _isLoading = false;
           _opportunities = [];
+          _totalCount = 0;
         });
         return;
       }
 
-      final results = <_StockOpportunity>[];
+      setState(() {
+        _totalCount = watchlist.length;
+      });
 
-      for (final item in watchlist) {
+      // Batch fetch all quotes first (single HTTP request)
+      final prefixedCodes = watchlist.map((item) => _apiClient.addMarketPrefix(item.code)).toList();
+      List<QuoteData> batchQuotes;
+      try {
+        batchQuotes = await _apiClient.getBatchRealtimeQuotes(prefixedCodes);
+      } catch (e) {
+        print('Batch quotes failed, falling back to individual: $e');
+        batchQuotes = [];
+      }
+
+      // Build a map of code -> QuoteData for quick lookup
+      final quoteMap = <String, QuoteData>{};
+      for (final q in batchQuotes) {
+        quoteMap[q.code] = q;
+      }
+
+      // Parallel analysis of all stocks using pre-fetched quotes
+      final futures = watchlist.map((item) async {
         try {
           final prefixedCode = _apiClient.addMarketPrefix(item.code);
           final klines = await _apiClient.getStockHistory(prefixedCode, days: 120);
-          final quote = await _apiClient.getRealtimeQuote(prefixedCode);
+          QuoteData? quote = quoteMap[prefixedCode];
+          // Fallback to individual quote if batch didn't return this stock
+          if (quote == null) {
+            try {
+              quote = await _apiClient.getRealtimeQuote(prefixedCode);
+            } catch (e) {
+              print('Individual quote failed for $prefixedCode: $e');
+            }
+          }
 
-          if (klines.isEmpty) continue;
+          if (klines.isEmpty) {
+            if (mounted) {
+              setState(() { _completedCount++; });
+            }
+            return null;
+          }
 
           final calculated = calcAllIndicators(klines);
           final signals = detectSignals(calculated);
@@ -106,7 +142,11 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
           final topSignals = signals.take(2).map((s) =>
               '${s.type == 'buy' ? '▲' : '▼'}${s.signal}').toList();
 
-          results.add(_StockOpportunity(
+          if (mounted) {
+            setState(() { _completedCount++; });
+          }
+
+          return _StockOpportunity(
             code: item.code,
             name: item.name,
             price: quote?.price ?? last.close,
@@ -120,16 +160,22 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
             confluenceScore: analysis.confluenceScore,
             tradeLevels: analysis.tradeLevels,
             topSignals: topSignals,
-          ));
+          );
         } catch (e) {
           print('Failed to analyze ${item.code}: $e');
+          if (mounted) {
+            setState(() { _completedCount++; });
+          }
+          return null;
         }
-      }
+      }).toList();
 
-      results.sort((a, b) => b.score.compareTo(a.score));
+      final results = await Future.wait(futures);
+      final opportunities = results.whereType<_StockOpportunity>().toList();
+      opportunities.sort((a, b) => b.score.compareTo(a.score));
 
       setState(() {
-        _opportunities = results;
+        _opportunities = opportunities;
         _isLoading = false;
       });
     } catch (e) {
@@ -171,7 +217,19 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
     final textTheme = theme.textTheme;
 
     if (_isLoading && _opportunities.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 12),
+            Text(
+              _totalCount > 0 ? '分析中 $_completedCount/$_totalCount' : '加载中...',
+              style: const TextStyle(color: Colors.white54, fontSize: 14),
+            ),
+          ],
+        ),
+      );
     }
 
     if (_opportunities.isEmpty) {
@@ -179,7 +237,10 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text('暂无自选股，请先添加自选', style: TextStyle(color: Colors.white54)),
+            Text(
+              _totalCount > 0 ? '分析失败，请下拉刷新重试' : '暂无自选股，请先添加自选',
+              style: const TextStyle(color: Colors.white54),
+            ),
             const SizedBox(height: 16),
             IconButton(
               onPressed: _loadOpportunities,
@@ -207,9 +268,9 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
                 style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
               if (_isLoading)
-                const SizedBox(
-                  width: 16, height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                Text(
+                  '$_completedCount/$_totalCount',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
                 )
               else
                 GestureDetector(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import 'quote_screen.dart';
+import 'sector_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -13,6 +14,7 @@ class HomeScreen extends StatefulWidget {
 class HomeScreenState extends State<HomeScreen> {
   final ApiClient _apiClient = ApiClient();
   List<QuoteData> _quotes = [];
+  List<SectorInfo> _sectors = [];
   bool _isLoading = true;
 
   @override
@@ -27,22 +29,15 @@ class HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      final codes = [
-        'sh000001',
-        'sz399001',
-        'sz399006',
-        'sh600519',
-        'sz000858',
-        'sh601318',
-        'sz000001',
-        'sh600036',
-      ];
-
+      final codes = ['sh000001', 'sz399001', 'sz399006'];
       final futures = codes.map((code) => _apiClient.getRealtimeQuote(code));
       final results = await Future.wait(futures);
 
+      final sectors = await _apiClient.getHotSectors();
+
       setState(() {
         _quotes = results.where((q) => q != null).cast<QuoteData>().toList();
+        _sectors = sectors;
       });
     } catch (e) {
       print('Load data failed: $e');
@@ -97,13 +92,14 @@ class HomeScreenState extends State<HomeScreen> {
                     child: Column(
                       children: [
                         Text(
-                          '热门股票',
+                          '热门板块',
                           style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 16),
-                        ..._quotes
-                            .where((q) => !['sh000001', 'sz399001', 'sz399006'].contains(q.code))
-                            .map((quote) => _buildStockItem(quote)),
+                        if (_sectors.isEmpty)
+                          const Text('暂无板块数据', style: TextStyle(color: Colors.white38))
+                        else
+                          ..._sectors.map((sector) => _buildSectorItem(sector)),
                       ],
                     ),
                   ),
@@ -143,8 +139,8 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildStockItem(QuoteData quote) {
-    final isUp = quote.change >= 0;
+  Widget _buildSectorItem(SectorInfo sector) {
+    final isUp = sector.changePct >= 0;
     final color = isUp ? Colors.red : Colors.green;
     final textTheme = Theme.of(context).textTheme;
 
@@ -153,7 +149,10 @@ class HomeScreenState extends State<HomeScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => QuoteScreen(code: quote.code, name: quote.name),
+            builder: (context) => SectorScreen(
+              sectorName: sector.name,
+              sectorCode: sector.code,
+            ),
           ),
         );
       },
@@ -165,20 +164,14 @@ class HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(quote.name, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                  Text(quote.code, style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text(sector.name, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                  Text('领涨: ${sector.leadStockName}', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
                 ],
               ),
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(quote.price.toStringAsFixed(2), style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                Text(
-                  '${isUp ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
-                  style: textTheme.bodyMedium?.copyWith(color: color),
-                ),
-              ],
+            Text(
+              '${isUp ? '+' : ''}${sector.changePct.toStringAsFixed(2)}%',
+              style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: color),
             ),
           ],
         ),

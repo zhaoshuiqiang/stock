@@ -129,7 +129,7 @@ class SearchScreenState extends State<SearchScreen> {
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(stock.name, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
-                                          Text(stock.code, style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                                          Text(stock.code.substring(2), style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
                                         ],
                                       ),
                                     ),

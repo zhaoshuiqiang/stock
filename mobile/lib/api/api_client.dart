@@ -45,9 +45,13 @@ class ApiClient {
           for (final group in groups) {
             final parts = group.split(',');
             if (parts.length >= 4) {
-              final name = parts[0];
+              // Sina API format: suggest_name,category,code,market,full_name,...
+              // parts[0] = matched text (could be code or name)
+              // parts[4] = full stock name (always the real name)
+              final name = parts.length >= 5 ? parts[4] : parts[0];
               final rawCode = parts[2];
-              final code = addMarketPrefix(rawCode);
+              final market = parts[3];
+              final code = market.isNotEmpty ? '$market$rawCode' : addMarketPrefix(rawCode);
               results.add(StockInfo(
                 code: code,
                 name: name,
@@ -59,9 +63,10 @@ class ApiClient {
           final parts = dataStr.split(',');
           for (var i = 0; i < parts.length; i += 4) {
             if (i + 3 < parts.length) {
-              final name = parts[i];
+              final name = i + 4 < parts.length ? parts[i + 4] : parts[i];
               final rawCode = parts[i + 2];
-              final code = addMarketPrefix(rawCode);
+              final market = parts[i + 3];
+              final code = market.isNotEmpty ? '$market$rawCode' : addMarketPrefix(rawCode);
               results.add(StockInfo(
                 code: code,
                 name: name,
@@ -71,8 +76,26 @@ class ApiClient {
           }
         }
 
-        _setCached(cacheKey, results, duration: const Duration(minutes: 5));
-        return results;
+        // Deduplicate by code and filter A-share only
+        final seen = <String>{};
+        final filtered = <StockInfo>[];
+        for (final stock in results) {
+          // Only keep A-share stocks (sh/sz prefix)
+          if (!stock.code.startsWith('sh') && !stock.code.startsWith('sz')) continue;
+          // Deduplicate by code
+          if (seen.contains(stock.code)) continue;
+          seen.add(stock.code);
+          // Ensure name is not empty
+          final name = stock.name.isEmpty ? stock.code : stock.name;
+          filtered.add(StockInfo(
+            code: stock.code,
+            name: name,
+            display: '$name(${stock.code.substring(2)})',
+          ));
+        }
+
+        _setCached(cacheKey, filtered, duration: const Duration(minutes: 5));
+        return filtered;
       }
     }
     return [];
@@ -665,6 +688,143 @@ class ApiClient {
     if (value is int) return value.toDouble();
     if (value is String) return double.tryParse(value) ?? 0;
     return 0;
+  }
+
+  /// 获取热门行业板块（东方财富行业板块涨幅排名前5）
+  Future<List<SectorInfo>> getHotSectors() async {
+    const cacheKey = 'hot_sectors';
+    final cached = _getCached(cacheKey);
+    if (cached != null) return cached as List<SectorInfo>;
+
+    final url = Uri.parse(
+      'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=5&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
+    );
+    final response = await _httpGet(url, headers: {
+      'User-Agent': 'Mozilla/5.0',
+      'Referer': 'https://quote.eastmoney.com/',
+    });
+    if (response != null) {
+      try {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final diff = data['data']?['diff'] as List?;
+        if (diff != null) {
+          final sectors = <SectorInfo>[];
+          for (final item in diff) {
+            final m = item as Map<String, dynamic>;
+            // f128=领涨股名称, f140=领涨股代码
+            final rawLeadCode = m['f140']?.toString() ?? '';
+            final leadStockCode = addMarketPrefix(rawLeadCode);
+            sectors.add(SectorInfo(
+              name: m['f14']?.toString() ?? '',
+              code: m['f12']?.toString() ?? '',
+              changePct: _parseDouble(m['f3']),
+              leadStockName: m['f128']?.toString() ?? '',
+              leadStockCode: leadStockCode,
+              stockCount: (m['f104'] as int? ?? 0) + (m['f105'] as int? ?? 0),
+            ));
+          }
+          _setCached(cacheKey, sectors, duration: const Duration(seconds: 30));
+          return sectors;
+        }
+      } catch (e) {
+        print('Parse hot sectors failed: $e');
+      }
+    }
+    return [];
+  }
+
+  /// 获取板块内个股（涨幅前10）
+  Future<List<QuoteData>> getSectorStocks(String sectorCode) async {
+    final cacheKey = 'sector_stocks_$sectorCode';
+    final cached = _getCached(cacheKey);
+    if (cached != null) return cached as List<QuoteData>;
+
+    final url = Uri.parse(
+      'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&fltt=2&invl=2&fid=f3&fs=b:$sectorCode+f:!50&fields=f12,f14,f2,f3,f4,f15,f16,f17,f5,f6',
+    );
+    final response = await _httpGet(url, headers: {
+      'User-Agent': 'Mozilla/5.0',
+      'Referer': 'https://quote.eastmoney.com/',
+    });
+    if (response != null) {
+      try {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final diff = data['data']?['diff'] as List?;
+        if (diff != null) {
+          final stocks = <QuoteData>[];
+          for (final item in diff) {
+            final m = item as Map<String, dynamic>;
+            final rawCode = m['f12']?.toString() ?? '';
+            final code = addMarketPrefix(rawCode);
+            stocks.add(QuoteData(
+              code: code,
+              name: m['f14']?.toString() ?? '',
+              price: _parseDouble(m['f2']),
+              change: _parseDouble(m['f4']),
+              changePct: _parseDouble(m['f3']),
+              open: _parseDouble(m['f17']),
+              high: _parseDouble(m['f15']),
+              low: _parseDouble(m['f16']),
+            ));
+          }
+          _setCached(cacheKey, stocks, duration: const Duration(seconds: 60));
+          return stocks;
+        }
+      } catch (e) {
+        print('Parse sector stocks failed: $e');
+      }
+    }
+    return [];
+  }
+
+  /// 批量获取实时行情（腾讯批量接口）
+  Future<List<QuoteData>> getBatchRealtimeQuotes(List<String> codes) async {
+    if (codes.isEmpty) return [];
+
+    // 腾讯批量接口：多个代码用逗号分隔
+    final codesStr = codes.join(',');
+    final url = Uri.parse('https://qt.gtimg.cn/q=$codesStr');
+    final response = await _httpGet(url);
+    if (response != null) {
+      final body = await _decodeGbk(response.bodyBytes);
+      final results = <QuoteData>[];
+
+      // 每只股票数据以分号分隔
+      final entries = body.split(';');
+      for (final entry in entries) {
+        final start = entry.indexOf('="');
+        final end = entry.lastIndexOf('"');
+        if (start >= 0 && end > start) {
+          final dataStr = entry.substring(start + 2, end);
+          final parts = dataStr.split('~');
+          if (parts.length >= 35) {
+            final code = parts[2];
+            final prefixedCode = addMarketPrefix(code);
+            final high = _parseDouble(parts[33]);
+            final low = _parseDouble(parts[34]);
+            final preClose = _parseDouble(parts[4]);
+            final amplitude = preClose > 0 ? (high - low) / preClose * 100 : 0.0;
+
+            results.add(QuoteData(
+              code: prefixedCode,
+              name: parts[1],
+              price: _parseDouble(parts[3]),
+              open: _parseDouble(parts[5]),
+              high: high,
+              low: low,
+              preClose: preClose,
+              volume: _parseDouble(parts[6]),
+              amount: _parseDouble(parts[37]) * 10000,
+              change: _parseDouble(parts[31]),
+              changePct: _parseDouble(parts[32]),
+              amplitude: amplitude,
+            ));
+          }
+        }
+      }
+      return results;
+    }
+    return [];
   }
 
   Future<String> _decodeGbk(Uint8List bytes) async {

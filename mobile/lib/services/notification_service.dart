@@ -134,7 +134,6 @@ class NotificationService {
         final newsId = latest['showTime'] ?? latest['title'] ?? '';
         if (newsId.isNotEmpty && newsId != _lastNewsId && _lastNewsId.isNotEmpty) {
           final title = latest['title'] ?? '财经快讯';
-          final digest = latest['digest'] ?? '';
           final url = latest['url'] ?? '';
           await _showNotification(
             id: 0,

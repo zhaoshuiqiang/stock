@@ -647,3 +647,21 @@ class ArchiveRecord {
     );
   }
 }
+
+class SectorInfo {
+  final String name;
+  final String code;
+  final double changePct;
+  final String leadStockName;
+  final String leadStockCode;
+  final int stockCount;
+
+  SectorInfo({
+    required this.name,
+    required this.code,
+    this.changePct = 0,
+    this.leadStockName = '',
+    this.leadStockCode = '',
+    this.stockCount = 0,
+  });
+}
