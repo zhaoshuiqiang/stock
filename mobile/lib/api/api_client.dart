@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:charset_converter/charset_converter.dart';
 import '../models/stock_models.dart';
+import '../validators/data_validator.dart';
 
 class ApiClient {
   final http.Client _client = http.Client();
@@ -28,7 +29,8 @@ class ApiClient {
     final cached = _getCached(cacheKey);
     if (cached != null) return cached as List<StockInfo>;
 
-    final url = Uri.parse('https://suggest3.sinajs.cn/suggest/type=111&key=$keyword');
+    final encoded = Uri.encodeComponent(keyword);
+    final url = Uri.parse('https://suggest3.sinajs.cn/suggest/type=111&key=$encoded');
     final response = await _httpGet(url, headers: {
       'Referer': 'https://finance.sina.com.cn',
     });
@@ -204,8 +206,40 @@ class ApiClient {
             totalMarketCap: totalMarketCap,
             circulatingMarketCap: circulatingMarketCap,
           );
-          _setCached(cacheKey, quote, duration: const Duration(seconds: 5));
-          return quote;
+          // Validate quote data
+          final validation = DataValidator.validateQuote(quote);
+          String confidence = 'high';
+          if (validation.anomalies.isNotEmpty) {
+            confidence = validation.anomalies.any((a) => a.type == DataAnomalyType.zeroPrice || a.type == DataAnomalyType.extremeChange) 
+                ? 'low' : 'medium';
+          }
+          final validatedQuote = QuoteData(
+            code: quote.code,
+            name: quote.name,
+            price: quote.price,
+            change: quote.change,
+            changePct: quote.changePct,
+            open: quote.open,
+            high: quote.high,
+            low: quote.low,
+            preClose: quote.preClose,
+            volume: quote.volume,
+            amount: quote.amount,
+            amplitude: quote.amplitude,
+            turnover: quote.turnover,
+            pe: quote.pe,
+            pb: quote.pb,
+            totalMarketCap: quote.totalMarketCap,
+            circulatingMarketCap: quote.circulatingMarketCap,
+            mainInflow: quote.mainInflow,
+            mainOutflow: quote.mainOutflow,
+            mainNetFlow: quote.mainNetFlow,
+            mainNetFlowRate: quote.mainNetFlowRate,
+            updateTime: quote.updateTime,
+            confidence: confidence,
+          );
+          _setCached(cacheKey, validatedQuote, duration: const Duration(seconds: 5));
+          return validatedQuote;
         }
       }
     }
@@ -235,7 +269,7 @@ class ApiClient {
             high: sinaHigh,
             low: sinaLow,
             preClose: sinaPreClose,
-            volume: _parseDouble(parts[8]),
+            volume: _parseDouble(parts[8]) / 100, // 新浪返回单位为股，转为手
             amount: _parseDouble(parts[9]),
             change: _parseDouble(parts[3]) - sinaPreClose,
             changePct: (_parseDouble(parts[3]) - sinaPreClose) /
@@ -243,8 +277,40 @@ class ApiClient {
                 100,
             amplitude: sinaAmplitude,
           );
-          _setCached(cacheKey, quote, duration: const Duration(seconds: 5));
-          return quote;
+          // Validate quote data
+          final validation = DataValidator.validateQuote(quote);
+          String confidence = 'high';
+          if (validation.anomalies.isNotEmpty) {
+            confidence = validation.anomalies.any((a) => a.type == DataAnomalyType.zeroPrice || a.type == DataAnomalyType.extremeChange) 
+                ? 'low' : 'medium';
+          }
+          final validatedQuote = QuoteData(
+            code: quote.code,
+            name: quote.name,
+            price: quote.price,
+            change: quote.change,
+            changePct: quote.changePct,
+            open: quote.open,
+            high: quote.high,
+            low: quote.low,
+            preClose: quote.preClose,
+            volume: quote.volume,
+            amount: quote.amount,
+            amplitude: quote.amplitude,
+            turnover: quote.turnover,
+            pe: quote.pe,
+            pb: quote.pb,
+            totalMarketCap: quote.totalMarketCap,
+            circulatingMarketCap: quote.circulatingMarketCap,
+            mainInflow: quote.mainInflow,
+            mainOutflow: quote.mainOutflow,
+            mainNetFlow: quote.mainNetFlow,
+            mainNetFlowRate: quote.mainNetFlowRate,
+            updateTime: quote.updateTime,
+            confidence: confidence,
+          );
+          _setCached(cacheKey, validatedQuote, duration: const Duration(seconds: 5));
+          return validatedQuote;
         }
       }
     }
@@ -312,7 +378,7 @@ class ApiClient {
     }
 
     final url = Uri.parse(
-      'https://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f170,f171',
+      'https://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fltt=2&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f170,f171',
     );
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
@@ -331,8 +397,8 @@ class ApiClient {
       final volume = _parseDouble(d['f47']); // 成交量(手)
       final amount = _parseDouble(d['f48']); // 成交额
       final preClose = _parseDouble(d['f60']);
-      final changePct = _parseDouble(d['f170']) / 100; // 涨跌幅需除以100
-      final change = _parseDouble(d['f171']) / 100; // 涨跌额需除以100
+      final changePct = _parseDouble(d['f170']); // fltt=2时已是正确单位
+      final change = _parseDouble(d['f171']); // fltt=2时已是正确单位
       final pe = _parseDouble(d['f162']); // 市盈率(动)
       final pb = _parseDouble(d['f167']); // 市净率
       final totalMarketCap = _parseDouble(d['f116']); // 总市值
@@ -494,6 +560,12 @@ class ApiClient {
           changePct: changePct,
         ));
       }
+      // Validate kline data
+      final klineValidation = DataValidator.validateKlines(results);
+      if (klineValidation.anomalies.isNotEmpty) {
+        // Filter out invalid klines (zero price, negative values)
+        results.removeWhere((k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
+      }
       _setCached(cacheKey, results, duration: const Duration(seconds: 60));
       return results;
     }
@@ -544,7 +616,7 @@ class ApiClient {
           final open = _parseDouble(parts[1]);
           final high = _parseDouble(parts[3]);
           final low = _parseDouble(parts[4]);
-          final volume = _parseDouble(parts[5]) / 100; // 手
+          final volume = _parseDouble(parts[5]); // 手（API直接返回手为单位）
           final amount = _parseDouble(parts[6]);
 
           double preClose = open;
@@ -581,40 +653,49 @@ class ApiClient {
     final cached = _getCached(cacheKey);
     if (cached != null) return cached as MarketSentiment;
 
-    final url = Uri.parse('https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=1&num=1&sort=changepercent&asc=0&node=hs_a&symbol=&_s_r_a=auto');
+    final url = Uri.parse(
+      'https://push2.eastmoney.com/api/qt/ulist.np/get?fields=f1,f2,f3,f4,f6,f12,f13,f104,f105,f106&secids=1.000001,0.399001,0.399006',
+    );
     final response = await _httpGet(url, headers: {
-      'Referer': 'https://finance.sina.com.cn',
+      'User-Agent': 'Mozilla/5.0',
+      'Referer': 'https://quote.eastmoney.com/',
     });
     if (response != null) {
       final body = response.body;
-      final data = json.decode(body);
+      final data = json.decode(body) as Map<String, dynamic>;
+      final diff = data['data']?['diff'] as List?;
+      if (diff != null && diff.isNotEmpty) {
+        int upCount = 0;
+        int downCount = 0;
+        int flatCount = 0;
+        double totalAmount = 0;
+        double avgChangePct = 0;
+        int count = 0;
 
-      if (data is List && data.isNotEmpty) {
-        final item = data.first as Map<String, dynamic>;
+        for (final item in diff) {
+          final m = item as Map<String, dynamic>;
+          upCount += (m['f104'] as num?)?.toInt() ?? 0;
+          downCount += (m['f105'] as num?)?.toInt() ?? 0;
+          flatCount += (m['f106'] as num?)?.toInt() ?? 0;
+          totalAmount += _parseDouble(m['f6']);
+          avgChangePct += _parseDouble(m['f3']);
+          count++;
+        }
+
+        if (count > 0) {
+          avgChangePct = avgChangePct / count;
+        }
+
         final result = MarketSentiment(
-          upCount: item['up_count'] ?? 0,
-          downCount: item['down_count'] ?? 0,
-          flatCount: item['flat_count'] ?? 0,
-          limitUpCount: item['limit_up_count'] ?? 0,
-          limitDownCount: item['limit_down_count'] ?? 0,
-          avgChangePct: _parseDouble(item['changepercent']),
-          totalVolume: _parseDouble(item['volume']),
-          totalAmount: _parseDouble(item['amount']),
-          totalAmountYi: _parseDouble(item['amount']),
-        );
-        _setCached(cacheKey, result, duration: const Duration(seconds: 30));
-        return result;
-      } else if (data is Map<String, dynamic>) {
-        final result = MarketSentiment(
-          upCount: data['up_count'] ?? 0,
-          downCount: data['down_count'] ?? 0,
-          flatCount: data['flat_count'] ?? 0,
-          limitUpCount: data['limit_up_count'] ?? 0,
-          limitDownCount: data['limit_down_count'] ?? 0,
-          avgChangePct: _parseDouble(data['avg_change_pct']),
-          totalVolume: _parseDouble(data['total_volume']),
-          totalAmount: _parseDouble(data['total_amount']),
-          totalAmountYi: _parseDouble(data['total_amount_yi']),
+          upCount: upCount,
+          downCount: downCount,
+          flatCount: flatCount,
+          limitUpCount: 0,
+          limitDownCount: 0,
+          avgChangePct: avgChangePct,
+          totalVolume: 0,
+          totalAmount: totalAmount,
+          totalAmountYi: totalAmount / 1e8,
         );
         _setCached(cacheKey, result, duration: const Duration(seconds: 30));
         return result;
@@ -778,82 +859,201 @@ class ApiClient {
     final cached = _getCached(cacheKey);
     if (cached != null) return cached as List<SectorInfo>;
 
-    final url = Uri.parse(
-      'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=15&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
-    );
-    final response = await _httpGet(url, headers: {
-      'User-Agent': 'Mozilla/5.0',
-      'Referer': 'https://quote.eastmoney.com/',
-    });
-    if (response != null) {
+    // 主接口：东方财富板块列表
+    List<SectorInfo>? sectors;
+    for (var attempt = 0; attempt < 2; attempt++) {
       try {
-        final data = json.decode(response.body) as Map<String, dynamic>;
-        final diff = data['data']?['diff'] as List?;
-        if (diff != null) {
-          final sectors = <SectorInfo>[];
-          for (final item in diff) {
-            final m = item as Map<String, dynamic>;
-            // f128=领涨股名称, f140=领涨股代码
-            final rawLeadCode = m['f140']?.toString() ?? '';
-            final leadStockCode = addMarketPrefix(rawLeadCode);
-            sectors.add(SectorInfo(
-              name: m['f14']?.toString() ?? '',
-              code: m['f12']?.toString() ?? '',
-              changePct: _parseDouble(m['f3']),
-              leadStockName: m['f128']?.toString() ?? '',
-              leadStockCode: leadStockCode,
-              stockCount: (m['f104'] as int? ?? 0) + (m['f105'] as int? ?? 0),
-            ));
+        final url = Uri.parse(
+          'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
+        );
+        final response = await _httpGet(url, headers: {
+          'User-Agent': 'Mozilla/5.0',
+          'Referer': 'https://quote.eastmoney.com/',
+        });
+        if (response != null) {
+          final data = json.decode(response.body) as Map<String, dynamic>;
+          final diff = data['data']?['diff'] as List?;
+          if (diff != null && diff.isNotEmpty) {
+            sectors = [];
+            for (final item in diff) {
+              final m = item as Map<String, dynamic>;
+              final rawLeadCode = m['f140']?.toString() ?? '';
+              final leadStockCode = addMarketPrefix(rawLeadCode);
+              sectors.add(SectorInfo(
+                name: m['f14']?.toString() ?? '',
+                code: m['f12']?.toString() ?? '',
+                changePct: _parseDouble(m['f3']),
+                leadStockName: m['f128']?.toString() ?? '',
+                leadStockCode: leadStockCode,
+                stockCount: (m['f104'] as int? ?? 0) + (m['f105'] as int? ?? 0),
+              ));
+            }
+            _setCached(cacheKey, sectors, duration: const Duration(seconds: 30));
+            break;
           }
-          _setCached(cacheKey, sectors, duration: const Duration(seconds: 30));
-          return sectors;
         }
       } catch (e) {
-        print('Parse hot sectors failed: $e');
+        print('Parse hot sectors failed (attempt ${attempt + 1}): $e');
+      }
+    }
+
+    // 备用接口：新浪行业板块
+    if (sectors == null || sectors.isEmpty) {
+      print('[Sectors] EastMoney failed, trying Sina fallback...');
+      try {
+        sectors = await _fetchHotSectorsFromSina();
+        if (sectors.isNotEmpty) {
+          _setCached(cacheKey, sectors, duration: const Duration(seconds: 30));
+        }
+      } catch (e) {
+        print('[Sectors] Sina fallback also failed: $e');
+      }
+    }
+
+    return sectors ?? [];
+  }
+
+  Future<List<SectorInfo>> _fetchHotSectorsFromSina() async {
+    final url = Uri.parse(
+      'https://vip.stock.finance.sina.com.cn/q/view/newSinaHy.php',
+    );
+    final response = await _httpGet(url, headers: {
+      'Referer': 'https://finance.sina.com.cn',
+    }, timeout: const Duration(seconds: 10));
+    if (response != null) {
+      final body = await _decodeGbk(response.bodyBytes);
+      // 新浪行业板块返回格式: var S_Finance_bankuai_sin498 = "板块名,代码,涨跌幅,...;..."
+      final regex = RegExp(r'"([^"]+)"');
+      final match = regex.firstMatch(body);
+      if (match != null) {
+        final dataStr = match.group(1)!;
+        final entries = dataStr.split(';');
+        final sectors = <SectorInfo>[];
+        for (final entry in entries) {
+          if (entry.trim().isEmpty) continue;
+          final parts = entry.split(',');
+          if (parts.length >= 3) {
+            final name = parts[0].trim();
+            final code = parts.length >= 4 ? parts[3].trim() : '';
+            final changePct = double.tryParse(parts[2].trim()) ?? 0.0;
+            if (name.isNotEmpty) {
+              sectors.add(SectorInfo(
+                name: name,
+                code: code,
+                changePct: changePct,
+              ));
+            }
+          }
+        }
+        // 按涨跌幅降序排列
+        sectors.sort((a, b) => b.changePct.compareTo(a.changePct));
+        return sectors;
       }
     }
     return [];
   }
 
-  /// 获取板块内个股（涨幅前10）
+  /// 获取板块内个股（涨幅前20）
   Future<List<QuoteData>> getSectorStocks(String sectorCode) async {
     final cacheKey = 'sector_stocks_$sectorCode';
     final cached = _getCached(cacheKey);
     if (cached != null) return cached as List<QuoteData>;
 
-    final url = Uri.parse(
-      'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=15&po=1&np=1&fltt=2&invl=2&fid=f3&fs=b:$sectorCode+f:!50&fields=f12,f14,f2,f3,f4,f15,f16,f17,f5,f6',
-    );
-    final response = await _httpGet(url, headers: {
-      'User-Agent': 'Mozilla/5.0',
-      'Referer': 'https://quote.eastmoney.com/',
-    });
-    if (response != null) {
+    // 主接口：东方财富板块个股
+    for (var attempt = 0; attempt < 2; attempt++) {
       try {
-        final data = json.decode(response.body) as Map<String, dynamic>;
-        final diff = data['data']?['diff'] as List?;
-        if (diff != null) {
-          final stocks = <QuoteData>[];
-          for (final item in diff) {
-            final m = item as Map<String, dynamic>;
-            final rawCode = m['f12']?.toString() ?? '';
-            final code = addMarketPrefix(rawCode);
-            stocks.add(QuoteData(
-              code: code,
-              name: m['f14']?.toString() ?? '',
-              price: _parseDouble(m['f2']),
-              change: _parseDouble(m['f4']),
-              changePct: _parseDouble(m['f3']),
-              open: _parseDouble(m['f17']),
-              high: _parseDouble(m['f15']),
-              low: _parseDouble(m['f16']),
-            ));
+        final url = Uri.parse(
+          'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=b:$sectorCode+f:!50&fields=f12,f14,f2,f3,f4,f15,f16,f17,f5,f6,f60',
+        );
+        final response = await _httpGet(url, headers: {
+          'User-Agent': 'Mozilla/5.0',
+          'Referer': 'https://quote.eastmoney.com/',
+        });
+        if (response != null) {
+          final data = json.decode(response.body) as Map<String, dynamic>;
+          final diff = data['data']?['diff'] as List?;
+          if (diff != null && diff.isNotEmpty) {
+            final stocks = <QuoteData>[];
+            for (final item in diff) {
+              final m = item as Map<String, dynamic>;
+              final rawCode = m['f12']?.toString() ?? '';
+              final code = addMarketPrefix(rawCode);
+              final preClose = _parseDouble(m['f60']);
+              final high = _parseDouble(m['f15']);
+              final low = _parseDouble(m['f16']);
+              stocks.add(QuoteData(
+                code: code,
+                name: m['f14']?.toString() ?? '',
+                price: _parseDouble(m['f2']),
+                change: _parseDouble(m['f4']),
+                changePct: _parseDouble(m['f3']),
+                open: _parseDouble(m['f17']),
+                high: high,
+                low: low,
+                preClose: preClose,
+                volume: _parseDouble(m['f5']),
+                amount: _parseDouble(m['f6']),
+                amplitude: preClose > 0 ? (high - low) / preClose * 100 : 0.0,
+              ));
+            }
+            _setCached(cacheKey, stocks, duration: const Duration(seconds: 60));
+            return stocks;
           }
-          _setCached(cacheKey, stocks, duration: const Duration(seconds: 60));
-          return stocks;
         }
       } catch (e) {
-        print('Parse sector stocks failed: $e');
+        print('Parse sector stocks failed (attempt ${attempt + 1}): $e');
+      }
+    }
+
+    // 备用接口：新浪板块个股
+    print('[SectorStocks] EastMoney failed for $sectorCode, trying Sina fallback...');
+    try {
+      final stocks = await _fetchSectorStocksFromSina(sectorCode);
+      if (stocks.isNotEmpty) {
+        _setCached(cacheKey, stocks, duration: const Duration(seconds: 60));
+        return stocks;
+      }
+    } catch (e) {
+      print('[SectorStocks] Sina fallback also failed for $sectorCode: $e');
+    }
+    return [];
+  }
+
+  Future<List<QuoteData>> _fetchSectorStocksFromSina(String sectorCode) async {
+    // 新浪板块个股接口：使用板块代码查询
+    final encodedSectorCode = Uri.encodeComponent(sectorCode);
+    final url = Uri.parse(
+      'https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=1&num=30&sort=changepercent&asc=0&node=$encodedSectorCode&symbol=&_s_r_a=auto',
+    );
+    final response = await _httpGet(url, headers: {
+      'Referer': 'https://finance.sina.com.cn',
+    }, timeout: const Duration(seconds: 10));
+    if (response != null) {
+      final body = response.body;
+      final data = json.decode(body);
+      if (data is List && data.isNotEmpty) {
+        final stocks = <QuoteData>[];
+        for (final item in data) {
+          final m = item as Map<String, dynamic>;
+          final rawCode = m['code']?.toString() ?? '';
+          final code = addMarketPrefix(rawCode);
+          final price = _parseDouble(m['trade']);
+          final preClose = _parseDouble(m['settlement']);
+          final change = price - preClose;
+          final changePct = preClose > 0 ? (change / preClose) * 100 : 0.0;
+          stocks.add(QuoteData(
+            code: code,
+            name: m['name']?.toString() ?? '',
+            price: price,
+            change: change,
+            changePct: changePct,
+            open: _parseDouble(m['open']),
+            high: _parseDouble(m['high']),
+            low: _parseDouble(m['low']),
+            preClose: preClose,
+          ));
+        }
+        return stocks;
       }
     }
     return [];
@@ -879,7 +1079,7 @@ class ApiClient {
         if (start >= 0 && end > start) {
           final dataStr = entry.substring(start + 2, end);
           final parts = dataStr.split('~');
-          if (parts.length >= 35) {
+          if (parts.length >= 38) {
             final code = parts[2];
             final prefixedCode = addMarketPrefix(code);
             final high = _parseDouble(parts[33]);
@@ -896,10 +1096,15 @@ class ApiClient {
               low: low,
               preClose: preClose,
               volume: _parseDouble(parts[6]),
-              amount: _parseDouble(parts[37]) * 10000,
+              amount: parts.length > 37 ? _parseDouble(parts[37]) * 10000 : 0,
               change: _parseDouble(parts[31]),
               changePct: _parseDouble(parts[32]),
               amplitude: amplitude,
+              turnover: parts.length > 38 ? _parseDouble(parts[38]) : 0,
+              pe: parts.length > 39 ? _parseDouble(parts[39]) : 0,
+              pb: parts.length > 46 ? _parseDouble(parts[46]) : 0,
+              totalMarketCap: parts.length > 45 ? _parseDouble(parts[45]) * 10000 : 0,
+              circulatingMarketCap: parts.length > 44 ? _parseDouble(parts[44]) * 10000 : 0,
             ));
           }
         }
@@ -936,7 +1141,7 @@ class ApiClient {
     }
 
     final url = Uri.parse(
-      'http://push2his.eastmoney.com/api/qt/stock/trends2/get'
+      'https://push2his.eastmoney.com/api/qt/stock/trends2/get'
       '?secid=$secid'
       '&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13'
       '&fields2=f51,f52,f53,f54,f55,f56,f57,f58'
@@ -960,17 +1165,19 @@ class ApiClient {
 
       final preClose = _parseDouble(trendsData['preClose']);
       final priceMap = <int, double>{};
-      final avgMap = <int, double>{};
+      final volumeMap = <int, double>{};
+      final amountMap = <int, double>{};
 
       for (final item in trends) {
         // 格式: "2024-01-01 09:30,10.50,12345,150000.00,10.48"
-        // 字段: 时间,价格,成交量,成交额,均价
+        // 字段: 时间,价格,成交量(手),成交额(元),均价
         final parts = (item as String).split(',');
         if (parts.length < 5) continue;
 
         final timeStr = parts[0];
         final price = _parseDouble(parts[1]);
-        final avgPrice = _parseDouble(parts[4]);
+        final volume = _parseDouble(parts[2]); // 每分钟成交量(手)
+        final amount = _parseDouble(parts[3]); // 每分钟成交额(元)
 
         // 解析时间获取分钟偏移量
         final timePart = timeStr.split(' ').last;
@@ -983,27 +1190,27 @@ class ApiClient {
         // 上午盘 9:30~11:30 -> offset 0~120
         const morningStart = 9 * 60 + 30;
         const morningEnd = 11 * 60 + 30;
-        // 下午盘 13:00~15:00 -> offset 121~240
+        // 下午盘 13:00~15:00 -> offset 120~240
         const afternoonStart = 13 * 60;
 
         int offset;
         if (totalMinutes >= morningStart && totalMinutes <= morningEnd) {
           offset = totalMinutes - morningStart;
         } else if (totalMinutes >= afternoonStart) {
-          offset = 121 + (totalMinutes - afternoonStart);
+          offset = 120 + (totalMinutes - afternoonStart);
         } else {
           continue;
         }
 
         priceMap[offset] = price;
-        if (avgPrice > 0) {
-          avgMap[offset] = avgPrice;
-        }
+        volumeMap[offset] = volume;
+        amountMap[offset] = amount;
       }
 
       final result = {
         'prices': priceMap,
-        'avgs': avgMap,
+        'volumes': volumeMap,
+        'amounts': amountMap,
         'preClose': {0: preClose},
       };
       // 交易时段(9:30-15:00工作日)缩短缓存至5秒，其他时段10秒
@@ -1017,4 +1224,9 @@ class ApiClient {
     return null;
   }
 
+  void dispose() {
+    _client.close();
+    _cache.clear();
+    _inFlightRequests.clear();
+  }
 }

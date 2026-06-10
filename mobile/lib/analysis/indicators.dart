@@ -246,18 +246,25 @@ List<HistoryKline> calcBOLL(List<HistoryKline> data, {int n = 20, int k = 2}) {
 
   final result = List<HistoryKline>.from(data);
 
-  for (int i = n - 1; i < data.length; i++) {
-    double sum = 0;
-    for (int j = i - n + 1; j <= i; j++) {
-      sum += data[j].close;
-    }
-    final mid = sum / n;
+  // O(n) sliding window: compute sum and sum-of-squares
+  double sum = 0;
+  double sumSq = 0;
+  for (int i = 0; i < n; i++) {
+    sum += data[i].close;
+    sumSq += data[i].close * data[i].close;
+  }
 
-    double variance = 0;
-    for (int j = i - n + 1; j <= i; j++) {
-      variance += (data[j].close - mid) * (data[j].close - mid);
+  for (int i = n - 1; i < data.length; i++) {
+    if (i >= n) {
+      sum = sum - data[i - n].close + data[i].close;
+      sumSq = sumSq - data[i - n].close * data[i - n].close + data[i].close * data[i].close;
     }
-    final std = variance > 0 ? sqrt(variance / n) : 0;
+
+    final mid = sum / n;
+    // Sample standard deviation: sqrt(variance / (n-1))
+    // variance = sumSq/n - mid^2, then variance * n / (n-1)
+    final variance = (sumSq - sum * sum / n) / (n - 1);
+    final std = variance > 0 ? sqrt(variance) : 0;
 
     final upper = mid + k * std;
     final lower = mid - k * std;
@@ -272,15 +279,236 @@ List<HistoryKline> calcBOLL(List<HistoryKline> data, {int n = 20, int k = 2}) {
   return result;
 }
 
+List<HistoryKline> calcEMA(List<HistoryKline> data, List<int> periods) {
+  if (data.isEmpty) return data;
+
+  final result = List<HistoryKline>.from(data);
+
+  for (final period in periods) {
+    final k = 2.0 / (period + 1);
+    double ema = data[0].close;
+
+    for (int i = 0; i < data.length; i++) {
+      if (i == 0) {
+        ema = data[0].close;
+      } else {
+        ema = k * data[i].close + (1 - k) * ema;
+      }
+
+      switch (period) {
+        case 5:
+          result[i] = result[i].copyWith(ema5: ema);
+          break;
+        case 10:
+          result[i] = result[i].copyWith(ema10: ema);
+          break;
+        case 20:
+          result[i] = result[i].copyWith(ema20: ema);
+          break;
+        case 60:
+          result[i] = result[i].copyWith(ema60: ema);
+          break;
+      }
+    }
+  }
+
+  return result;
+}
+
+List<HistoryKline> calcATR(List<HistoryKline> data, {int period = 14}) {
+  if (data.length < 2) return data;
+
+  final result = List<HistoryKline>.from(data);
+
+  final List<double> tr = List.filled(data.length, 0);
+  tr[0] = data[0].high - data[0].low;
+  for (int i = 1; i < data.length; i++) {
+    final hl = data[i].high - data[i].low;
+    final hc = (data[i].high - data[i - 1].close).abs();
+    final lc = (data[i].low - data[i - 1].close).abs();
+    tr[i] = [hl, hc, lc].reduce((a, b) => a > b ? a : b);
+  }
+
+  if (data.length < period) return result;
+
+  final k = 2.0 / (period + 1);
+  double atr = 0;
+  for (int i = 0; i < period; i++) {
+    atr += tr[i];
+  }
+  atr /= period;
+
+  for (int i = 0; i < data.length; i++) {
+    if (i < period - 1) {
+      result[i] = result[i].copyWith(atr14: 0);
+    } else if (i == period - 1) {
+      result[i] = result[i].copyWith(atr14: atr);
+    } else {
+      atr = k * tr[i] + (1 - k) * atr;
+      result[i] = result[i].copyWith(atr14: atr);
+    }
+  }
+
+  return result;
+}
+
+List<HistoryKline> calcOBV(List<HistoryKline> data) {
+  if (data.isEmpty) return data;
+
+  final result = List<HistoryKline>.from(data);
+
+  double obv = 0;
+  for (int i = 0; i < data.length; i++) {
+    if (i == 0) {
+      obv = data[i].volume;
+    } else if (data[i].close > data[i - 1].close) {
+      obv += data[i].volume;
+    } else if (data[i].close < data[i - 1].close) {
+      obv -= data[i].volume;
+    }
+    result[i] = result[i].copyWith(obv: obv);
+  }
+
+  return result;
+}
+
+List<HistoryKline> calcBIAS(List<HistoryKline> data, List<int> periods) {
+  if (data.isEmpty) return data;
+
+  final result = List<HistoryKline>.from(data);
+
+  for (final period in periods) {
+    for (int i = period - 1; i < data.length; i++) {
+      double sum = 0;
+      for (int j = i - period + 1; j <= i; j++) {
+        sum += data[j].close;
+      }
+      final ma = sum / period;
+      final bias = ma > 0 ? (data[i].close - ma) / ma * 100 : 0;
+
+      switch (period) {
+        case 6:
+          result[i] = result[i].copyWith(bias6: bias.toDouble());
+          break;
+        case 12:
+          result[i] = result[i].copyWith(bias12: bias.toDouble());
+          break;
+        case 24:
+          result[i] = result[i].copyWith(bias24: bias.toDouble());
+          break;
+      }
+    }
+  }
+
+  return result;
+}
+
+List<HistoryKline> calcDMI(List<HistoryKline> data, {int period = 14}) {
+  if (data.length < period + 1) return data;
+
+  final result = List<HistoryKline>.from(data);
+
+  final List<double> plusDm = List.filled(data.length, 0);
+  final List<double> minusDm = List.filled(data.length, 0);
+  final List<double> tr = List.filled(data.length, 0);
+
+  for (int i = 1; i < data.length; i++) {
+    final upMove = data[i].high - data[i - 1].high;
+    final downMove = data[i - 1].low - data[i].low;
+
+    plusDm[i] = (upMove > downMove && upMove > 0) ? upMove : 0;
+    minusDm[i] = (downMove > upMove && downMove > 0) ? downMove : 0;
+
+    final hl = data[i].high - data[i].low;
+    final hc = (data[i].high - data[i - 1].close).abs();
+    final lc = (data[i].low - data[i - 1].close).abs();
+    tr[i] = [hl, hc, lc].reduce((a, b) => a > b ? a : b);
+  }
+
+  // Smooth using Wilder's method
+  double smoothPlusDm = 0;
+  double smoothMinusDm = 0;
+  double smoothTr = 0;
+
+  for (int i = 1; i <= period && i < data.length; i++) {
+    smoothPlusDm += plusDm[i];
+    smoothMinusDm += minusDm[i];
+    smoothTr += tr[i];
+  }
+
+  final List<double> plusDi = List.filled(data.length, 0);
+  final List<double> minusDi = List.filled(data.length, 0);
+  final List<double> dxList = List.filled(data.length, 0);
+
+  if (data.length > period) {
+    plusDi[period] = smoothTr > 0 ? smoothPlusDm / smoothTr * 100 : 0;
+    minusDi[period] = smoothTr > 0 ? smoothMinusDm / smoothTr * 100 : 0;
+    final diSum = plusDi[period] + minusDi[period];
+    dxList[period] = diSum > 0 ? (plusDi[period] - minusDi[period]).abs() / diSum * 100 : 0;
+
+    for (int i = period + 1; i < data.length; i++) {
+      smoothPlusDm = smoothPlusDm - smoothPlusDm / period + plusDm[i];
+      smoothMinusDm = smoothMinusDm - smoothMinusDm / period + minusDm[i];
+      smoothTr = smoothTr - smoothTr / period + tr[i];
+
+      plusDi[i] = smoothTr > 0 ? smoothPlusDm / smoothTr * 100 : 0;
+      minusDi[i] = smoothTr > 0 ? smoothMinusDm / smoothTr * 100 : 0;
+      final diSum = plusDi[i] + minusDi[i];
+      dxList[i] = diSum > 0 ? (plusDi[i] - minusDi[i]).abs() / diSum * 100 : 0;
+    }
+  }
+
+  // ADX = EMA of DX
+  double adx = 0;
+  for (int i = period; i < 2 * period - 1 && i < data.length; i++) {
+    adx += dxList[i];
+  }
+  if (data.length >= 2 * period - 1) {
+    adx /= period;
+  }
+
+  for (int i = 0; i < data.length; i++) {
+    if (i < period) {
+      result[i] = result[i].copyWith(plusDi14: 0, minusDi14: 0, dx: 0, adx14: 0);
+    } else if (i < 2 * period - 1 || data.length < 2 * period - 1) {
+      result[i] = result[i].copyWith(
+        plusDi14: plusDi[i],
+        minusDi14: minusDi[i],
+        dx: dxList[i],
+        adx14: i == period ? dxList[period] : 0,
+      );
+    } else {
+      if (i == 2 * period - 1) {
+        // First ADX already computed above
+      } else {
+        adx = (adx * (period - 1) + dxList[i]) / period;
+      }
+      result[i] = result[i].copyWith(
+        plusDi14: plusDi[i],
+        minusDi14: minusDi[i],
+        dx: dxList[i],
+        adx14: adx,
+      );
+    }
+  }
+
+  return result;
+}
+
 List<HistoryKline> calcAllIndicators(List<HistoryKline> data) {
   if (data.isEmpty || data.length < 2) return data;
 
   var result = calcMA(data, [5, 10, 20, 60]);
+  result = calcEMA(result, [5, 10, 20, 60]);
   result = calcMACD(result);
   result = calcRSI(result, [6, 12, 24]);
   result = calcKDJ(result);
   result = calcBOLL(result);
   result = calcVolumeMA(result, [5, 10]);
+  result = calcATR(result);
+  result = calcOBV(result);
+  result = calcBIAS(result, [6, 12, 24]);
+  result = calcDMI(result);
 
   return result;
 }
@@ -392,6 +620,35 @@ Map<String, dynamic> getIndicatorSummary(List<HistoryKline> data) {
       summary['BOLL信号'] = '中轨上方（偏多）';
     } else {
       summary['BOLL信号'] = '中轨下方（偏空）';
+    }
+  }
+
+  if (last.ema5 > 0) {
+    summary['EMA5'] = double.parse(last.ema5.toStringAsFixed(2));
+    summary['EMA10'] = double.parse(last.ema10.toStringAsFixed(2));
+    summary['EMA20'] = double.parse(last.ema20.toStringAsFixed(2));
+  }
+
+  if (last.atr14 > 0) {
+    summary['ATR14'] = double.parse(last.atr14.toStringAsFixed(2));
+  }
+
+  if (last.bias6 != 0) {
+    summary['BIAS6'] = double.parse(last.bias6.toStringAsFixed(2));
+    summary['BIAS12'] = double.parse(last.bias12.toStringAsFixed(2));
+    summary['BIAS24'] = double.parse(last.bias24.toStringAsFixed(2));
+  }
+
+  if (last.adx14 > 0) {
+    summary['+DI14'] = double.parse(last.plusDi14.toStringAsFixed(2));
+    summary['-DI14'] = double.parse(last.minusDi14.toStringAsFixed(2));
+    summary['ADX14'] = double.parse(last.adx14.toStringAsFixed(2));
+    if (last.adx14 > 25) {
+      summary['ADX信号'] = '趋势明确(ADX=${last.adx14.toStringAsFixed(1)})';
+    } else if (last.adx14 < 20) {
+      summary['ADX信号'] = '盘整区间(ADX=${last.adx14.toStringAsFixed(1)})';
+    } else {
+      summary['ADX信号'] = '趋势形成中(ADX=${last.adx14.toStringAsFixed(1)})';
     }
   }
 

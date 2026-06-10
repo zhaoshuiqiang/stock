@@ -648,7 +648,7 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
   final buySignals = signals.where((s) => s.type == 'buy').toList();
   final sellSignals = signals.where((s) => s.type == 'sell').toList();
 
-  // ========== 多维加权评分 ==========
+  // ========== 多维加权评分（三维度） ==========
 
   // 1. 信号评分 (0-40分)
   int buyCount = buySignals.length;
@@ -697,28 +697,78 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
   if (last.volMa5 > 0) {
     final volRatio = last.volume / last.volMa5;
     if (last.close >= last.open) {
-      // 价涨量增=看多
       if (volRatio > 1.5) {
         volumeScore = 18;
       } else if (volRatio > 1.0) {
         volumeScore = 14;
       } else {
-        volumeScore = 8; // 价涨量缩=弱势
+        volumeScore = 8;
       }
     } else {
-      // 价跌量增=看空
       if (volRatio > 1.5) {
         volumeScore = 3;
       } else if (volRatio > 1.0) {
         volumeScore = 6;
       } else {
-        volumeScore = 10; // 价跌量缩=空方减弱
+        volumeScore = 10;
       }
     }
   }
 
-  // 总分
-  final totalScore = (signalScore + trendScore + momentumScore + volumeScore).round().clamp(0, 100);
+  // K线信号基础分 (0-100)
+  final klineBaseScore = (signalScore + trendScore + momentumScore + volumeScore).round().clamp(0, 100);
+
+  // ========== 5. 实时行情评分 (0-100) ==========
+  double realtimeScore = 50; // 中性基准
+  if (quote != null && quote.price > 0) {
+    // 涨跌幅权重
+    final changePct = quote.changePct;
+    if (changePct > 0 && changePct <= 3) {
+      realtimeScore += 10; // 温和上涨，趋势确认
+    } else if (changePct > 3 && changePct <= 5) {
+      realtimeScore += 5; // 涨幅较大，部分获利
+    } else if (changePct > 5) {
+      realtimeScore -= 5; // 涨幅过大，追高风险
+    } else if (changePct < 0 && changePct >= -3) {
+      realtimeScore -= 5; // 温和下跌，弱势延续
+    } else if (changePct < -3 && changePct >= -5) {
+      realtimeScore += 5; // 跌幅较大，超跌机会
+    } else if (changePct < -5) {
+      realtimeScore += 10; // 暴跌，超跌反弹机会（高风险高回报）
+    }
+
+    // 资金流向权重
+    if (quote.mainNetFlow != 0) {
+      if (quote.mainNetFlow > 0) {
+        realtimeScore += (quote.mainNetFlowRate > 5 ? 8 : 5); // 主力净流入加分
+      } else {
+        realtimeScore -= (quote.mainNetFlowRate < -5 ? 8 : 5); // 主力净流出减分
+      }
+    }
+
+    // 换手率权重
+    if (quote.turnover > 0) {
+      if (quote.turnover >= 1 && quote.turnover <= 5) {
+        realtimeScore += 5; // 活跃但不过热
+      } else if (quote.turnover > 10) {
+        realtimeScore -= 5; // 过热风险
+      } else if (quote.turnover < 0.5) {
+        realtimeScore -= 3; // 流动性不足
+      }
+    }
+  }
+  realtimeScore = realtimeScore.clamp(0.0, 100.0);
+
+  // ========== 6. 板块趋势评分 (0-100) ==========
+  // 使用大盘涨跌作为板块趋势代理（个股分析时通常没有板块数据）
+  double sectorScore = 50; // 中性基准
+  // 注意：板块数据在机会页面批量获取，此处仅用市场情绪做参考
+  // 如果有quote的changePct，可以结合大盘走势判断
+  // 暂时使用中性值，板块权重由机会页面单独计算
+
+  // ========== 三维度加权总分 ==========
+  // K线信号(60%) + 实时行情(25%) + 板块趋势(15%)
+  final totalScore = (klineBaseScore * 0.6 + realtimeScore * 0.25 + sectorScore * 0.15).round().clamp(0, 100);
 
   // ========== 5级推荐 ==========
   String recommendation;
@@ -744,6 +794,15 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
   if (last.rsi6 < 30 && last.rsi6 > 0) reasons.add('RSI超卖区域');
   if (last.volume > last.volMa5 * 1.5 && last.volMa5 > 0) reasons.add('成交量显著放大');
   if (last.close >= last.open && last.volume < last.volMa5 * 0.7 && last.volMa5 > 0) reasons.add('上涨缩量，动能不足');
+
+  // 实时行情因素
+  if (quote != null && quote.price > 0) {
+    if (quote.changePct > 3) reasons.add('当日涨幅${quote.changePct.toStringAsFixed(1)}%，追高需谨慎');
+    if (quote.changePct < -3) reasons.add('当日跌幅${quote.changePct.toStringAsFixed(1)}%，超跌关注反弹');
+    if (quote.mainNetFlow > 0 && quote.mainNetFlowRate > 3) reasons.add('主力资金净流入${quote.mainNetFlowRate.toStringAsFixed(1)}%');
+    if (quote.mainNetFlow < 0 && quote.mainNetFlowRate < -3) reasons.add('主力资金净流出${quote.mainNetFlowRate.abs().toStringAsFixed(1)}%');
+    if (quote.turnover > 10) reasons.add('换手率${quote.turnover.toStringAsFixed(1)}%，交投过热');
+  }
 
   // ========== 风险因子 ==========
   final riskFactors = <String>[];

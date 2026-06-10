@@ -1,5 +1,4 @@
 import '../models/stock_models.dart';
-import 'signal_engine.dart';
 
 class TradingStrategy {
   final String id;
@@ -53,7 +52,7 @@ List<TradingStrategy> evaluateStrategies(List<HistoryKline> data, List<SignalIte
     exitRule: 'DIF下穿DEA或MACD柱连续缩短3日',
     stopLossRule: '跌破金叉日最低价',
     isActive: macdGoldenCross,
-    signalStrength: macdGoldenCross ? 85 : 0,
+    signalStrength: macdGoldenCross ? (last.macdDif > 0 ? 90 : 75) : 0,
     entryPrice: macdGoldenCross ? price : null,
     stopLossPrice: macdGoldenCross ? last.low : null,
     type: 'buy',
@@ -186,6 +185,225 @@ List<TradingStrategy> evaluateStrategies(List<HistoryKline> data, List<SignalIte
     stopLossPrice: rsiOversoldRecovery ? last.low * 0.99 : null,
     type: 'buy',
   ));
+
+  // 9. MACD零轴上方金叉战法
+  final macdAboveZero = signals.any((s) => s.signal == 'MACD金叉') && last.macdDif > 0;
+  strategies.add(TradingStrategy(
+    id: 'macd_above_zero_cross',
+    name: 'MACD零轴上方金叉',
+    category: '趋势',
+    description: 'MACD在零轴上方形成金叉，说明多头趋势强劲，是比普通金叉更强的买入信号。中线持股为主。',
+    entryRule: 'MACD在零轴上方DIF上穿DEA',
+    exitRule: 'MACD柱连续缩短3日或DIF下穿DEA',
+    stopLossRule: '跌破金叉日最低价或MA20',
+    isActive: macdAboveZero,
+    signalStrength: macdAboveZero ? 90 : 0,
+    entryPrice: macdAboveZero ? price : null,
+    targetPrice: macdAboveZero ? price * 1.15 : null,
+    stopLossPrice: macdAboveZero ? last.low : null,
+    type: 'buy',
+  ));
+
+  // 10. 均线粘合突破战法
+  final maClose = last.close > 0 &&
+      (last.ma5 - last.ma10).abs() / last.close < 0.02 &&
+      (last.ma10 - last.ma20).abs() / last.close < 0.02 &&
+      last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0;
+  final maBreakout = maClose && last.close > last.ma5 && last.close > last.ma10 && last.close > last.ma20;
+  strategies.add(TradingStrategy(
+    id: 'ma_converge_breakout',
+    name: '均线粘合突破战法',
+    category: '趋势',
+    description: '多条均线靠拢粘合说明市场成本趋于一致，即将选择方向突破。放量突破均线密集区是强买入信号。',
+    entryRule: 'MA5/MA10/MA20粘合后放量突破，收盘站上所有均线',
+    exitRule: '跌破MA20或均线重新粘合',
+    stopLossRule: '跌破粘合区间下沿',
+    isActive: maBreakout,
+    signalStrength: maBreakout ? 85 : (maClose ? 55 : 0),
+    entryPrice: maBreakout ? price : null,
+    targetPrice: maBreakout ? price * 1.12 : null,
+    stopLossPrice: maBreakout ? last.ma20 * 0.98 : null,
+    type: 'buy',
+  ));
+
+  // 11. 红三兵战法
+  final redThreeSoldiers = data.length >= 3 &&
+      data[data.length - 3].close > data[data.length - 3].open &&
+      data[data.length - 2].close > data[data.length - 2].open &&
+      last.close > last.open &&
+      data[data.length - 2].close > data[data.length - 3].close &&
+      last.close > data[data.length - 2].close &&
+      last.close > prev.close;
+  strategies.add(TradingStrategy(
+    id: 'red_three_soldiers',
+    name: '红三兵战法',
+    category: 'K线形态',
+    description: '连续三根阳线且收盘价逐步抬高，是强烈的看涨信号。出现在底部区域更为可靠，预示趋势反转向上。',
+    entryRule: '连续3根阳线且收盘价递增',
+    exitRule: '出现长上影线或放量阴线',
+    stopLossRule: '跌破第一根阳线最低点',
+    isActive: redThreeSoldiers,
+    signalStrength: redThreeSoldiers ? 75 : 0,
+    entryPrice: redThreeSoldiers ? price : null,
+    targetPrice: redThreeSoldiers ? price * 1.08 : null,
+    stopLossPrice: redThreeSoldiers ? data[data.length - 3].low : null,
+    type: 'buy',
+  ));
+
+  // 12. 早晨之星战法
+  final morningStar = data.length >= 3 &&
+      data[data.length - 3].close < data[data.length - 3].open && // 第一根阴线
+      data[data.length - 2].open > 0 &&
+      (data[data.length - 2].close - data[data.length - 2].open).abs() / data[data.length - 2].open < 0.01 && // 第二根十字星
+      last.close > last.open && // 第三根阳线
+      last.close > (data[data.length - 3].open + data[data.length - 3].close) / 2; // 阳线收复阴线一半以上
+  strategies.add(TradingStrategy(
+    id: 'morning_star',
+    name: '早晨之星战法',
+    category: 'K线形态',
+    description: '由阴线+十字星+阳线组成，是经典的底部反转形态。第三根阳线深入第一根阴线实体越多，反转信号越强。',
+    entryRule: '阴线+十字星+阳线组合出现，阳线收复阴线过半',
+    exitRule: '跌破十字星最低点',
+    stopLossRule: '十字星最低点下方2%',
+    isActive: morningStar,
+    signalStrength: morningStar ? 80 : 0,
+    entryPrice: morningStar ? price : null,
+    targetPrice: morningStar ? price * 1.1 : null,
+    stopLossPrice: morningStar ? data[data.length - 2].low * 0.98 : null,
+    type: 'buy',
+  ));
+
+  // 13. 量价齐升战法
+  final volPriceUp = last.close > prev.close && last.volume > prev.volume * 1.3 &&
+      last.close > last.open && prev.close > prev.open;
+  strategies.add(TradingStrategy(
+    id: 'volume_price_up',
+    name: '量价齐升战法',
+    category: '量价',
+    description: '股价上涨同时成交量放大，说明买盘积极，资金持续流入。连续量价齐升是强势行情的典型特征。',
+    entryRule: '当日量价齐升，量比>1.3',
+    exitRule: '出现缩量滞涨或放量滞涨',
+    stopLossRule: '跌破放量上涨起始日最低价',
+    isActive: volPriceUp,
+    signalStrength: volPriceUp ? 70 : 0,
+    entryPrice: volPriceUp ? price : null,
+    stopLossPrice: volPriceUp ? prev.low : null,
+    type: 'buy',
+  ));
+
+  // 14. 布林带支撑战法
+  final bollSupport = last.low <= last.bollLower * 1.005 && last.close > last.bollLower &&
+      last.bollLower > 0;
+  strategies.add(TradingStrategy(
+    id: 'boll_support',
+    name: '布林带支撑战法',
+    category: '震荡',
+    description: '股价触及布林带下轨后企稳回升，说明下轨支撑有效。适合在震荡行情中低吸操作。',
+    entryRule: '股价触及布林带下轨后收阳',
+    exitRule: '股价触及布林带上轨或中轨压力明显',
+    stopLossRule: '跌破布林带下轨3%',
+    isActive: bollSupport,
+    signalStrength: bollSupport ? 65 : 0,
+    entryPrice: bollSupport ? price : null,
+    targetPrice: bollSupport ? last.bollMid : null,
+    stopLossPrice: bollSupport ? last.bollLower * 0.97 : null,
+    type: 'buy',
+  ));
+
+  // 15. KDJ超买死叉战法（卖出信号）
+  final kdjOverboughtCross = last.k < last.d && prev.k >= prev.d && prev.k > 70;
+  strategies.add(TradingStrategy(
+    id: 'kdj_overbought_cross',
+    name: 'KDJ超买死叉战法',
+    category: '反转',
+    description: 'KDJ在超买区（K>70）形成死叉，是短线见顶信号。J值从100以上拐头向下更为可靠，应及时减仓。',
+    entryRule: 'K线下穿D线且K值>70',
+    exitRule: 'K值<30或K线重新上穿D线',
+    stopLossRule: '突破死叉日最高价',
+    isActive: kdjOverboughtCross,
+    signalStrength: kdjOverboughtCross ? 75 : 0,
+    entryPrice: kdjOverboughtCross ? price : null,
+    stopLossPrice: kdjOverboughtCross ? last.high * 1.02 : null,
+    type: 'sell',
+  ));
+
+  // 16. RSI超买回落战法（卖出信号）
+  final rsiOverboughtDrop = last.rsi6 < 70 && prev.rsi6 >= 70;
+  strategies.add(TradingStrategy(
+    id: 'rsi_overbought_drop',
+    name: 'RSI超买回落战法',
+    category: '震荡',
+    description: 'RSI6从超买区（>70）回落跌破70，说明短期买盘衰竭，可能出现回调。适合短线减仓或止盈。',
+    entryRule: 'RSI6从70以上跌破70',
+    exitRule: 'RSI6<30或重新突破50',
+    stopLossRule: 'RSI6重新突破70',
+    isActive: rsiOverboughtDrop,
+    signalStrength: rsiOverboughtDrop ? 65 : 0,
+    entryPrice: rsiOverboughtDrop ? price : null,
+    stopLossPrice: rsiOverboughtDrop ? last.high * 1.02 : null,
+    type: 'sell',
+  ));
+
+  // 17. 三只乌鸦战法（卖出信号）
+  final threeCrows = data.length >= 3 &&
+      data[data.length - 3].close < data[data.length - 3].open &&
+      data[data.length - 2].close < data[data.length - 2].open &&
+      last.close < last.open &&
+      data[data.length - 2].close < data[data.length - 3].close &&
+      last.close < data[data.length - 2].close;
+  strategies.add(TradingStrategy(
+    id: 'three_crows',
+    name: '三只乌鸦战法',
+    category: 'K线形态',
+    description: '连续三根阴线且收盘价逐步走低，是强烈的看跌信号。出现在高位区域更为危险，预示趋势反转向下。',
+    entryRule: '连续3根阴线且收盘价递减',
+    exitRule: '出现放量阳线反包',
+    stopLossRule: '突破第一根阴线最高点',
+    isActive: threeCrows,
+    signalStrength: threeCrows ? 75 : 0,
+    entryPrice: threeCrows ? price : null,
+    stopLossPrice: threeCrows ? data[data.length - 3].high * 1.02 : null,
+    type: 'sell',
+  ));
+
+  // 18. 均线空头排列战法（卖出信号）
+  final maBearish = last.ma5 < last.ma10 && last.ma10 < last.ma20 && last.ma20 > 0;
+  strategies.add(TradingStrategy(
+    id: 'ma_bearish',
+    name: '均线空头排列战法',
+    category: '趋势',
+    description: 'MA5<MA10<MA20为空头排列，说明处于下降趋势中。反弹至MA10附近是减仓机会，不宜抄底。',
+    entryRule: '空头排列形成后，股价反弹至MA10附近受阻',
+    exitRule: '均线重新多头排列',
+    stopLossRule: '突破MA20',
+    isActive: maBearish,
+    signalStrength: maBearish ? 70 : 0,
+    entryPrice: maBearish ? price : null,
+    stopLossPrice: maBearish ? last.ma20 * 1.02 : null,
+    type: 'sell',
+  ));
+
+  // Detect buy/sell strategy conflicts
+  final activeBuyStrategies = strategies.where((s) => s.isActive && s.type == 'buy').toList();
+  final activeSellStrategies = strategies.where((s) => s.isActive && s.type == 'sell').toList();
+
+  if (activeBuyStrategies.isNotEmpty && activeSellStrategies.isNotEmpty) {
+    // Add conflict note to conflicting strategies
+    for (final s in activeBuyStrategies) {
+      strategies.add(TradingStrategy(
+        id: 'conflict_${s.id}',
+        name: '${s.name}(冲突)',
+        category: '警告',
+        description: '买入策略${s.name}与卖出策略${activeSellStrategies.map((e) => e.name).join('/')}同时激活，信号矛盾，建议谨慎操作',
+        entryRule: '多空信号冲突，观望为主',
+        exitRule: '等待信号统一',
+        stopLossRule: '严格止损',
+        isActive: true,
+        signalStrength: 50,
+        type: 'buy',
+      ));
+    }
+  }
 
   return strategies;
 }

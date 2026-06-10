@@ -1,4 +1,5 @@
 import '../models/stock_models.dart';
+import '../core/trading_session.dart';
 
 enum DataAnomalyType { zeroPrice, extremeChange, zeroVolume, negativeValue, staleData }
 
@@ -196,5 +197,17 @@ class DataValidator {
       isValid: !anomalies.any((a) => a.severity >= 1.0),
       anomalies: anomalies,
     );
+  }
+
+  static bool isStaleQuote(QuoteData quote) {
+    if (quote.updateTime == null) return false;
+    final now = DateTime.now();
+    final diff = now.difference(quote.updateTime!).inSeconds;
+    // During trading hours, data older than 60 seconds is stale
+    if (TradingSession.isInTradingSession()) {
+      return diff > 60;
+    }
+    // After hours, data older than 30 minutes is stale
+    return diff > 1800;
   }
 }

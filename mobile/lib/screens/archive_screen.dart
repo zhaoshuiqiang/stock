@@ -49,14 +49,26 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   }
 
   Future<void> _refreshCurrentPrices() async {
-    for (final archive in _archives) {
-      final prefixedCode = _apiClient.addMarketPrefix(archive.code);
-      final quote = await _apiClient.getRealtimeQuote(prefixedCode);
-      if (quote != null && mounted) {
-        setState(() {
-          _currentQuotes[archive.code] = quote;
-        });
+    if (_archives.isEmpty) return;
+    try {
+      final codes = _archives.map((r) => _apiClient.addMarketPrefix(r.code)).toList();
+      final batchQuotes = await _apiClient.getBatchRealtimeQuotes(codes);
+      final quoteMap = <String, QuoteData>{};
+      for (final q in batchQuotes) {
+        quoteMap[q.code] = q;
       }
+      if (!mounted) return;
+      setState(() {
+        for (final record in _archives) {
+          final prefixedCode = _apiClient.addMarketPrefix(record.code);
+          final quote = quoteMap[prefixedCode];
+          if (quote != null) {
+            _currentQuotes[record.code] = quote;
+          }
+        }
+      });
+    } catch (e) {
+      print('Refresh prices failed: $e');
     }
   }
 
@@ -185,6 +197,33 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     }
   }
 
+  Future<void> _deleteAll() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a1a2e),
+        title: const Text('一键删除', style: TextStyle(color: Colors.white)),
+        content: Text('确定要删除全部 ${_archives.length} 条留档记录吗？此操作不可恢复。', style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('全部删除', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    for (final record in _archives) {
+      if (record.id != null) {
+        await _dbService.deleteArchive(record.id!);
+      }
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已删除全部留档记录')),
+      );
+    }
+    _loadArchives();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -206,12 +245,113 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       );
     }
 
+    // 统计合理/偏差条数
+    int reasonableCount = 0;
+    int deviationCount = 0;
+    for (final record in _archives) {
+      final currentQuote = _currentQuotes[record.code];
+      final currentPrice = currentQuote?.price ?? 0;
+      if (currentPrice > 0) {
+        final priceChange = currentPrice - record.price;
+        final wasBuy = record.recommendation.contains('买入');
+        final wasSell = record.recommendation.contains('卖出');
+        if ((wasBuy && priceChange < 0) || (wasSell && priceChange > 0)) {
+          deviationCount++;
+        } else if (wasBuy || wasSell) {
+          reasonableCount++;
+        }
+      }
+    }
+    final total = reasonableCount + deviationCount;
+    final winRate = total > 0 ? (reasonableCount / total * 100) : 0.0;
+
     return RefreshIndicator(
       onRefresh: _loadArchives,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(8),
-        itemCount: _archives.length,
-        itemBuilder: (context, index) {
+      child: CustomScrollView(
+        slivers: [
+          // 顶部胜率统计卡片
+          SliverToBoxAdapter(
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0f3460),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('推荐胜率', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${winRate.toStringAsFixed(1)}%',
+                          style: const TextStyle(color: Colors.orange, fontSize: 28, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(width: 1, height: 40, color: Colors.white12),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        Column(
+                          children: [
+                            const Text('合理', style: TextStyle(color: Colors.orange, fontSize: 11)),
+                            const SizedBox(height: 2),
+                            Text('$reasonableCount', style: const TextStyle(color: Colors.orange, fontSize: 22, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        Column(
+                          children: [
+                            const Text('偏差', style: TextStyle(color: Color(0xFF26a69a), fontSize: 11)),
+                            const SizedBox(height: 2),
+                            Text('$deviationCount', style: const TextStyle(color: Color(0xFF26a69a), fontSize: 22, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        Column(
+                          children: [
+                            const Text('总计', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                            const SizedBox(height: 2),
+                            Text('$total', style: const TextStyle(color: Colors.white70, fontSize: 22, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: _deleteAll,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.red.withOpacity(0.5)),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.delete_sweep, color: Colors.red, size: 14),
+                          SizedBox(width: 4),
+                          Text('一键删除', style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // 留档列表
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
           final record = _archives[index];
           final currentQuote = _currentQuotes[record.code];
           final currentPrice = currentQuote?.price ?? 0;
@@ -357,7 +497,11 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
             ),
           );
         },
-      ),
+            childCount: _archives.length,
+          ),
+        ),
+      ],
+    ),
     );
   }
 

@@ -164,6 +164,8 @@ class DatabaseService {
         'created_at': rule.createdAt.millisecondsSinceEpoch,
         'enabled': rule.enabled ? 1 : 0,
         'last_triggered_at': rule.lastTriggeredAt?.millisecondsSinceEpoch,
+        'alert_type': rule.alertType,
+        'indicator_type': rule.indicatorType,
       },
     );
   }
@@ -178,6 +180,8 @@ class DatabaseService {
         'threshold_value': rule.thresholdValue,
         'enabled': rule.enabled ? 1 : 0,
         'last_triggered_at': rule.lastTriggeredAt?.millisecondsSinceEpoch,
+        'alert_type': rule.alertType,
+        'indicator_type': rule.indicatorType,
       },
       where: 'id = ?',
       whereArgs: [rule.id],
@@ -211,6 +215,8 @@ class DatabaseService {
       lastTriggeredAt: row['last_triggered_at'] != null
           ? DateTime.fromMillisecondsSinceEpoch(row['last_triggered_at'] as int)
           : null,
+      alertType: row['alert_type'] as String? ?? '',
+      indicatorType: row['indicator_type'] as String? ?? '',
     )).toList();
   }
 
@@ -232,6 +238,8 @@ class DatabaseService {
       lastTriggeredAt: row['last_triggered_at'] != null
           ? DateTime.fromMillisecondsSinceEpoch(row['last_triggered_at'] as int)
           : null,
+      alertType: row['alert_type'] as String? ?? '',
+      indicatorType: row['indicator_type'] as String? ?? '',
     )).toList();
   }
 

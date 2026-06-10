@@ -61,6 +61,7 @@ class QuoteData {
   double mainNetFlow;
   double mainNetFlowRate;
   final DateTime? updateTime;
+  final String confidence;
 
   QuoteData({
     required this.code,
@@ -85,6 +86,7 @@ class QuoteData {
     this.mainNetFlow = 0,
     this.mainNetFlowRate = 0,
     this.updateTime,
+    this.confidence = 'high',
   });
 
   factory QuoteData.fromJson(Map<String, dynamic> json) {
@@ -111,6 +113,7 @@ class QuoteData {
       mainNetFlow: _parseDouble(json['main_net_flow']),
       mainNetFlowRate: _parseDouble(json['main_net_flow_rate']),
       updateTime: json['update_time'] != null ? DateTime.tryParse(json['update_time']) : null,
+      confidence: json['confidence'] ?? 'high',
     );
   }
 
@@ -157,6 +160,19 @@ class HistoryKline {
   final double bollUpper;
   final double bollMid;
   final double bollLower;
+  final double ema5;
+  final double ema10;
+  final double ema20;
+  final double ema60;
+  final double atr14;
+  final double obv;
+  final double bias6;
+  final double bias12;
+  final double bias24;
+  final double plusDi14;
+  final double minusDi14;
+  final double dx;
+  final double adx14;
 
   HistoryKline({
     required this.date,
@@ -188,6 +204,19 @@ class HistoryKline {
     this.bollUpper = 0,
     this.bollMid = 0,
     this.bollLower = 0,
+    this.ema5 = 0,
+    this.ema10 = 0,
+    this.ema20 = 0,
+    this.ema60 = 0,
+    this.atr14 = 0,
+    this.obv = 0,
+    this.bias6 = 0,
+    this.bias12 = 0,
+    this.bias24 = 0,
+    this.plusDi14 = 0,
+    this.minusDi14 = 0,
+    this.dx = 0,
+    this.adx14 = 0,
   });
 
   HistoryKline copyWith({
@@ -220,6 +249,19 @@ class HistoryKline {
     double? bollUpper,
     double? bollMid,
     double? bollLower,
+    double? ema5,
+    double? ema10,
+    double? ema20,
+    double? ema60,
+    double? atr14,
+    double? obv,
+    double? bias6,
+    double? bias12,
+    double? bias24,
+    double? plusDi14,
+    double? minusDi14,
+    double? dx,
+    double? adx14,
   }) {
     return HistoryKline(
       date: date ?? this.date,
@@ -251,6 +293,19 @@ class HistoryKline {
       bollUpper: bollUpper ?? this.bollUpper,
       bollMid: bollMid ?? this.bollMid,
       bollLower: bollLower ?? this.bollLower,
+      ema5: ema5 ?? this.ema5,
+      ema10: ema10 ?? this.ema10,
+      ema20: ema20 ?? this.ema20,
+      ema60: ema60 ?? this.ema60,
+      atr14: atr14 ?? this.atr14,
+      obv: obv ?? this.obv,
+      bias6: bias6 ?? this.bias6,
+      bias12: bias12 ?? this.bias12,
+      bias24: bias24 ?? this.bias24,
+      plusDi14: plusDi14 ?? this.plusDi14,
+      minusDi14: minusDi14 ?? this.minusDi14,
+      dx: dx ?? this.dx,
+      adx14: adx14 ?? this.adx14,
     );
   }
 
@@ -632,18 +687,18 @@ class ArchiveRecord {
       id: map['id'] as int?,
       code: map['code'] as String,
       name: map['name'] as String,
-      price: map['price'] as double,
-      changePct: map['change_pct'] as double,
-      score: map['score'] as int,
+      price: (map['price'] as num?)?.toDouble() ?? 0.0,
+      changePct: (map['change_pct'] as num?)?.toDouble() ?? 0.0,
+      score: (map['score'] as num?)?.toInt() ?? 0,
       recommendation: map['recommendation'] as String,
       riskLevel: map['risk_level'] as String,
-      buySignalCount: map['buy_signal_count'] as int,
-      sellSignalCount: map['sell_signal_count'] as int,
-      activeStrategyCount: map['active_strategy_count'] as int,
-      confluenceScore: map['confluence_score'] as int,
+      buySignalCount: (map['buy_signal_count'] as num?)?.toInt() ?? 0,
+      sellSignalCount: (map['sell_signal_count'] as num?)?.toInt() ?? 0,
+      activeStrategyCount: (map['active_strategy_count'] as num?)?.toInt() ?? 0,
+      confluenceScore: (map['confluence_score'] as num?)?.toInt() ?? 0,
       tradeLevelsJson: map['trade_levels_json'] as String?,
       topSignals: map['top_signals'] as String? ?? '',
-      archivedAt: DateTime.fromMillisecondsSinceEpoch(map['archived_at'] as int),
+      archivedAt: DateTime.fromMillisecondsSinceEpoch((map['archived_at'] as num?)?.toInt() ?? 0),
     );
   }
 }

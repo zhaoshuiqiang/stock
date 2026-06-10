@@ -56,6 +56,7 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
   bool _isLoading = true;
   int _completedCount = 0;
   int _totalCount = 0;
+  Map<String, QuoteData> _lastQuotes = {};
   Timer? _refreshTimer;
 
   @override
@@ -114,7 +115,6 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
       final futures = watchlist.map((item) async {
         try {
           final prefixedCode = _apiClient.addMarketPrefix(item.code);
-          final klines = await _apiClient.getStockHistory(prefixedCode, days: 120);
           QuoteData? quote = quoteMap[prefixedCode];
           // Fallback to individual quote if batch didn't return this stock
           if (quote == null) {
@@ -125,10 +125,20 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
             }
           }
 
-          if (klines.isEmpty) {
-            if (mounted) {
-              setState(() { _completedCount++; });
+          // Incremental analysis: skip re-analysis if price unchanged
+          final lastQuote = _lastQuotes[prefixedCode];
+          if (lastQuote != null && quote != null && quote.price == lastQuote.price && quote.changePct == lastQuote.changePct) {
+            final existing = _opportunities.where((o) => o.code == item.code).toList();
+            if (existing.isNotEmpty) {
+              return existing.first;
             }
+          }
+          if (quote != null) {
+            _lastQuotes[prefixedCode] = quote;
+          }
+
+          final klines = await _apiClient.getStockHistory(prefixedCode, days: 120, bypassCache: TradingSession.isInTradingSession());
+          if (klines.isEmpty) {
             return null;
           }
 
@@ -141,10 +151,6 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
           final last = calculated.last;
           final topSignals = signals.take(2).map((s) =>
               '${s.type == 'buy' ? '▲' : '▼'}${s.signal}').toList();
-
-          if (mounted) {
-            setState(() { _completedCount++; });
-          }
 
           return _StockOpportunity(
             code: item.code,
@@ -163,9 +169,6 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
           );
         } catch (e) {
           print('Failed to analyze ${item.code}: $e');
-          if (mounted) {
-            setState(() { _completedCount++; });
-          }
           return null;
         }
       }).toList();
@@ -175,6 +178,7 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
       opportunities.sort((a, b) => b.score.compareTo(a.score));
 
       setState(() {
+        _completedCount = _totalCount;
         _opportunities = opportunities;
         _isLoading = false;
       });
@@ -207,6 +211,37 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${o.name} 已留档')),
+      );
+    }
+  }
+
+  Future<void> _archiveAll() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a1a2e),
+        title: const Text('一键留档', style: TextStyle(color: Colors.white)),
+        content: Text('确定将 ${_opportunities.length} 条推荐全部留档吗？', style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('确定', style: TextStyle(color: Colors.orange))),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    int successCount = 0;
+    for (final o in _opportunities) {
+      try {
+        await _archiveOpportunity(o);
+        successCount++;
+      } catch (e) {
+        print('Archive failed for ${o.name}: $e');
+      }
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已留档 $successCount/${_opportunities.length} 条')),
       );
     }
   }
@@ -267,16 +302,42 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
                 '机会与风险',
                 style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
-              if (_isLoading)
-                Text(
-                  '$_completedCount/$_totalCount',
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
-                )
-              else
-                GestureDetector(
-                  onTap: _loadOpportunities,
-                  child: const Icon(Icons.refresh, color: Colors.white54, size: 20),
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_opportunities.isNotEmpty)
+                    GestureDetector(
+                      onTap: _archiveAll,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.orange.withOpacity(0.5)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.bookmark, color: Colors.orange, size: 14),
+                            SizedBox(width: 4),
+                            Text('一键留档', style: TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  const SizedBox(width: 8),
+                  if (_isLoading)
+                    Text(
+                      '$_completedCount/$_totalCount',
+                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    )
+                  else
+                    GestureDetector(
+                      onTap: _loadOpportunities,
+                      child: const Icon(Icons.refresh, color: Colors.white54, size: 20),
+                    ),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 8),

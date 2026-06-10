@@ -50,8 +50,6 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   Map<int, double> _timeshareData = {};
   // 分时图均价数据：key=分钟偏移量, value=均价
   Map<int, double> _timeshareAvgData = {};
-  double _timeshareTotalAmount = 0; // 累计成交额
-  double _timeshareTotalVolume = 0; // 累计成交量(手)
   int? _selectedKlineIndex;
   bool _showFibonacci = false;
   bool _showBoll = false;
@@ -250,16 +248,33 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         if (timeshareResult != null && mounted) {
           setState(() {
             final apiPrices = timeshareResult['prices'] ?? {};
-            final apiAvgs = timeshareResult['avgs'] ?? {};
+            final apiVolumes = timeshareResult['volumes'] ?? <int, double>{};
+            final apiAmounts = timeshareResult['amounts'] ?? <int, double>{};
             // API数据作为基础，轮询数据覆盖同一分钟槽位
             _timeshareData = {...apiPrices, ..._timeshareData};
-            _timeshareAvgData = {...apiAvgs, ..._timeshareAvgData};
+            // 重新计算累计VWAP
+            final preCloseVal = _quote?.preClose ?? 0;
+            final sortedOffsets = _timeshareData.keys.toList()..sort();
+            double cumAmount = 0;
+            double cumVolume = 0;
+            _timeshareAvgData.clear();
+            for (final offset in sortedOffsets) {
+              cumAmount += apiAmounts[offset] ?? 0;
+              cumVolume += apiVolumes[offset] ?? 0;
+              if (cumVolume > 0) {
+                _timeshareAvgData[offset] = cumAmount / (cumVolume * 100);
+              } else {
+                _timeshareAvgData[offset] = preCloseVal;
+              }
+            }
+            // VWAP累计计算完成
             _timeshareLoadFailed = false;
           });
         }
       }
 
       final quote = await _apiClient.getRealtimeQuote(widget.code);
+      if (!mounted) return;
       if (quote != null) {
         _handleQuoteUpdate(quote);
       }
@@ -280,6 +295,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       // Fetch fresh klines bypassing cache
       final klines = await _apiClient.getStockHistory(widget.code, days: 120, bypassCache: true);
       if (klines.isEmpty) return;
+      if (!mounted) return;
 
       final calculated = calcAllIndicators(klines);
       final analysis = generateAnalysis(calculated, _quote);
@@ -293,6 +309,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         tech['fibonacci'] = calcFibonacci(calculated);
       }
 
+      if (!mounted) return;
       setState(() {
         _klines = calculated;
         _analysis = analysis;
@@ -301,15 +318,19 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       });
     } catch (e) {
       print('Refresh analysis failed: $e');
-      setState(() { _isAnalysisRefreshing = false; });
+      if (mounted) setState(() { _isAnalysisRefreshing = false; });
     }
   }
 
   void _handleQuoteUpdate(QuoteData quote) {
+    if (!mounted) return;
     if (quote.code == widget.code) {
       setState(() {
         // 合并数据：保留原有PE/PB等字段，更新价格和主力资金字段
         if (_quote != null) {
+          final newHigh = quote.high > 0 ? quote.high : _quote!.high;
+          final newLow = quote.low > 0 ? quote.low : _quote!.low;
+          final newPreClose = quote.preClose > 0 ? quote.preClose : _quote!.preClose;
           _quote = QuoteData(
             code: _quote!.code,
             name: _quote!.name,
@@ -317,22 +338,22 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             change: quote.change,
             changePct: quote.changePct,
             open: quote.open > 0 ? quote.open : _quote!.open,
-            high: quote.high > 0 ? quote.high : _quote!.high,
-            low: quote.low > 0 ? quote.low : _quote!.low,
-            preClose: quote.preClose > 0 ? quote.preClose : _quote!.preClose,
+            high: newHigh,
+            low: newLow,
+            preClose: newPreClose,
             volume: quote.volume > 0 ? quote.volume : _quote!.volume,
             amount: quote.amount > 0 ? quote.amount : _quote!.amount,
-            amplitude: _quote!.amplitude,
-            turnover: _quote!.turnover,
+            amplitude: newPreClose > 0 ? (newHigh - newLow) / newPreClose * 100 : 0.0,
+            turnover: quote.turnover > 0 ? quote.turnover : _quote!.turnover,
             pe: _quote!.pe,
             pb: _quote!.pb,
             totalMarketCap: _quote!.totalMarketCap,
             circulatingMarketCap: _quote!.circulatingMarketCap,
             // 主力资金：如果轮询返回了有效数据则更新，否则保留原值
-            mainInflow: quote.mainInflow > 0 ? quote.mainInflow : _quote!.mainInflow,
-            mainOutflow: quote.mainOutflow > 0 ? quote.mainOutflow : _quote!.mainOutflow,
-            mainNetFlow: quote.mainNetFlow != 0 ? quote.mainNetFlow : _quote!.mainNetFlow,
-            mainNetFlowRate: quote.mainNetFlowRate != 0 ? quote.mainNetFlowRate : _quote!.mainNetFlowRate,
+            mainInflow: quote.mainInflow,
+            mainOutflow: quote.mainOutflow,
+            mainNetFlow: quote.mainNetFlow,
+            mainNetFlowRate: quote.mainNetFlowRate,
           );
         } else {
           _quote = quote;
@@ -404,7 +425,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     });
 
     try {
-      final quote = await _apiClient.getRealtimeQuote(widget.code);
+      var quote = await _apiClient.getRealtimeQuote(widget.code);
       final mainFundFlow = await _apiClient.getMainFundFlow(widget.code);
       final klines = await _apiClient.getStockHistory(widget.code, days: 120);
       print('[_loadData] quote=${quote?.name} price=${quote?.price}, klines=${klines.length}');
@@ -413,10 +434,16 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       print('[_loadData] calculated=${calculated.length}, analysis.score=${analysis.score}, signals=${analysis.signals.length}');
 
       if (quote != null && mainFundFlow != null) {
-        quote.mainInflow = mainFundFlow.mainInflow;
-        quote.mainOutflow = mainFundFlow.mainOutflow;
-        quote.mainNetFlow = mainFundFlow.mainNetFlow;
-        quote.mainNetFlowRate = mainFundFlow.mainNetFlowRate;
+        quote = QuoteData(
+          code: quote.code, name: quote.name, price: quote.price,
+          open: quote.open, high: quote.high, low: quote.low,
+          preClose: quote.preClose, volume: quote.volume, amount: quote.amount,
+          change: quote.change, changePct: quote.changePct, amplitude: quote.amplitude,
+          turnover: quote.turnover, pe: quote.pe, pb: quote.pb,
+          totalMarketCap: quote.totalMarketCap, circulatingMarketCap: quote.circulatingMarketCap,
+          mainInflow: mainFundFlow.mainInflow, mainOutflow: mainFundFlow.mainOutflow,
+          mainNetFlow: mainFundFlow.mainNetFlow, mainNetFlowRate: mainFundFlow.mainNetFlowRate,
+        );
       }
 
       // 计算支撑压力位和斐波那契
@@ -431,6 +458,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       // 加载分时线历史数据（盘后也能显示全天走势）
       final timeshareResult = await _apiClient.getTimeshareData(widget.code);
 
+      if (!mounted) return;
+
       // 判断是否在交易时段
       final now = DateTime.now();
       final isWeekday = now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
@@ -444,7 +473,24 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         _techAnalysis = tech;
         if (timeshareResult != null) {
           _timeshareData = timeshareResult['prices'] ?? {};
-          _timeshareAvgData = timeshareResult['avgs'] ?? {};
+          // 计算累计VWAP：按分钟偏移量顺序累加成交量和成交额
+          final volumes = timeshareResult['volumes'] ?? <int, double>{};
+          final amounts = timeshareResult['amounts'] ?? <int, double>{};
+          final preCloseVal = quote?.preClose ?? 0;
+          final sortedOffsets = _timeshareData.keys.toList()..sort();
+          double cumAmount = 0;
+          double cumVolume = 0;
+          _timeshareAvgData.clear();
+          for (final offset in sortedOffsets) {
+            cumAmount += amounts[offset] ?? 0;
+            cumVolume += volumes[offset] ?? 0;
+            if (cumVolume > 0) {
+              _timeshareAvgData[offset] = cumAmount / (cumVolume * 100);
+            } else {
+              _timeshareAvgData[offset] = preCloseVal;
+            }
+          }
+          // VWAP累计计算完成
           _timeshareLoadFailed = false;
         } else if (isTradingHour) {
           // 交易时段分时数据加载失败，设置降级标志
@@ -455,9 +501,11 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       print('Load data failed for ${widget.code}: $e');
       print('Stack trace: $stackTrace');
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -640,6 +688,36 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             ],
           ),
           const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              Column(
+                children: [
+                  Text('总市值', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text(_formatMarketCap(quote.totalMarketCap), style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
+                ],
+              ),
+              Column(
+                children: [
+                  Text('流通市值', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text(_formatMarketCap(quote.circulatingMarketCap), style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
+                ],
+              ),
+              Column(
+                children: [
+                  Text('换手率', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text('${quote.turnover.toStringAsFixed(2)}%', style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
+                ],
+              ),
+              Column(
+                children: [
+                  Text('振幅', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                  Text('${quote.amplitude.toStringAsFixed(2)}%', style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
@@ -718,7 +796,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       // 午休期间的数据归到上午最后一分钟
       return 120;
     } else if (totalMinutes >= afternoonStart && totalMinutes <= afternoonEnd) {
-      return 120 + (totalMinutes - afternoonStart); // 121 ~ 240
+      return 120 + (totalMinutes - afternoonStart); // 120 ~ 240
     }
     return null; // 非交易时间
   }
@@ -742,13 +820,13 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
   /// 将分钟偏移量转换为时间字符串
   String _minuteOffsetToTime(int offset) {
-    if (offset <= 120) {
+    if (offset < 120) {
       final totalMinutes = 9 * 60 + 30 + offset;
       final h = totalMinutes ~/ 60;
       final m = totalMinutes % 60;
       return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
     } else {
-      final totalMinutes = 13 * 60 + (offset - 121);
+      final totalMinutes = 13 * 60 + (offset - 120);
       final h = totalMinutes ~/ 60;
       final m = totalMinutes % 60;
       return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
@@ -760,13 +838,12 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     final now = DateTime.now();
     final offset = _timeToMinuteOffset(now);
     if (offset == null) return; // 非交易时间不记录
-    
+
     // 限制范围
-    final clampedOffset = offset.clamp(0, 239);
+    final clampedOffset = offset.clamp(0, 240);
     _timeshareData[clampedOffset] = price;
-    
-    // 计算均价 = 累计成交额 / 累计成交量
-    // 注意：每次轮询返回的是当日累计值，直接用当前值
+
+    // 计算均价 = 累计成交额 / (累计成交量 * 100)
     if (amount > 0 && volume > 0) {
       _timeshareAvgData[clampedOffset] = amount / (volume * 100); // 成交额(元) / 成交量(股)
     }
@@ -830,9 +907,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     // 对应offset: 0, 30, 60, 90, 120, 150, 180, 210, 240
     final timeLabels = {0: '9:30', 30: '10:00', 60: '10:30', 90: '11:00', 120: '11:30/13:00', 150: '13:30', 180: '14:00', 210: '14:30', 240: '15:00'};
 
-    // 涨跌幅百分比（右侧Y轴）
-    final maxPctChange = preClose > 0 ? ((displayMaxY - preClose) / preClose * 100) : 0.0;
-    final minPctChange = preClose > 0 ? ((displayMinY - preClose) / preClose * 100) : 0.0;
+    // 涨跌幅百分比（右侧Y轴）- 用于参考线标注
 
     return Container(
       padding: const EdgeInsets.all(8),
@@ -1124,7 +1199,6 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                 _techAnalysis = {'fibonacci': fib};
               }
             }
-            _loadData();
           });
         },
         child: Container(
@@ -2100,8 +2174,21 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     return '${amount.toStringAsFixed(0)}元';
   }
 
+  String _formatMarketCap(double value) {
+    if (value <= 0) return '--';
+    if (value.abs() >= 1e12) {
+      return '${(value / 1e12).toStringAsFixed(2)}万亿';
+    } else if (value.abs() >= 1e8) {
+      return '${(value / 1e8).toStringAsFixed(2)}亿';
+    } else if (value.abs() >= 1e4) {
+      return '${(value / 1e4).toStringAsFixed(2)}万';
+    }
+    return '${value.toStringAsFixed(0)}元';
+  }
+
   @override
   void dispose() {
+    _apiClient.dispose();
     _tabController?.dispose();
     _pollingTimer?.cancel();
     _analysisRefreshTimer?.cancel();

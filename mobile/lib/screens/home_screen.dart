@@ -23,6 +23,12 @@ class HomeScreenState extends State<HomeScreen> {
     _loadData();
   }
 
+  @override
+  void dispose() {
+    _apiClient.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadData() async {
     setState(() {
       _isLoading = true;
@@ -99,7 +105,7 @@ class HomeScreenState extends State<HomeScreen> {
                         if (_sectors.isEmpty)
                           const Text('暂无板块数据', style: TextStyle(color: Colors.white38))
                         else
-                          ..._sectors.take(10).map((sector) => _buildSectorItem(sector)),
+                          ..._sectors.take(20).map((sector) => _buildSectorItem(sector)),
                       ],
                     ),
                   ),
