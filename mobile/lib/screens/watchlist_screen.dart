@@ -23,6 +23,10 @@ class WatchlistScreenState extends State<WatchlistScreen> {
   String _sortBy = 'default'; // 'default', 'change_pct'
   bool _sortAscending = false; // false=降序(从高到低), true=升序(从低到高)
 
+  // 批量删除相关状态
+  bool _isEditMode = false;
+  Set<String> _selectedCodes = {};
+
   @override
   void initState() {
     super.initState();
@@ -54,7 +58,7 @@ class WatchlistScreenState extends State<WatchlistScreen> {
         });
       }
     } catch (e) {
-      print('Load watchlist failed: $e');
+      // ignore
     } finally {
       setState(() {
         _isLoading = false;
@@ -140,9 +144,12 @@ class WatchlistScreenState extends State<WatchlistScreen> {
 
     return _isLoading
         ? const Center(child: CircularProgressIndicator())
-        : ListView(
-            padding: const EdgeInsets.all(8),
+        : Column(
             children: [
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(8),
+                  children: [
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
@@ -185,6 +192,18 @@ class WatchlistScreenState extends State<WatchlistScreen> {
                       style: textTheme.bodyMedium?.copyWith(color: Colors.grey),
                     ),
                     const Spacer(),
+                    // 编辑按钮
+                    if (_watchlist.isNotEmpty)
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _isEditMode = !_isEditMode;
+                            if (!_isEditMode) _selectedCodes.clear();
+                          });
+                        },
+                        child: Text(_isEditMode ? '完成' : '编辑', style: const TextStyle(color: Colors.white70)),
+                      ),
+                    const SizedBox(width: 4),
                     // 排序按钮
                     InkWell(
                       onTap: _toggleSort,
@@ -272,9 +291,34 @@ class WatchlistScreenState extends State<WatchlistScreen> {
                       padding: const EdgeInsets.all(12),
                       child: Row(
                         children: [
+                          if (_isEditMode)
+                            Checkbox(
+                              value: _selectedCodes.contains(item.code),
+                              onChanged: (checked) {
+                                setState(() {
+                                  if (checked == true) {
+                                    _selectedCodes.add(item.code);
+                                  } else {
+                                    _selectedCodes.remove(item.code);
+                                  }
+                                });
+                              },
+                              fillColor: WidgetStateProperty.resolveWith((states) =>
+                                  states.contains(WidgetState.selected) ? Colors.orange : Colors.white38),
+                            ),
                           Expanded(
                             child: InkWell(
-                              onTap: () => _onStockTap(codeWithPrefix, item.name),
+                              onTap: _isEditMode
+                                  ? () {
+                                      setState(() {
+                                        if (_selectedCodes.contains(item.code)) {
+                                          _selectedCodes.remove(item.code);
+                                        } else {
+                                          _selectedCodes.add(item.code);
+                                        }
+                                      });
+                                    }
+                                  : () => _onStockTap(codeWithPrefix, item.name),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -294,21 +338,87 @@ class WatchlistScreenState extends State<WatchlistScreen> {
                               ),
                             ],
                           ),
-                          const SizedBox(width: 8),
-                          IconButton(
-                            icon: const Icon(Icons.add_alert, color: Colors.blue),
-                            onPressed: () => _addAlert(codeWithPrefix, item.name),
-                            tooltip: '添加预警',
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Color(0xFFef5350)),
-                            onPressed: () => _removeFromWatchlist(item.code),
-                          ),
+                          if (!_isEditMode) ...[
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.add_alert, color: Colors.blue),
+                              onPressed: () => _addAlert(codeWithPrefix, item.name),
+                              tooltip: '添加预警',
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Color(0xFFef5350)),
+                              onPressed: () => _removeFromWatchlist(item.code),
+                            ),
+                          ],
                         ],
                       ),
                     ),
                   );
                 }),
+            ],
+          ),
+              ),
+              if (_isEditMode)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1a1a2e),
+                    border: Border(top: BorderSide(color: Colors.white12)),
+                  ),
+                  child: SafeArea(
+                    child: Row(
+                      children: [
+                        Text('已选${_selectedCodes.length}只', style: const TextStyle(color: Colors.white70, fontSize: 14)),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: _selectedCodes.isEmpty ? null : () {
+                            final allCodes = _watchlist.map((w) => w.code).toSet();
+                            if (_selectedCodes.length == allCodes.length) {
+                              setState(() => _selectedCodes.clear());
+                            } else {
+                              setState(() => _selectedCodes = allCodes);
+                            }
+                          },
+                          child: Text(
+                            _selectedCodes.length == _watchlist.length ? '取消全选' : '全选',
+                            style: TextStyle(color: _selectedCodes.isEmpty ? Colors.white24 : Colors.white70),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: _selectedCodes.isEmpty ? null : () async {
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                backgroundColor: const Color(0xFF1a1a2e),
+                                title: const Text('确认删除', style: TextStyle(color: Colors.white)),
+                                content: Text('确定要删除选中的${_selectedCodes.length}只股票吗？', style: const TextStyle(color: Colors.white70)),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+                                  TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('删除', style: TextStyle(color: Colors.red))),
+                                ],
+                              ),
+                            );
+                            if (confirmed == true) {
+                              await DatabaseService().batchRemoveFromWatchlist(_selectedCodes.toList());
+                              setState(() {
+                                _isEditMode = false;
+                                _selectedCodes.clear();
+                              });
+                              _loadWatchlist();
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor: Colors.red.withValues(alpha: 0.3),
+                          ),
+                          child: Text('删除选中(${_selectedCodes.length})'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           );
   }

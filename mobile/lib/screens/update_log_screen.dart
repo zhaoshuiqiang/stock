@@ -10,6 +10,22 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.10.0',
+        'date': '2026-06-10',
+        'changes': [
+          '首页热门板块新增"精选"按钮：一键分析板块内股票，筛选买入推荐',
+          '精选分析显示实时进度（分析中3/20板块），支持提前退出',
+          '精选结果以底部面板展示，含股票名称、推荐、评分、板块来源',
+          '精选面板"一键加自选"按钮，批量添加精选股票到自选',
+          '自选页新增批量删除：编辑模式下多选+全选+删除选中',
+          'DatabaseService新增批量操作：batchAdd/batchRemove/clearWatchlist',
+          '共振评分修复为双向对称：多空维度均影响评分，顶背离纳入bearCount',
+          'ADX权重调整改为作用于单个信号强度，更精准',
+          '移除冗余avgVol5计算，使用last.volMa5',
+          '移除所有残留print()语句',
+        ],
+      },
+      {
         'version': 'v2.9.0',
         'date': '2026-06-10',
         'changes': [

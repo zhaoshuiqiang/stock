@@ -127,6 +127,37 @@ class DatabaseService {
     );
   }
 
+  Future<void> batchAddToWatchlist(List<WatchlistItem> items) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final item in items) {
+        await txn.insert(
+          'watchlist',
+          {
+            'code': item.code,
+            'name': item.name,
+            'added_at': item.addedAt.millisecondsSinceEpoch,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+    });
+  }
+
+  Future<void> batchRemoveFromWatchlist(List<String> codes) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final code in codes) {
+        await txn.delete('watchlist', where: 'code = ?', whereArgs: [code]);
+      }
+    });
+  }
+
+  Future<void> clearWatchlist() async {
+    final db = await database;
+    await db.delete('watchlist');
+  }
+
   Future<bool> isInWatchlist(String code) async {
     final db = await database;
     final result = await db.query(
