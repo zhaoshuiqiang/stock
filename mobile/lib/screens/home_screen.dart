@@ -52,7 +52,7 @@ class HomeScreenState extends State<HomeScreen> {
         _sectors = sectors;
       });
     } catch (e) {
-      // ignore
+      debugPrint('Load data failed: $e');
     } finally {
       setState(() {
         _isLoading = false;

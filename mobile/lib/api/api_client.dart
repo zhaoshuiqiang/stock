@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:async';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:charset_converter/charset_converter.dart';
 import '../models/stock_models.dart';
@@ -13,13 +14,19 @@ class ApiClient {
   final Map<String, Future> _inFlightRequests = {};
   static const int _maxCacheSize = 100;
 
-  /// 公共 HTTP GET 请求方法，统一处理超时、状态码检查和异常捕获
-  Future<http.Response?> _httpGet(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 10)}) async {
-    try {
-      final response = await _client.get(url, headers: headers ?? {}).timeout(timeout);
-      if (response.statusCode == 200) return response;
-    } catch (e) {
-      print('HTTP GET error ($url): $e');
+  /// 公共 HTTP GET 请求方法，统一处理超时、重试和异常捕获
+  Future<http.Response?> _httpGet(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 15), int retries = 2}) async {
+    for (var attempt = 0; attempt < retries; attempt++) {
+      try {
+        final response = await _client.get(url, headers: headers ?? {}).timeout(timeout);
+        if (response.statusCode == 200) return response;
+        debugPrint('HTTP ${response.statusCode}: ${url.host}${url.path}');
+      } catch (e) {
+        debugPrint('HTTP attempt ${attempt + 1}/$retries failed: ${url.host}${url.path} - $e');
+        if (attempt < retries - 1) {
+          await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+        }
+      }
     }
     return null;
   }
@@ -171,14 +178,12 @@ class ApiClient {
             totalMarketCap = _parseDouble(parts[45]) * 10000;
           }
 
-          // PB/PE 合理性校验：异常值记录日志便于排查字段索引问题
+          // PB/PE 合理性校验
           if (pb > 0 && (pb > 100 || pb < 0.01)) {
-            print('[PB Warning] code=$code pb=$pb parts.length=${parts.length}');
-            print('[PB Debug] parts[44]=${parts.length > 44 ? parts[44] : "N/A"} parts[45]=${parts.length > 45 ? parts[45] : "N/A"} parts[46]=${parts.length > 46 ? parts[46] : "N/A"}');
+            // anomaly detected
           }
           if (pe > 0 && (pe > 10000 || pe < 0.01)) {
-            print('[PE Warning] code=$code pe=$pe parts.length=${parts.length}');
-            print('[PE Debug] parts[38]=${parts.length > 38 ? parts[38] : "N/A"} parts[39]=${parts.length > 39 ? parts[39] : "N/A"}');
+            // anomaly detected
           }
 
           final high = _parseDouble(parts[33]);
@@ -571,7 +576,6 @@ class ApiClient {
     }
 
     // 新浪K线接口失败时，尝试东方财富备用接口
-    print('[Kline] Sina failed for $code, trying EastMoney fallback...');
     try {
       final emResult = await _fetchStockHistoryFromEastMoney(code, days);
       if (emResult.isNotEmpty) {
@@ -579,7 +583,7 @@ class ApiClient {
         return emResult;
       }
     } catch (e) {
-      print('[Kline] EastMoney fallback also failed for $code: $e');
+      // ignore
     }
     return [];
   }
@@ -861,52 +865,48 @@ class ApiClient {
 
     // 主接口：东方财富板块列表
     List<SectorInfo>? sectors;
-    for (var attempt = 0; attempt < 2; attempt++) {
-      try {
-        final url = Uri.parse(
-          'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
-        );
-        final response = await _httpGet(url, headers: {
-          'User-Agent': 'Mozilla/5.0',
-          'Referer': 'https://quote.eastmoney.com/',
-        });
-        if (response != null) {
-          final data = json.decode(response.body) as Map<String, dynamic>;
-          final diff = data['data']?['diff'] as List?;
-          if (diff != null && diff.isNotEmpty) {
-            sectors = [];
-            for (final item in diff) {
-              final m = item as Map<String, dynamic>;
-              final rawLeadCode = m['f140']?.toString() ?? '';
-              final leadStockCode = addMarketPrefix(rawLeadCode);
-              sectors.add(SectorInfo(
-                name: m['f14']?.toString() ?? '',
-                code: m['f12']?.toString() ?? '',
-                changePct: _parseDouble(m['f3']),
-                leadStockName: m['f128']?.toString() ?? '',
-                leadStockCode: leadStockCode,
-                stockCount: (m['f104'] as int? ?? 0) + (m['f105'] as int? ?? 0),
-              ));
-            }
-            _setCached(cacheKey, sectors, duration: const Duration(seconds: 30));
-            break;
+    try {
+      final url = Uri.parse(
+        'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
+      );
+      final response = await _httpGet(url, headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://quote.eastmoney.com/',
+      }, retries: 3);
+      if (response != null) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final diff = data['data']?['diff'] as List?;
+        if (diff != null && diff.isNotEmpty) {
+          sectors = [];
+          for (final item in diff) {
+            final m = item as Map<String, dynamic>;
+            final rawLeadCode = m['f140']?.toString() ?? '';
+            final leadStockCode = addMarketPrefix(rawLeadCode);
+            sectors.add(SectorInfo(
+              name: m['f14']?.toString() ?? '',
+              code: m['f12']?.toString() ?? '',
+              changePct: _parseDouble(m['f3']),
+              leadStockName: m['f128']?.toString() ?? '',
+              leadStockCode: leadStockCode,
+              stockCount: (m['f104'] as int? ?? 0) + (m['f105'] as int? ?? 0),
+            ));
           }
+          _setCached(cacheKey, sectors, duration: const Duration(seconds: 30));
         }
-      } catch (e) {
-        print('Parse hot sectors failed (attempt ${attempt + 1}): $e');
       }
+    } catch (e) {
+      debugPrint('getHotSectors eastmoney failed: $e');
     }
 
     // 备用接口：新浪行业板块
     if (sectors == null || sectors.isEmpty) {
-      print('[Sectors] EastMoney failed, trying Sina fallback...');
       try {
         sectors = await _fetchHotSectorsFromSina();
         if (sectors.isNotEmpty) {
           _setCached(cacheKey, sectors, duration: const Duration(seconds: 30));
         }
       } catch (e) {
-        print('[Sectors] Sina fallback also failed: $e');
+        debugPrint('getHotSectors sina failed: $e');
       }
     }
 
@@ -1001,12 +1001,11 @@ class ApiClient {
           }
         }
       } catch (e) {
-        print('Parse sector stocks failed (attempt ${attempt + 1}): $e');
+        // ignore
       }
     }
 
     // 备用接口：新浪板块个股
-    print('[SectorStocks] EastMoney failed for $sectorCode, trying Sina fallback...');
     try {
       final stocks = await _fetchSectorStocksFromSina(sectorCode);
       if (stocks.isNotEmpty) {
@@ -1014,7 +1013,7 @@ class ApiClient {
         return stocks;
       }
     } catch (e) {
-      print('[SectorStocks] Sina fallback also failed for $sectorCode: $e');
+      // ignore
     }
     return [];
   }
