@@ -653,38 +653,43 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
   // 1. 信号评分 (0-30分) - 按信号强度加权
   int buyCount = buySignals.length;
   int sellCount = sellSignals.length;
-  double buyStrength = buySignals.fold(0.0, (sum, s) => sum + s.strength);
-  double sellStrength = sellSignals.fold(0.0, (sum, s) => sum + s.strength);
+
+  // ADX趋势/盘整权重调整：在加权阶段分别调整信号强度
+  final adx = last.adx14;
+  double buyStrength = 0;
+  double sellStrength = 0;
+  for (final s in buySignals) {
+    double strength = s.strength.toDouble();
+    if (adx > 25) {
+      // 趋势市：趋势类信号权重×1.2
+      if (s.indicator == 'MA' || s.indicator == 'MACD' || s.signal.contains('排列') || s.signal.contains('金叉') || s.signal.contains('死叉')) {
+        strength *= 1.2;
+      }
+    } else if (adx > 0 && adx < 20) {
+      // 盘整市：震荡类信号权重×1.2
+      if (s.indicator == 'RSI' || s.indicator == 'KDJ' || s.signal.contains('超买') || s.signal.contains('超卖')) {
+        strength *= 1.2;
+      }
+    }
+    buyStrength += strength;
+  }
+  for (final s in sellSignals) {
+    double strength = s.strength.toDouble();
+    if (adx > 25) {
+      if (s.indicator == 'MA' || s.indicator == 'MACD' || s.signal.contains('排列') || s.signal.contains('金叉') || s.signal.contains('死叉')) {
+        strength *= 1.2;
+      }
+    } else if (adx > 0 && adx < 20) {
+      if (s.indicator == 'RSI' || s.indicator == 'KDJ' || s.signal.contains('超买') || s.signal.contains('超卖')) {
+        strength *= 1.2;
+      }
+    }
+    sellStrength += strength;
+  }
   // Normalize: max possible strength per signal is 100, typical 3-4 signals
   double maxTotal = 300.0;
   double signalScore = 15 + (buyStrength - sellStrength) / maxTotal * 30;
   signalScore = signalScore.clamp(0.0, 30.0);
-
-  // ADX trend/ranging weight adjustment
-  final adx = last.adx14;
-  if (adx > 25) {
-    // Trending market: boost trend signals, dampen oscillator signals
-    final trendSignals = signals.where((s) =>
-      s.indicator == 'MA' || s.indicator == 'MACD' || s.signal.contains('排列') || s.signal.contains('金叉') || s.signal.contains('死叉')
-    ).fold(0.0, (sum, s) => sum + s.strength);
-    final oscSignals = signals.where((s) =>
-      s.indicator == 'RSI' || s.indicator == 'KDJ' || s.signal.contains('超买') || s.signal.contains('超卖')
-    ).fold(0.0, (sum, s) => sum + s.strength);
-    if (trendSignals > oscSignals) {
-      signalScore = (signalScore * 1.2).clamp(0.0, 30.0);
-    }
-  } else if (adx > 0 && adx < 20) {
-    // Ranging market: boost oscillator signals, dampen trend signals
-    final oscSignals = signals.where((s) =>
-      s.indicator == 'RSI' || s.indicator == 'KDJ' || s.signal.contains('超买') || s.signal.contains('超卖')
-    ).fold(0.0, (sum, s) => sum + s.strength);
-    final trendSignals = signals.where((s) =>
-      s.indicator == 'MA' || s.indicator == 'MACD' || s.signal.contains('排列') || s.signal.contains('金叉') || s.signal.contains('死叉')
-    ).fold(0.0, (sum, s) => sum + s.strength);
-    if (oscSignals > trendSignals) {
-      signalScore = (signalScore * 1.2).clamp(0.0, 30.0);
-    }
-  }
 
   // 2. 趋势强度评分 (0-20分) - 基于均线排列 + ADX趋势强度
   double trendScore = 0;
@@ -831,32 +836,40 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
   }
   realtimeScore = realtimeScore.clamp(0.0, 100.0);
 
-  // ========== 共振评分 ==========
+  // ========== 共振评分（双向：多空对称） ==========
   int bullCount = 0;
+  int bearCount = 0;
   final maBull = last.ma5 > last.ma10 && last.ma10 > last.ma20;
   final maBear = last.ma5 < last.ma10 && last.ma10 < last.ma20;
   if (maBull) bullCount++;
+  if (maBear) bearCount++;
   final macdBull = last.macdDif > last.macdDea && last.macdHist > 0;
   final macdBear = last.macdDif < last.macdDea && last.macdHist < 0;
   if (macdBull) bullCount++;
+  if (macdBear) bearCount++;
   final rsiBull = last.rsi6 > 60;
   final rsiBear = last.rsi6 < 40 && last.rsi6 > 0;
   if (rsiBull) bullCount++;
+  if (rsiBear) bearCount++;
   final kdjBull = last.k > last.d && last.k < 80;
   final kdjBear = last.k < last.d && last.k > 20;
   if (kdjBull) bullCount++;
+  if (kdjBear) bearCount++;
   final bollBull = last.bollMid > 0 && last.close > last.bollMid;
   final bollBear = last.bollMid > 0 && last.close < last.bollMid;
   if (bollBull) bullCount++;
-  final avgVol5 = data.length >= 5 ? data.sublist(data.length - 5).map((d) => d.volume).reduce((a, b) => a + b) / 5 : 0.0;
-  final volBull = last.volume > avgVol5 && last.close > last.open;
-  final volBear = last.volume > avgVol5 && last.close < last.open;
+  if (bollBear) bearCount++;
+  final volBull = last.volMa5 > 0 && last.volume > last.volMa5 && last.close > last.open;
+  final volBear = last.volMa5 > 0 && last.volume > last.volMa5 && last.close < last.open;
   if (volBull) bullCount++;
+  if (volBear) bearCount++;
   final hasBottomDivergence = signals.any((s) => s.signal.contains('底背离'));
   final hasTopDivergence = signals.any((s) => s.signal.contains('顶背离'));
   if (hasBottomDivergence) bullCount += 2;
+  if (hasTopDivergence) bearCount += 2;
 
-  final confluenceBonus = bullCount / 8 * 100;
+  // 双向共振：多空对称，范围[-8, 8]，映射到[0, 100]
+  final confluenceBonus = (50 + (bullCount - bearCount) / 8 * 50).clamp(0.0, 100.0);
 
   // ========== 三维度加权总分 ==========
   // K线信号(55%) + 实时行情(25%) + 共振评分(20%)
