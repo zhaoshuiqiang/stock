@@ -331,7 +331,6 @@ List<HistoryKline> calcATR(List<HistoryKline> data, {int period = 14}) {
 
   if (data.length < period) return result;
 
-  final k = 2.0 / (period + 1);
   double atr = 0;
   for (int i = 0; i < period; i++) {
     atr += tr[i];
@@ -344,7 +343,7 @@ List<HistoryKline> calcATR(List<HistoryKline> data, {int period = 14}) {
     } else if (i == period - 1) {
       result[i] = result[i].copyWith(atr14: atr);
     } else {
-      atr = k * tr[i] + (1 - k) * atr;
+      atr = (atr * (period - 1) + tr[i]) / period;
       result[i] = result[i].copyWith(atr14: atr);
     }
   }
@@ -460,17 +459,17 @@ List<HistoryKline> calcDMI(List<HistoryKline> data, {int period = 14}) {
 
   // ADX = EMA of DX
   double adx = 0;
-  for (int i = period; i < 2 * period - 1 && i < data.length; i++) {
+  for (int i = period; i < 2 * period && i < data.length; i++) {
     adx += dxList[i];
   }
-  if (data.length >= 2 * period - 1) {
+  if (data.length >= 2 * period) {
     adx /= period;
   }
 
   for (int i = 0; i < data.length; i++) {
     if (i < period) {
       result[i] = result[i].copyWith(plusDi14: 0, minusDi14: 0, dx: 0, adx14: 0);
-    } else if (i < 2 * period - 1 || data.length < 2 * period - 1) {
+    } else if (i < 2 * period || data.length < 2 * period) {
       result[i] = result[i].copyWith(
         plusDi14: plusDi[i],
         minusDi14: minusDi[i],

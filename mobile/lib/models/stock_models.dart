@@ -345,6 +345,19 @@ class HistoryKline {
       bollUpper: QuoteData._parseDouble(json['boll_upper']),
       bollMid: QuoteData._parseDouble(json['boll_mid']),
       bollLower: QuoteData._parseDouble(json['boll_lower']),
+      ema5: QuoteData._parseDouble(json['ema5']),
+      ema10: QuoteData._parseDouble(json['ema10']),
+      ema20: QuoteData._parseDouble(json['ema20']),
+      ema60: QuoteData._parseDouble(json['ema60']),
+      atr14: QuoteData._parseDouble(json['atr14']),
+      obv: QuoteData._parseDouble(json['obv']),
+      bias6: QuoteData._parseDouble(json['bias6']),
+      bias12: QuoteData._parseDouble(json['bias12']),
+      bias24: QuoteData._parseDouble(json['bias24']),
+      plusDi14: QuoteData._parseDouble(json['plus_di14']),
+      minusDi14: QuoteData._parseDouble(json['minus_di14']),
+      dx: QuoteData._parseDouble(json['dx']),
+      adx14: QuoteData._parseDouble(json['adx14']),
     );
   }
 }

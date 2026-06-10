@@ -317,7 +317,6 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         _isAnalysisRefreshing = false;
       });
     } catch (e) {
-      print('Refresh analysis failed: $e');
       if (mounted) setState(() { _isAnalysisRefreshing = false; });
     }
   }
@@ -350,10 +349,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             totalMarketCap: _quote!.totalMarketCap,
             circulatingMarketCap: _quote!.circulatingMarketCap,
             // 主力资金：如果轮询返回了有效数据则更新，否则保留原值
-            mainInflow: quote.mainInflow,
-            mainOutflow: quote.mainOutflow,
-            mainNetFlow: quote.mainNetFlow,
-            mainNetFlowRate: quote.mainNetFlowRate,
+            mainInflow: quote.mainInflow != 0 ? quote.mainInflow : _quote!.mainInflow,
+            mainOutflow: quote.mainOutflow != 0 ? quote.mainOutflow : _quote!.mainOutflow,
+            mainNetFlow: quote.mainNetFlow != 0 ? quote.mainNetFlow : _quote!.mainNetFlow,
+            mainNetFlowRate: quote.mainNetFlowRate != 0 ? quote.mainNetFlowRate : _quote!.mainNetFlowRate,
           );
         } else {
           _quote = quote;
@@ -428,10 +427,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       var quote = await _apiClient.getRealtimeQuote(widget.code);
       final mainFundFlow = await _apiClient.getMainFundFlow(widget.code);
       final klines = await _apiClient.getStockHistory(widget.code, days: 120);
-      print('[_loadData] quote=${quote?.name} price=${quote?.price}, klines=${klines.length}');
       final calculated = calcAllIndicators(klines);
       final analysis = generateAnalysis(calculated, quote);
-      print('[_loadData] calculated=${calculated.length}, analysis.score=${analysis.score}, signals=${analysis.signals.length}');
 
       if (quote != null && mainFundFlow != null) {
         quote = QuoteData(
@@ -497,9 +494,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           _timeshareLoadFailed = true;
         }
       });
-    } catch (e, stackTrace) {
-      print('Load data failed for ${widget.code}: $e');
-      print('Stack trace: $stackTrace');
+    } catch (e) {
+      // ignore
     } finally {
       if (mounted) {
         setState(() {

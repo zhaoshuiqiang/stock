@@ -388,21 +388,21 @@ List<TradingStrategy> evaluateStrategies(List<HistoryKline> data, List<SignalIte
   final activeSellStrategies = strategies.where((s) => s.isActive && s.type == 'sell').toList();
 
   if (activeBuyStrategies.isNotEmpty && activeSellStrategies.isNotEmpty) {
-    // Add conflict note to conflicting strategies
-    for (final s in activeBuyStrategies) {
-      strategies.add(TradingStrategy(
-        id: 'conflict_${s.id}',
-        name: '${s.name}(冲突)',
-        category: '警告',
-        description: '买入策略${s.name}与卖出策略${activeSellStrategies.map((e) => e.name).join('/')}同时激活，信号矛盾，建议谨慎操作',
-        entryRule: '多空信号冲突，观望为主',
-        exitRule: '等待信号统一',
-        stopLossRule: '严格止损',
-        isActive: true,
-        signalStrength: 50,
-        type: 'buy',
-      ));
-    }
+    strategies.add(TradingStrategy(
+      id: 'conflict_warning',
+      name: '策略冲突警告',
+      category: '警告',
+      description: '同时存在${activeBuyStrategies.length}个买入策略和${activeSellStrategies.length}个卖出策略，市场信号矛盾，建议观望',
+      entryRule: '多空信号冲突，观望为主',
+      exitRule: '等待信号统一',
+      stopLossRule: '严格止损',
+      isActive: true,
+      signalStrength: 70,
+      entryPrice: null,
+      targetPrice: null,
+      stopLossPrice: null,
+      type: 'warning',
+    ));
   }
 
   return strategies;

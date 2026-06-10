@@ -10,6 +10,7 @@ import '../validators/data_validator.dart';
 
 class ApiClient {
   http.Client _client = http.Client();
+  HttpClient? _fallbackClient;
   final Map<String, dynamic> _cache = {};
   final Duration _cacheDuration = const Duration(minutes: 5);
   final Map<String, Future> _inFlightRequests = {};
@@ -19,6 +20,14 @@ class ApiClient {
   void _rebuildClient() {
     try { _client.close(); } catch (_) {}
     _client = http.Client();
+  }
+
+  /// 获取共享的fallback HttpClient
+  HttpClient _getFallbackClient() {
+    _fallbackClient ??= HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15)
+      ..idleTimeout = const Duration(seconds: 5);
+    return _fallbackClient!;
   }
 
   /// 公共 HTTP GET 请求方法，统一处理超时、重试和异常捕获
@@ -46,27 +55,25 @@ class ApiClient {
   /// 备用HTTP GET：使用dart:io HttpClient，避免http包连接池问题
   Future<http.Response?> _httpGetFallback(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 15)}) async {
     for (var attempt = 0; attempt < 2; attempt++) {
-      HttpClient? client;
       try {
-        client = HttpClient();
-        client.connectionTimeout = timeout;
-        client.idleTimeout = const Duration(seconds: 5);
+        final client = _getFallbackClient();
         final request = await client.getUrl(url);
         headers?.forEach((key, value) => request.headers.set(key, value));
         final ioResponse = await request.close().timeout(timeout);
         final bodyBytes = await ioResponse.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d)).then((b) => b.takeBytes());
         if (ioResponse.statusCode == 200) {
           return http.Response.bytes(Uint8List.fromList(bodyBytes), 200,
-            headers: {'content-type': 'text/html; charset=utf-8'});
+            headers: {'content-type': 'application/json; charset=utf-8'});
         }
         debugPrint('HTTP fallback ${ioResponse.statusCode}: ${url.host}${url.path}');
       } catch (e) {
         debugPrint('HTTP fallback attempt ${attempt + 1}/2 failed: ${url.host}${url.path} - $e');
+        // fallback客户端连接异常时重建
+        try { _fallbackClient?.close(); } catch (_) {}
+        _fallbackClient = null;
         if (attempt < 1) {
           await Future.delayed(const Duration(milliseconds: 500));
         }
-      } finally {
-        client?.close();
       }
     }
     return null;
@@ -816,7 +823,7 @@ class ApiClient {
   /// 判断是否为主板股票（沪深主板，排除创业板/科创板/北交所）
   bool isMainBoardStock(String code) {
     final pureCode = code.replaceAll(RegExp(r'^[a-zA-Z]+'), '');
-    return pureCode.startsWith('60') || pureCode.startsWith('00');
+    return pureCode.length == 6 && (pureCode.startsWith('60') || pureCode.startsWith('00'));
   }
 
   /// 获取财经快讯
@@ -1285,6 +1292,7 @@ class ApiClient {
 
   void dispose() {
     _client.close();
+    _fallbackClient?.close();
     _cache.clear();
     _inFlightRequests.clear();
   }

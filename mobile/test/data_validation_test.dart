@@ -392,13 +392,22 @@ void main() {
       ));
     });
 
-    test('ST stock within 10% limit is not flagged as extreme change', () {
-      final quote = createTestQuote(changePct: 8.0, name: '*ST测试');
+    test('ST stock within 5% limit is not flagged as extreme change', () {
+      final quote = createTestQuote(changePct: 4.0, name: '*ST测试');
       final result = DataValidator.validateQuote(quote);
 
       expect(result.anomalies, isNot(anyElement(
         predicate<DataAnomaly>((a) => a.type == DataAnomalyType.extremeChange),
       )));
+    });
+
+    test('ST stock exceeding 5% limit is flagged as extreme change', () {
+      final quote = createTestQuote(changePct: 8.0, name: '*ST测试');
+      final result = DataValidator.validateQuote(quote);
+
+      expect(result.anomalies, anyElement(
+        predicate<DataAnomaly>((a) => a.type == DataAnomalyType.extremeChange),
+      ));
     });
 
     test('detects zero volume', () {

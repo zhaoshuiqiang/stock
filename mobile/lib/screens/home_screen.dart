@@ -237,18 +237,16 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _pickSectors() async {
+    final topSectors = _sectors.take(10).toList();
     setState(() {
       _isPickingSectors = true;
       _pickProgress = 0;
-      // 只分析涨幅前10的板块，每个板块取涨幅前10的主板股票
-      final topSectors = _sectors.take(10).toList();
       _pickTotal = topSectors.length;
     });
 
     try {
       final List<Map<String, dynamic>> picks = [];
       final Set<String> seenCodes = {};
-      final topSectors = _sectors.take(10).toList();
 
       // Process sectors in batches of 5
       for (int i = 0; i < topSectors.length; i += 5) {

@@ -42,9 +42,11 @@ class DataValidator {
       ));
     }
 
-    // Extreme change check (non-ST: >20%, ST: >10%)
+    // 主板(60x/00x)涨跌停10%，创业板(300x)/科创板(688x)涨跌停20%
     final isST = quote.name.contains('ST');
-    final changeLimit = isST ? 10.0 : 20.0;
+    final codeNum = quote.code.replaceAll(RegExp(r'^[a-zA-Z]+'), '');
+    final isMainBoard = codeNum.startsWith('60') || codeNum.startsWith('00');
+    final changeLimit = isST ? 5.0 : (isMainBoard ? 11.0 : 21.0); // 留1%容差
     if (quote.changePct.abs() > changeLimit) {
       anomalies.add(DataAnomaly(
         type: DataAnomalyType.extremeChange,

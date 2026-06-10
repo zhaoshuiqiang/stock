@@ -10,6 +10,22 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.11.0',
+        'date': '2026-06-11',
+        'changes': [
+          'HTTP客户端重构：新增3层容错机制（主客户端重试+连接池重建+dart:io HttpClient降级）',
+          '修复东方财富API连接不稳定导致板块/K线数据加载失败的问题',
+          '修复精选股票中文乱码：Sina接口GBK解码修正，降级响应UTF-8编码头修正',
+          '板块和精选仅显示主板沪深股票（60xxxx上海+00xxxx深圳），过滤创业板/科创板/北交所',
+          '精选分析速度优化：限制Top10板块×10只股票，板块内并行分析',
+          '修复精选分析topSectors重复创建问题',
+          '修复isMainBoardStock缺少长度校验导致短代码误匹配',
+          '修复降级HttpClient每次请求新建实例，改为共享+懒初始化+错误重建',
+          'Sina板块接口解析从正则改为JSON解析，适配接口格式变更',
+          'ApiClient dispose新增_fallbackClient关闭，防止内存泄漏',
+        ],
+      },
+      {
         'version': 'v2.10.0',
         'date': '2026-06-10',
         'changes': [
