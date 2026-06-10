@@ -1072,7 +1072,7 @@ class ApiClient {
       'Referer': 'https://finance.sina.com.cn',
     }, timeout: const Duration(seconds: 10));
     if (response != null) {
-      final body = response.body;
+      final body = await _decodeGbk(response.bodyBytes);
       final data = json.decode(body);
       if (data is List && data.isNotEmpty) {
         final stocks = <QuoteData>[];
