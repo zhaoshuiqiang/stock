@@ -339,10 +339,10 @@ List<SignalItem> detectSignals(List<HistoryKline> data) {
       final bollWidth = (last.bollUpper - last.bollLower) / last.bollMid * 100;
       if (bollWidth < 5) {
         signals.add(SignalItem(
-          type: 'buy',
+          type: 'neutral',
           indicator: 'BOLL',
           signal: '布林带收窄',
-          description: '布林带宽度仅${bollWidth.toStringAsFixed(1)}%，波动率极低，可能即将变盘',
+          description: '布林带宽度仅${bollWidth.toStringAsFixed(1)}%，波动率极低，即将变盘但方向待确认',
           strength: 55,
           timestamp: last.date,
         ));
@@ -557,10 +557,10 @@ List<SignalItem> _detectBollSqueezeBreakout(List<HistoryKline> data) {
 
   if (currentBw <= minBw * 1.1 && contracting) {
     signals.add(SignalItem(
-      type: 'buy',
+      type: 'neutral',
       indicator: 'BOLL',
       signal: '布林带收口蓄势',
-      description: '布林带宽度收窄至${currentBw.toStringAsFixed(1)}%，连续5日递减，即将选择方向突破',
+      description: '布林带宽度收窄至${currentBw.toStringAsFixed(1)}%，连续5日递减，即将选择方向突破但方向待确认',
       strength: 60,
       timestamp: last.date,
     ));
@@ -650,37 +650,73 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
 
   // ========== 多维加权评分（三维度） ==========
 
-  // 1. 信号评分 (0-40分)
+  // 1. 信号评分 (0-30分) - 按信号强度加权
   int buyCount = buySignals.length;
   int sellCount = sellSignals.length;
-  double signalScore = (buyCount - sellCount) * 8.0 + 20;
-  signalScore = signalScore.clamp(0.0, 40.0);
+  double buyStrength = buySignals.fold(0.0, (sum, s) => sum + s.strength);
+  double sellStrength = sellSignals.fold(0.0, (sum, s) => sum + s.strength);
+  // Normalize: max possible strength per signal is 100, typical 3-4 signals
+  double maxTotal = 300.0;
+  double signalScore = 15 + (buyStrength - sellStrength) / maxTotal * 30;
+  signalScore = signalScore.clamp(0.0, 30.0);
 
-  // 2. 趋势强度评分 (0-20分) - 基于均线排列
+  // ADX trend/ranging weight adjustment
+  final adx = last.adx14;
+  if (adx > 25) {
+    // Trending market: boost trend signals, dampen oscillator signals
+    final trendSignals = signals.where((s) =>
+      s.indicator == 'MA' || s.indicator == 'MACD' || s.signal.contains('排列') || s.signal.contains('金叉') || s.signal.contains('死叉')
+    ).fold(0.0, (sum, s) => sum + s.strength);
+    final oscSignals = signals.where((s) =>
+      s.indicator == 'RSI' || s.indicator == 'KDJ' || s.signal.contains('超买') || s.signal.contains('超卖')
+    ).fold(0.0, (sum, s) => sum + s.strength);
+    if (trendSignals > oscSignals) {
+      signalScore = (signalScore * 1.2).clamp(0.0, 30.0);
+    }
+  } else if (adx > 0 && adx < 20) {
+    // Ranging market: boost oscillator signals, dampen trend signals
+    final oscSignals = signals.where((s) =>
+      s.indicator == 'RSI' || s.indicator == 'KDJ' || s.signal.contains('超买') || s.signal.contains('超卖')
+    ).fold(0.0, (sum, s) => sum + s.strength);
+    final trendSignals = signals.where((s) =>
+      s.indicator == 'MA' || s.indicator == 'MACD' || s.signal.contains('排列') || s.signal.contains('金叉') || s.signal.contains('死叉')
+    ).fold(0.0, (sum, s) => sum + s.strength);
+    if (oscSignals > trendSignals) {
+      signalScore = (signalScore * 1.2).clamp(0.0, 30.0);
+    }
+  }
+
+  // 2. 趋势强度评分 (0-20分) - 基于均线排列 + ADX趋势强度
   double trendScore = 0;
   if (last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0) {
     if (last.ma5 > last.ma10 && last.ma10 > last.ma20) {
-      trendScore = 20; // 完美多头排列
+      trendScore = 18;
     } else if (last.ma5 > last.ma10) {
-      trendScore = 12;
+      trendScore = 11;
     } else if (last.ma5 > last.ma20) {
-      trendScore = 8;
+      trendScore = 7;
     } else {
       trendScore = 3;
     }
   }
-  // 空头排列惩罚
   if (last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0) {
     if (last.ma5 < last.ma10 && last.ma10 < last.ma20) {
       trendScore = 0;
     }
   }
+  // ADX trend strength bonus
+  if (last.adx14 > 25) {
+    trendScore += 5;
+  } else if (last.adx14 > 0 && last.adx14 < 20) {
+    trendScore -= 3;
+  }
+  trendScore = trendScore.clamp(0.0, 20.0);
 
-  // 3. 动量评分 (0-20分) - 基于RSI
-  double momentumScore = 10; // 中性
+  // 3. 动量评分 (0-20分) - 基于RSI + BIAS乖离率
+  double momentumScore = 10;
   if (last.rsi6 > 0) {
     if (last.rsi6 < 30) {
-      momentumScore = 16; // 超卖=潜在反弹
+      momentumScore = 16;
     } else if (last.rsi6 < 40) {
       momentumScore = 13;
     } else if (last.rsi6 < 60) {
@@ -688,35 +724,71 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
     } else if (last.rsi6 < 70) {
       momentumScore = 7;
     } else {
-      momentumScore = 3; // 超买=潜在回调
+      momentumScore = 3;
     }
   }
+  // BIAS extreme deviation penalty
+  if (last.bias6.abs() > 5) {
+    momentumScore -= 4;
+  } else if (last.bias6.abs() > 3) {
+    momentumScore -= 2;
+  }
+  momentumScore = momentumScore.clamp(0.0, 20.0);
 
-  // 4. 量价确认评分 (0-20分)
-  double volumeScore = 10; // 中性
+  // 4. 量价确认评分 (0-15分) - 基于量比 + OBV趋势
+  double volumeScore = 8;
   if (last.volMa5 > 0) {
     final volRatio = last.volume / last.volMa5;
     if (last.close >= last.open) {
       if (volRatio > 1.5) {
-        volumeScore = 18;
-      } else if (volRatio > 1.0) {
         volumeScore = 14;
+      } else if (volRatio > 1.0) {
+        volumeScore = 11;
       } else {
-        volumeScore = 8;
+        volumeScore = 6;
       }
     } else {
       if (volRatio > 1.5) {
-        volumeScore = 3;
+        volumeScore = 2;
       } else if (volRatio > 1.0) {
-        volumeScore = 6;
+        volumeScore = 5;
       } else {
-        volumeScore = 10;
+        volumeScore = 8;
       }
+    }
+  }
+  // OBV trend confirmation
+  if (data.length >= 5 && last.obv != 0) {
+    final obv5 = data[data.length - 5].obv;
+    if (obv5 != 0) {
+      if (last.obv > obv5 && last.close > data[data.length - 5].close) {
+        volumeScore += 3; // OBV confirms uptrend
+      } else if (last.obv < obv5 && last.close < data[data.length - 5].close) {
+        volumeScore -= 2; // OBV confirms downtrend
+      }
+    }
+  }
+  volumeScore = volumeScore.clamp(0.0, 15.0);
+
+  // 5. 波动率评分 (0-15分) - 基于ATR
+  double volatilityScore = 8;
+  if (last.atr14 > 0 && last.close > 0) {
+    final atrPct = last.atr14 / last.close * 100;
+    if (atrPct < 2) {
+      volatilityScore = 13; // Low volatility, stable
+    } else if (atrPct < 3) {
+      volatilityScore = 11;
+    } else if (atrPct < 4) {
+      volatilityScore = 8;
+    } else if (atrPct < 5) {
+      volatilityScore = 5;
+    } else {
+      volatilityScore = 2; // High volatility, risky
     }
   }
 
   // K线信号基础分 (0-100)
-  final klineBaseScore = (signalScore + trendScore + momentumScore + volumeScore).round().clamp(0, 100);
+  final klineBaseScore = (signalScore + trendScore + momentumScore + volumeScore + volatilityScore).round().clamp(0, 100);
 
   // ========== 5. 实时行情评分 (0-100) ==========
   double realtimeScore = 50; // 中性基准
@@ -724,17 +796,17 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
     // 涨跌幅权重
     final changePct = quote.changePct;
     if (changePct > 0 && changePct <= 3) {
-      realtimeScore += 10; // 温和上涨，趋势确认
+      realtimeScore += 10;
     } else if (changePct > 3 && changePct <= 5) {
-      realtimeScore += 5; // 涨幅较大，部分获利
+      realtimeScore += 5;
     } else if (changePct > 5) {
-      realtimeScore -= 5; // 涨幅过大，追高风险
+      realtimeScore -= 5;
     } else if (changePct < 0 && changePct >= -3) {
-      realtimeScore -= 5; // 温和下跌，弱势延续
+      realtimeScore -= 5;
     } else if (changePct < -3 && changePct >= -5) {
-      realtimeScore += 5; // 跌幅较大，超跌机会
+      realtimeScore += 5;
     } else if (changePct < -5) {
-      realtimeScore += 10; // 暴跌，超跌反弹机会（高风险高回报）
+      realtimeScore += 8;
     }
 
     // 资金流向权重
@@ -759,16 +831,36 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
   }
   realtimeScore = realtimeScore.clamp(0.0, 100.0);
 
-  // ========== 6. 板块趋势评分 (0-100) ==========
-  // 使用大盘涨跌作为板块趋势代理（个股分析时通常没有板块数据）
-  double sectorScore = 50; // 中性基准
-  // 注意：板块数据在机会页面批量获取，此处仅用市场情绪做参考
-  // 如果有quote的changePct，可以结合大盘走势判断
-  // 暂时使用中性值，板块权重由机会页面单独计算
+  // ========== 共振评分 ==========
+  int bullCount = 0;
+  final maBull = last.ma5 > last.ma10 && last.ma10 > last.ma20;
+  final maBear = last.ma5 < last.ma10 && last.ma10 < last.ma20;
+  if (maBull) bullCount++;
+  final macdBull = last.macdDif > last.macdDea && last.macdHist > 0;
+  final macdBear = last.macdDif < last.macdDea && last.macdHist < 0;
+  if (macdBull) bullCount++;
+  final rsiBull = last.rsi6 > 60;
+  final rsiBear = last.rsi6 < 40 && last.rsi6 > 0;
+  if (rsiBull) bullCount++;
+  final kdjBull = last.k > last.d && last.k < 80;
+  final kdjBear = last.k < last.d && last.k > 20;
+  if (kdjBull) bullCount++;
+  final bollBull = last.bollMid > 0 && last.close > last.bollMid;
+  final bollBear = last.bollMid > 0 && last.close < last.bollMid;
+  if (bollBull) bullCount++;
+  final avgVol5 = data.length >= 5 ? data.sublist(data.length - 5).map((d) => d.volume).reduce((a, b) => a + b) / 5 : 0.0;
+  final volBull = last.volume > avgVol5 && last.close > last.open;
+  final volBear = last.volume > avgVol5 && last.close < last.open;
+  if (volBull) bullCount++;
+  final hasBottomDivergence = signals.any((s) => s.signal.contains('底背离'));
+  final hasTopDivergence = signals.any((s) => s.signal.contains('顶背离'));
+  if (hasBottomDivergence) bullCount += 2;
+
+  final confluenceBonus = bullCount / 8 * 100;
 
   // ========== 三维度加权总分 ==========
-  // K线信号(60%) + 实时行情(25%) + 板块趋势(15%)
-  final totalScore = (klineBaseScore * 0.6 + realtimeScore * 0.25 + sectorScore * 0.15).round().clamp(0, 100);
+  // K线信号(55%) + 实时行情(25%) + 共振评分(20%)
+  final totalScore = (klineBaseScore * 0.55 + realtimeScore * 0.25 + confluenceBonus * 0.20).round().clamp(0, 100);
 
   // ========== 5级推荐 ==========
   String recommendation;
@@ -876,6 +968,29 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
     }
   }
 
+  // ATR波动率风险
+  if (last.atr14 > 0 && last.close > 0) {
+    final atrPct = last.atr14 / last.close * 100;
+    if (atrPct > 5) {
+      riskFactors.add('ATR波动率${atrPct.toStringAsFixed(1)}%，短期波动剧烈');
+    }
+  }
+
+  // BIAS极端乖离风险
+  if (last.bias6 > 5) {
+    riskFactors.add('BIAS6乖离率${last.bias6.toStringAsFixed(1)}%，偏离均线过大，回归风险');
+  } else if (last.bias6 < -5) {
+    riskFactors.add('BIAS6乖离率${last.bias6.toStringAsFixed(1)}%，严重偏离均线，关注反弹');
+  }
+
+  // OBV量价背离风险
+  if (data.length >= 5 && last.obv != 0) {
+    final obv5 = data[data.length - 5].obv;
+    if (obv5 != 0 && last.close > data[data.length - 5].close && last.obv < obv5) {
+      riskFactors.add('OBV量价背离：价格上涨但量能趋势下降，上涨持续性存疑');
+    }
+  }
+
   // ========== 风险等级 ==========
   String riskLevel;
   if (riskFactors.length >= 3 || riskFactors.any((f) => f.contains('超买') || f.contains('过热'))) {
@@ -959,52 +1074,15 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
   // 免责声明
   suggestions.add('以上分析基于历史数据和技术指标，仅供参考，不构成投资建议，投资有风险，决策需谨慎');
 
-  // ========== 多指标共振评分（7维度） ==========
+  // ========== 多指标共振详情（7维度） ==========
   final confluenceDetails = <Map<String, dynamic>>[];
-  int bullCount = 0;
-
-  // 1. MA趋势
-  final maBull = last.ma5 > last.ma10 && last.ma10 > last.ma20;
-  final maBear = last.ma5 < last.ma10 && last.ma10 < last.ma20;
   confluenceDetails.add({'name': 'MA', 'bull': maBull, 'bear': maBear});
-  if (maBull) bullCount++;
-
-  // 2. MACD方向
-  final macdBull = last.macdDif > last.macdDea && last.macdHist > 0;
-  final macdBear = last.macdDif < last.macdDea && last.macdHist < 0;
   confluenceDetails.add({'name': 'MACD', 'bull': macdBull, 'bear': macdBear});
-  if (macdBull) bullCount++;
-
-  // 3. RSI区间
-  final rsiBull = last.rsi6 > 60;
-  final rsiBear = last.rsi6 < 40 && last.rsi6 > 0;
   confluenceDetails.add({'name': 'RSI', 'bull': rsiBull, 'bear': rsiBear});
-  if (rsiBull) bullCount++;
-
-  // 4. KDJ信号
-  final kdjBull = last.k > last.d && last.k < 80;
-  final kdjBear = last.k < last.d && last.k > 20;
   confluenceDetails.add({'name': 'KDJ', 'bull': kdjBull, 'bear': kdjBear});
-  if (kdjBull) bullCount++;
-
-  // 5. BOLL位置
-  final bollBull = last.bollMid > 0 && last.close > last.bollMid;
-  final bollBear = last.bollMid > 0 && last.close < last.bollMid;
   confluenceDetails.add({'name': 'BOLL', 'bull': bollBull, 'bear': bollBear});
-  if (bollBull) bullCount++;
-
-  // 6. 量价配合
-  final avgVol = data.length >= 5 ? data.sublist(data.length - 5).map((d) => d.volume).reduce((a, b) => a + b) / 5 : 0.0;
-  final volBull = last.volume > avgVol && last.close > last.open;
-  final volBear = last.volume > avgVol && last.close < last.open;
   confluenceDetails.add({'name': '量价', 'bull': volBull, 'bear': volBear});
-  if (volBull) bullCount++;
-
-  // 7. 背离信号（权重×2）
-  final hasBottomDivergence = signals.any((s) => s.signal.contains('底背离'));
-  final hasTopDivergence = signals.any((s) => s.signal.contains('顶背离'));
   confluenceDetails.add({'name': '背离', 'bull': hasBottomDivergence, 'bear': hasTopDivergence, 'weighted': true});
-  if (hasBottomDivergence) bullCount += 2;
 
   final tradeLevels = calcTradeLevels(data);
 

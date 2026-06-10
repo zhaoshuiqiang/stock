@@ -57,6 +57,7 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
   int _completedCount = 0;
   int _totalCount = 0;
   Map<String, QuoteData> _lastQuotes = {};
+  Map<String, DateTime> _lastAnalysisTime = {};
   Timer? _refreshTimer;
 
   @override
@@ -101,7 +102,7 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
       try {
         batchQuotes = await _apiClient.getBatchRealtimeQuotes(prefixedCodes);
       } catch (e) {
-        print('Batch quotes failed, falling back to individual: $e');
+        // ignore
         batchQuotes = [];
       }
 
@@ -111,69 +112,82 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
         quoteMap[q.code] = q;
       }
 
-      // Parallel analysis of all stocks using pre-fetched quotes
-      final futures = watchlist.map((item) async {
-        try {
-          final prefixedCode = _apiClient.addMarketPrefix(item.code);
-          QuoteData? quote = quoteMap[prefixedCode];
-          // Fallback to individual quote if batch didn't return this stock
-          if (quote == null) {
+      // Batch analysis with concurrency limit of 5
+      const batchSize = 5;
+      final results = <_StockOpportunity?>[];
+      for (int i = 0; i < watchlist.length; i += batchSize) {
+        final batch = watchlist.sublist(i, (i + batchSize).clamp(0, watchlist.length));
+        final batchResults = await Future.wait(
+          batch.map((item) async {
             try {
-              quote = await _apiClient.getRealtimeQuote(prefixedCode);
+              final prefixedCode = _apiClient.addMarketPrefix(item.code);
+              QuoteData? quote = quoteMap[prefixedCode];
+              // Fallback to individual quote if batch didn't return this stock
+              if (quote == null) {
+                try {
+                  quote = await _apiClient.getRealtimeQuote(prefixedCode);
+                } catch (e) {
+                  // ignore
+                }
+              }
+
+              // Incremental analysis: skip re-analysis if price unchanged and within 30s
+              final now = DateTime.now();
+              final lastTime = _lastAnalysisTime[prefixedCode];
+              final timeExpired = lastTime == null || now.difference(lastTime).inSeconds > 30;
+
+              if (!timeExpired && _lastQuotes.containsKey(prefixedCode)) {
+                final lastQuote = _lastQuotes[prefixedCode]!;
+                if (quote != null && quote.price == lastQuote.price && quote.changePct == lastQuote.changePct) {
+                  final existing = _opportunities.where((o) => o.code == item.code).toList();
+                  if (existing.isNotEmpty) {
+                    return existing.first;
+                  }
+                }
+              }
+              if (quote != null) {
+                _lastQuotes[prefixedCode] = quote;
+              }
+              _lastAnalysisTime[prefixedCode] = now;
+
+              final klines = await _apiClient.getStockHistory(prefixedCode, days: 120, bypassCache: TradingSession.isInTradingSession());
+              if (klines.isEmpty) {
+                return null;
+              }
+
+              final calculated = calcAllIndicators(klines);
+              final signals = detectSignals(calculated);
+              final analysis = generateAnalysis(calculated, quote);
+              final strategies = evaluateStrategies(calculated, signals);
+              final activeStrategies = strategies.where((s) => s.isActive).length;
+
+              final last = calculated.last;
+              final topSignals = signals.take(2).map((s) =>
+                  '${s.type == 'buy' ? '▲' : '▼'}${s.signal}').toList();
+
+              return _StockOpportunity(
+                code: item.code,
+                name: item.name,
+                price: quote?.price ?? last.close,
+                changePct: quote?.changePct ?? last.changePct,
+                score: analysis.score,
+                recommendation: analysis.recommendation,
+                riskLevel: analysis.riskLevel,
+                buySignalCount: signals.where((s) => s.type == 'buy').length,
+                sellSignalCount: signals.where((s) => s.type == 'sell').length,
+                activeStrategyCount: activeStrategies,
+                confluenceScore: analysis.confluenceScore,
+                tradeLevels: analysis.tradeLevels,
+                topSignals: topSignals,
+              );
             } catch (e) {
-              print('Individual quote failed for $prefixedCode: $e');
+              // ignore
+              return null;
             }
-          }
-
-          // Incremental analysis: skip re-analysis if price unchanged
-          final lastQuote = _lastQuotes[prefixedCode];
-          if (lastQuote != null && quote != null && quote.price == lastQuote.price && quote.changePct == lastQuote.changePct) {
-            final existing = _opportunities.where((o) => o.code == item.code).toList();
-            if (existing.isNotEmpty) {
-              return existing.first;
-            }
-          }
-          if (quote != null) {
-            _lastQuotes[prefixedCode] = quote;
-          }
-
-          final klines = await _apiClient.getStockHistory(prefixedCode, days: 120, bypassCache: TradingSession.isInTradingSession());
-          if (klines.isEmpty) {
-            return null;
-          }
-
-          final calculated = calcAllIndicators(klines);
-          final signals = detectSignals(calculated);
-          final analysis = generateAnalysis(calculated, quote);
-          final strategies = evaluateStrategies(calculated, signals);
-          final activeStrategies = strategies.where((s) => s.isActive).length;
-
-          final last = calculated.last;
-          final topSignals = signals.take(2).map((s) =>
-              '${s.type == 'buy' ? '▲' : '▼'}${s.signal}').toList();
-
-          return _StockOpportunity(
-            code: item.code,
-            name: item.name,
-            price: quote?.price ?? last.close,
-            changePct: quote?.changePct ?? last.changePct,
-            score: analysis.score,
-            recommendation: analysis.recommendation,
-            riskLevel: analysis.riskLevel,
-            buySignalCount: signals.where((s) => s.type == 'buy').length,
-            sellSignalCount: signals.where((s) => s.type == 'sell').length,
-            activeStrategyCount: activeStrategies,
-            confluenceScore: analysis.confluenceScore,
-            tradeLevels: analysis.tradeLevels,
-            topSignals: topSignals,
-          );
-        } catch (e) {
-          print('Failed to analyze ${item.code}: $e');
-          return null;
-        }
-      }).toList();
-
-      final results = await Future.wait(futures);
+          }),
+        );
+        results.addAll(batchResults);
+      }
       final opportunities = results.whereType<_StockOpportunity>().toList();
       opportunities.sort((a, b) => b.score.compareTo(a.score));
 
@@ -183,7 +197,7 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
         _isLoading = false;
       });
     } catch (e) {
-      print('Load opportunities failed: $e');
+      // ignore
       setState(() {
         _isLoading = false;
       });
@@ -236,7 +250,7 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
         await _archiveOpportunity(o);
         successCount++;
       } catch (e) {
-        print('Archive failed for ${o.name}: $e');
+        // ignore
       }
     }
     if (mounted) {
@@ -244,6 +258,54 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
         SnackBar(content: Text('已留档 $successCount/${_opportunities.length} 条')),
       );
     }
+  }
+
+  void _showScoringInfo() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a1a2e),
+        title: const Text('推荐评分逻辑说明', style: TextStyle(color: Colors.white, fontSize: 16)),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildInfoSection('综合评分公式', '总分 = K线评分×55% + 实时行情×25% + 共振评分×20%'),
+              const SizedBox(height: 12),
+              _buildInfoSection('K线评分（55%）', '由5个维度加权：\n• 信号评分(0-30)：按信号强度加权\n• 趋势评分(0-20)：MA排列+ADX趋势\n• 动量评分(0-20)：RSI区间+BIAS乖离\n• 量价评分(0-15)：量比+OBV趋势\n• 波动率评分(0-15)：ATR波动率评估'),
+              const SizedBox(height: 12),
+              _buildInfoSection('实时行情（25%）', '• 涨跌幅：温和上涨加分，超跌反弹加分\n• 资金流向：主力净流入加分\n• 换手率：适度活跃加分，过热减分'),
+              const SizedBox(height: 12),
+              _buildInfoSection('共振评分（20%）', '7维度多空共振：MA/MACD/RSI/KDJ/BOLL/量价/背离\n看多维度越多，共振加分越高'),
+              const SizedBox(height: 12),
+              _buildInfoSection('ADX权重调整', '• ADX>25趋势市：趋势信号权重×1.2\n• ADX<20盘整市：震荡信号权重×1.2'),
+              const SizedBox(height: 12),
+              _buildInfoSection('推荐等级', '• 80-100分：强烈买入\n• 65-79分：买入\n• 40-64分：观望\n• 25-39分：卖出\n• 0-24分：强烈卖出'),
+              const SizedBox(height: 12),
+              Text('※ 以上分析基于历史数据和技术指标，仅供参考，不构成投资建议', style: TextStyle(color: Colors.orange.withOpacity(0.8), fontSize: 11)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('知道了', style: TextStyle(color: Colors.blue)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoSection(String title, String content) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(color: Colors.blue, fontSize: 13, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text(content, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.5)),
+      ],
+    );
   }
 
   @override
@@ -305,6 +367,26 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  GestureDetector(
+                    onTap: _showScoringInfo,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.blue.withOpacity(0.5)),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.info_outline, color: Colors.blue, size: 14),
+                          SizedBox(width: 4),
+                          Text('评分说明', style: TextStyle(color: Colors.blue, fontSize: 12, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   if (_opportunities.isNotEmpty)
                     GestureDetector(
                       onTap: _archiveAll,

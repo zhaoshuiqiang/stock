@@ -68,7 +68,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         }
       });
     } catch (e) {
-      print('Refresh prices failed: $e');
+      // ignore
     }
   }
 
@@ -108,6 +108,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     Color reliabilityColor;
     final wasBuy = record.recommendation.contains('买入');
     final wasSell = record.recommendation.contains('卖出');
+    final wasNeutral = record.recommendation.contains('观望');
 
     if (wasBuy && priceChange < 0) {
       reliability = '推荐偏差';
@@ -115,6 +116,9 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     } else if (wasSell && priceChange > 0) {
       reliability = '推荐偏差';
       reliabilityColor = const Color(0xFFef5350);
+    } else if (wasNeutral && priceChangePct.abs() > 5) {
+      reliability = '推荐偏差';
+      reliabilityColor = priceChange > 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a);
     } else {
       reliability = '推荐合理';
       reliabilityColor = Colors.orange;
@@ -253,11 +257,13 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       final currentPrice = currentQuote?.price ?? 0;
       if (currentPrice > 0) {
         final priceChange = currentPrice - record.price;
+        final priceChangePct = record.price > 0 ? (priceChange / record.price * 100) : 0.0;
         final wasBuy = record.recommendation.contains('买入');
         final wasSell = record.recommendation.contains('卖出');
-        if ((wasBuy && priceChange < 0) || (wasSell && priceChange > 0)) {
+        final wasNeutral = record.recommendation.contains('观望');
+        if ((wasBuy && priceChange < 0) || (wasSell && priceChange > 0) || (wasNeutral && priceChangePct.abs() > 5)) {
           deviationCount++;
-        } else if (wasBuy || wasSell) {
+        } else if (wasBuy || wasSell || wasNeutral) {
           reasonableCount++;
         }
       }
@@ -360,16 +366,21 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
 
           final wasBuy = record.recommendation.contains('买入');
           final wasSell = record.recommendation.contains('卖出');
+          final wasNeutral = record.recommendation.contains('观望');
           String reliabilityLabel = '';
           Color reliabilityColor = Colors.transparent;
           if (currentPrice > 0) {
+            final priceChangePct = record.price > 0 ? (priceChange / record.price * 100) : 0.0;
             if (wasBuy && priceChange < 0) {
               reliabilityLabel = '偏差';
               reliabilityColor = const Color(0xFF26a69a);
             } else if (wasSell && priceChange > 0) {
               reliabilityLabel = '偏差';
               reliabilityColor = const Color(0xFFef5350);
-            } else if (wasBuy || wasSell) {
+            } else if (wasNeutral && priceChangePct.abs() > 5) {
+              reliabilityLabel = '偏差';
+              reliabilityColor = priceChange > 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a);
+            } else if (wasBuy || wasSell || wasNeutral) {
               reliabilityLabel = '合理';
               reliabilityColor = Colors.orange;
             }
