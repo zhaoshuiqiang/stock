@@ -45,23 +45,28 @@ class ApiClient {
 
   /// 备用HTTP GET：使用dart:io HttpClient，避免http包连接池问题
   Future<http.Response?> _httpGetFallback(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 15)}) async {
-    try {
-      final client = HttpClient();
-      client.connectionTimeout = timeout;
-      client.idleTimeout = const Duration(seconds: 5);
+    for (var attempt = 0; attempt < 2; attempt++) {
+      HttpClient? client;
       try {
+        client = HttpClient();
+        client.connectionTimeout = timeout;
+        client.idleTimeout = const Duration(seconds: 5);
         final request = await client.getUrl(url);
         headers?.forEach((key, value) => request.headers.set(key, value));
         final ioResponse = await request.close().timeout(timeout);
         final bodyBytes = await ioResponse.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d)).then((b) => b.takeBytes());
         if (ioResponse.statusCode == 200) {
-          return http.Response.bytes(bodyBytes, 200);
+          return http.Response.bytes(Uint8List.fromList(bodyBytes), 200);
+        }
+        debugPrint('HTTP fallback ${ioResponse.statusCode}: ${url.host}${url.path}');
+      } catch (e) {
+        debugPrint('HTTP fallback attempt ${attempt + 1}/2 failed: ${url.host}${url.path} - $e');
+        if (attempt < 1) {
+          await Future.delayed(const Duration(milliseconds: 500));
         }
       } finally {
-        client.close();
+        client?.close();
       }
-    } catch (e) {
-      debugPrint('HTTP fallback failed: ${url.host}${url.path} - $e');
     }
     return null;
   }
@@ -367,7 +372,7 @@ class ApiClient {
       secid = code;
     }
 
-    final url = Uri.parse('http://push2.eastmoney.com/api/qt/ulist.np/get?fields=f62,f184,f66,f69,f72,f75,f78,f81,f84,f87&secids=$secid');
+    final url = Uri.parse('https://push2.eastmoney.com/api/qt/ulist.np/get?fields=f62,f184,f66,f69,f72,f75,f78,f81,f84,f87&secids=$secid');
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
     });
@@ -418,7 +423,7 @@ class ApiClient {
     }
 
     final url = Uri.parse(
-      'http://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fltt=2&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f170,f171',
+      'https://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fltt=2&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f170,f171',
     );
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
@@ -635,7 +640,7 @@ class ApiClient {
     }
 
     final url = Uri.parse(
-        'http://push2his.eastmoney.com/api/qt/stock/kline/get?secid=$secid&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=$days');
+        'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=$secid&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=$days');
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
     }, timeout: const Duration(seconds: 15));
@@ -693,7 +698,7 @@ class ApiClient {
     if (cached != null) return cached as MarketSentiment;
 
     final url = Uri.parse(
-      'http://push2.eastmoney.com/api/qt/ulist.np/get?fields=f1,f2,f3,f4,f6,f12,f13,f104,f105,f106&secids=1.000001,0.399001,0.399006',
+      'https://push2.eastmoney.com/api/qt/ulist.np/get?fields=f1,f2,f3,f4,f6,f12,f13,f104,f105,f106&secids=1.000001,0.399001,0.399006',
     );
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
@@ -902,7 +907,7 @@ class ApiClient {
     List<SectorInfo>? sectors;
     try {
       final url = Uri.parse(
-        'http://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
+        'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
       );
       final response = await _httpGet(url, headers: {
         'User-Agent': 'Mozilla/5.0',
@@ -1007,7 +1012,7 @@ class ApiClient {
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         final url = Uri.parse(
-          'http://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=b:$sectorCode+f:!50&fields=f12,f14,f2,f3,f4,f15,f16,f17,f5,f6,f60',
+          'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=b:$sectorCode+f:!50&fields=f12,f14,f2,f3,f4,f15,f16,f17,f5,f6,f60',
         );
         final response = await _httpGet(url, headers: {
           'User-Agent': 'Mozilla/5.0',
@@ -1184,7 +1189,7 @@ class ApiClient {
     }
 
     final url = Uri.parse(
-      'http://push2his.eastmoney.com/api/qt/stock/trends2/get'
+      'https://push2his.eastmoney.com/api/qt/stock/trends2/get'
       '?secid=$secid'
       '&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13'
       '&fields2=f51,f52,f53,f54,f55,f56,f57,f58'
