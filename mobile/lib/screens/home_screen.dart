@@ -240,17 +240,20 @@ class HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isPickingSectors = true;
       _pickProgress = 0;
-      _pickTotal = _sectors.length;
+      // 只分析涨幅前10的板块，每个板块取涨幅前10的主板股票
+      final topSectors = _sectors.take(10).toList();
+      _pickTotal = topSectors.length;
     });
 
     try {
       final List<Map<String, dynamic>> picks = [];
       final Set<String> seenCodes = {};
+      final topSectors = _sectors.take(10).toList();
 
       // Process sectors in batches of 5
-      for (int i = 0; i < _sectors.length; i += 5) {
+      for (int i = 0; i < topSectors.length; i += 5) {
         if (!mounted) return;
-        final batch = _sectors.sublist(i, i + 5 > _sectors.length ? _sectors.length : i + 5);
+        final batch = topSectors.sublist(i, i + 5 > topSectors.length ? topSectors.length : i + 5);
 
         // Fetch sector stocks in parallel
         final sectorStocksList = await Future.wait(
@@ -260,46 +263,42 @@ class HomeScreenState extends State<HomeScreen> {
         for (int j = 0; j < batch.length; j++) {
           if (!mounted) return;
           final sector = batch[j];
-          final stocks = sectorStocksList[j];
+          // 只取涨幅前10的主板股票
+          final stocks = sectorStocksList[j].take(10).toList();
 
           setState(() {
             _pickProgress = (i + j + 1).clamp(0, _pickTotal);
           });
 
-          // Analyze stocks in batches of 5
-          for (int k = 0; k < stocks.length; k += 5) {
-            if (!mounted) return;
-            final stockBatch = stocks.sublist(k, k + 5 > stocks.length ? stocks.length : k + 5);
-
-            final analyses = await Future.wait(
-              stockBatch.map((stock) async {
-                try {
-                  final klineData = await _apiClient.getStockHistory(stock.code);
-                  if (klineData.length < 20) return null;
-                  final analysis = generateAnalysis(calcAllIndicators(klineData), stock);
-                  if (analysis.recommendation.contains('买入')) {
-                    return {
-                      'code': stock.code,
-                      'name': stock.name,
-                      'recommendation': analysis.recommendation,
-                      'score': analysis.score,
-                      'sector': sector.name,
-                    };
-                  }
-                  return null;
-                } catch (_) {
-                  return null;
+          // Analyze all stocks in parallel (max 10 per sector)
+          final analyses = await Future.wait(
+            stocks.map((stock) async {
+              try {
+                final klineData = await _apiClient.getStockHistory(stock.code);
+                if (klineData.length < 20) return null;
+                final analysis = generateAnalysis(calcAllIndicators(klineData), stock);
+                if (analysis.recommendation.contains('买入')) {
+                  return {
+                    'code': stock.code,
+                    'name': stock.name,
+                    'recommendation': analysis.recommendation,
+                    'score': analysis.score,
+                    'sector': sector.name,
+                  };
                 }
-              }),
-            );
+                return null;
+              } catch (_) {
+                return null;
+              }
+            }),
+          );
 
-            for (final result in analyses) {
-              if (result != null) {
-                final code = result['code'] as String;
-                if (!seenCodes.contains(code)) {
-                  seenCodes.add(code);
-                  picks.add(result);
-                }
+          for (final result in analyses) {
+            if (result != null) {
+              final code = result['code'] as String;
+              if (!seenCodes.contains(code)) {
+                seenCodes.add(code);
+                picks.add(result);
               }
             }
           }

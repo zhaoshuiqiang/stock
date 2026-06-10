@@ -56,7 +56,8 @@ class ApiClient {
         final ioResponse = await request.close().timeout(timeout);
         final bodyBytes = await ioResponse.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d)).then((b) => b.takeBytes());
         if (ioResponse.statusCode == 200) {
-          return http.Response.bytes(Uint8List.fromList(bodyBytes), 200);
+          return http.Response.bytes(Uint8List.fromList(bodyBytes), 200,
+            headers: {'content-type': 'text/html; charset=utf-8'});
         }
         debugPrint('HTTP fallback ${ioResponse.statusCode}: ${url.host}${url.path}');
       } catch (e) {
@@ -812,6 +813,12 @@ class ApiClient {
     return code;
   }
 
+  /// 判断是否为主板股票（沪深主板，排除创业板/科创板/北交所）
+  bool isMainBoardStock(String code) {
+    final pureCode = code.replaceAll(RegExp(r'^[a-zA-Z]+'), '');
+    return pureCode.startsWith('60') || pureCode.startsWith('00');
+  }
+
   /// 获取财经快讯
   Future<List<dynamic>> getMarketNews() async {
     const cacheKey = 'market_news';
@@ -1027,6 +1034,8 @@ class ApiClient {
               final m = item as Map<String, dynamic>;
               final rawCode = m['f12']?.toString() ?? '';
               final code = addMarketPrefix(rawCode);
+              // 仅保留主板股票（沪深主板，排除创业板/科创板/北交所）
+              if (!isMainBoardStock(code)) continue;
               final preClose = _parseDouble(m['f60']);
               final high = _parseDouble(m['f15']);
               final low = _parseDouble(m['f16']);
@@ -1085,6 +1094,8 @@ class ApiClient {
           final m = item as Map<String, dynamic>;
           final rawCode = m['code']?.toString() ?? '';
           final code = addMarketPrefix(rawCode);
+          // 仅保留主板股票
+          if (!isMainBoardStock(code)) continue;
           final price = _parseDouble(m['trade']);
           final preClose = _parseDouble(m['settlement']);
           final change = price - preClose;
