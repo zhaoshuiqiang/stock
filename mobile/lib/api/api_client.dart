@@ -566,64 +566,29 @@ class ApiClient {
   }
 
   Future<List<HistoryKline>> _fetchStockHistory(String code, int days, String cacheKey) async {
-    final url = Uri.parse(
-        'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=$code&scale=240&ma=no&datalen=$days');
-    final response = await _httpGet(url, headers: {
-      'Referer': 'https://finance.sina.com.cn',
-    }, timeout: const Duration(seconds: 15));
-    if (response != null) {
-      final body = response.body;
-      final data = json.decode(body) as List;
-      final results = <HistoryKline>[];
-
-      for (int i = 0; i < data.length; i++) {
-        final item = data[i] as Map<String, dynamic>;
-        final close = _parseDouble(item['close']);
-        final open = _parseDouble(item['open']);
-        final high = _parseDouble(item['high']);
-        final low = _parseDouble(item['low']);
-        final volume = _parseDouble(item['volume']) / 100;
-        double preClose = open;
-        if (i > 0) {
-          preClose = _parseDouble(data[i - 1]['close']);
-        }
-        final change = close - preClose;
-        final changePct = preClose > 0 ? (change / preClose) * 100 : 0.0;
-
-        // 新浪K线API不返回amount字段，使用估算公式计算：
-        // 成交额 ≈ 成交量(手) × 100 × 均价
-        // 均价 = (开盘 + 最高 + 最低 + 收盘) / 4
-        double amount = _parseDouble(item['amount']);
-        if (amount == 0 && volume > 0) {
-          final avgPrice = (open + high + low + close) / 4;
-          if (avgPrice > 0) {
-            amount = volume * 100 * avgPrice;
-          }
-        }
-
-        results.add(HistoryKline(
-          date: DateTime.tryParse(item['day'] ?? '') ?? DateTime.now(),
-          open: open,
-          high: high,
-          low: low,
-          close: close,
-          volume: volume,
-          amount: amount,
-          change: change,
-          changePct: changePct,
-        ));
+    // 主数据源：腾讯K线API（稳定可靠）
+    try {
+      final tencentResult = await _fetchStockHistoryFromTencent(code, days);
+      if (tencentResult.isNotEmpty) {
+        _setCached(cacheKey, tencentResult, duration: const Duration(seconds: 60));
+        return tencentResult;
       }
-      // Validate kline data
-      final klineValidation = DataValidator.validateKlines(results);
-      if (klineValidation.anomalies.isNotEmpty) {
-        // Filter out invalid klines (zero price, negative values)
-        results.removeWhere((k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
-      }
-      _setCached(cacheKey, results, duration: const Duration(seconds: 60));
-      return results;
+    } catch (e) {
+      debugPrint('Tencent kline failed for $code: $e');
     }
 
-    // 新浪K线接口失败时，尝试东方财富备用接口
+    // 备用1：新浪K线接口
+    try {
+      final sinaResult = await _fetchStockHistoryFromSina(code, days);
+      if (sinaResult.isNotEmpty) {
+        _setCached(cacheKey, sinaResult, duration: const Duration(seconds: 60));
+        return sinaResult;
+      }
+    } catch (e) {
+      debugPrint('Sina kline failed for $code: $e');
+    }
+
+    // 备用2：东方财富K线接口
     try {
       final emResult = await _fetchStockHistoryFromEastMoney(code, days);
       if (emResult.isNotEmpty) {
@@ -631,9 +596,135 @@ class ApiClient {
         return emResult;
       }
     } catch (e) {
-      // ignore
+      debugPrint('EastMoney kline failed for $code: $e');
     }
     return [];
+  }
+
+  /// 腾讯K线API（主数据源）
+  Future<List<HistoryKline>> _fetchStockHistoryFromTencent(String code, int days) async {
+    // 计算日期范围：从半年前开始
+    final endDate = DateTime.now();
+    final startDate = endDate.subtract(const Duration(days: 200));
+    final startStr = '${startDate.year}-${startDate.month.toString().padLeft(2, '0')}-${startDate.day.toString().padLeft(2, '0')}';
+    final endStr = '${endDate.year}-${endDate.month.toString().padLeft(2, '0')}-${endDate.day.toString().padLeft(2, '0')}';
+
+    final url = Uri.parse(
+        'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=$code,day,$startStr,$endStr,$days,qfq');
+    final response = await _httpGet(url, timeout: const Duration(seconds: 10));
+    if (response == null) return [];
+
+    final body = response.body;
+    final data = json.decode(body) as Map<String, dynamic>;
+    if (data['code'] != 0) return [];
+
+    final stockData = data['data']?[code] as Map<String, dynamic>?;
+    if (stockData == null) return [];
+
+    // qfqday: 前复权日K线，格式: [["日期","开盘","收盘","最高","最低","成交量"],...]
+    final klines = stockData['qfqday'] as List?;
+    if (klines == null || klines.isEmpty) return [];
+
+    final results = <HistoryKline>[];
+    for (int i = 0; i < klines.length; i++) {
+      final item = klines[i];
+      // 腾讯API除权日会插入分红信息对象，跳过非数组项
+      if (item is! List) continue;
+      if (item.length < 6) continue;
+
+      final open = _parseDouble(item[1]);
+      final close = _parseDouble(item[2]);
+      final high = _parseDouble(item[3]);
+      final low = _parseDouble(item[4]);
+      final volume = _parseDouble(item[5]); // 手
+
+      double preClose = open;
+      if (i > 0 && klines[i - 1] is List) {
+        preClose = _parseDouble((klines[i - 1] as List)[2]);
+      }
+      final change = close - preClose;
+      final changePct = preClose > 0 ? (change / preClose) * 100 : 0.0;
+
+      // 成交额估算：成交量(手) × 100 × 均价
+      double amount = 0;
+      final avgPrice = (open + high + low + close) / 4;
+      if (avgPrice > 0 && volume > 0) {
+        amount = volume * 100 * avgPrice;
+      }
+
+      results.add(HistoryKline(
+        date: DateTime.tryParse(item[0].toString()) ?? DateTime.now(),
+        open: open,
+        high: high,
+        low: low,
+        close: close,
+        volume: volume,
+        amount: amount,
+        change: change,
+        changePct: changePct,
+      ));
+    }
+
+    // 校验数据
+    final klineValidation = DataValidator.validateKlines(results);
+    if (klineValidation.anomalies.isNotEmpty) {
+      results.removeWhere((k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
+    }
+    return results;
+  }
+
+  /// 新浪K线API（备用1）
+  Future<List<HistoryKline>> _fetchStockHistoryFromSina(String code, int days) async {
+    final url = Uri.parse(
+        'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=$code&scale=240&ma=no&datalen=$days');
+    final response = await _httpGet(url, headers: {
+      'Referer': 'https://finance.sina.com.cn',
+    }, timeout: const Duration(seconds: 10));
+    if (response == null) return [];
+
+    final body = response.body;
+    final data = json.decode(body) as List;
+    final results = <HistoryKline>[];
+
+    for (int i = 0; i < data.length; i++) {
+      final item = data[i] as Map<String, dynamic>;
+      final close = _parseDouble(item['close']);
+      final open = _parseDouble(item['open']);
+      final high = _parseDouble(item['high']);
+      final low = _parseDouble(item['low']);
+      final volume = _parseDouble(item['volume']) / 100;
+      double preClose = open;
+      if (i > 0) {
+        preClose = _parseDouble(data[i - 1]['close']);
+      }
+      final change = close - preClose;
+      final changePct = preClose > 0 ? (change / preClose) * 100 : 0.0;
+
+      double amount = _parseDouble(item['amount']);
+      if (amount == 0 && volume > 0) {
+        final avgPrice = (open + high + low + close) / 4;
+        if (avgPrice > 0) {
+          amount = volume * 100 * avgPrice;
+        }
+      }
+
+      results.add(HistoryKline(
+        date: DateTime.tryParse(item['day'] ?? '') ?? DateTime.now(),
+        open: open,
+        high: high,
+        low: low,
+        close: close,
+        volume: volume,
+        amount: amount,
+        change: change,
+        changePct: changePct,
+      ));
+    }
+    final klineValidation = DataValidator.validateKlines(results);
+    if (klineValidation.anomalies.isNotEmpty) {
+      results.removeWhere((k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
+    }
+    return results;
   }
 
   Future<List<HistoryKline>> _fetchStockHistoryFromEastMoney(String code, int days) async {
