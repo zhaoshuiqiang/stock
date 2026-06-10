@@ -35,28 +35,49 @@ class HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  String _loadError = '';
+
   Future<void> _loadData() async {
     setState(() {
       _isLoading = true;
+      _loadError = '';
     });
 
+    // 大盘数据和板块数据分开加载，互不影响
     try {
       final codes = ['sh000001', 'sz399001', 'sz399006'];
       final futures = codes.map((code) => _apiClient.getRealtimeQuote(code));
       final results = await Future.wait(futures);
-
-      final sectors = await _apiClient.getHotSectors();
-
-      setState(() {
-        _quotes = results.where((q) => q != null).cast<QuoteData>().toList();
-        _sectors = sectors;
-      });
+      if (mounted) {
+        setState(() {
+          _quotes = results.where((q) => q != null).cast<QuoteData>().toList();
+        });
+      }
     } catch (e) {
-      debugPrint('Load data failed: $e');
+      debugPrint('Load market data failed: $e');
+    }
+
+    try {
+      final sectors = await _apiClient.getHotSectors();
+      if (mounted) {
+        setState(() {
+          _sectors = sectors;
+          if (sectors.isEmpty) _loadError = '板块数据加载失败，下拉刷新重试';
+        });
+      }
+    } catch (e) {
+      debugPrint('Load sectors failed: $e');
+      if (mounted) {
+        setState(() {
+          _loadError = '板块数据加载失败：$e';
+        });
+      }
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -133,7 +154,7 @@ class HomeScreenState extends State<HomeScreen> {
                         ),
                         const SizedBox(height: 16),
                         if (_sectors.isEmpty)
-                          const Text('暂无板块数据', style: TextStyle(color: Colors.white38))
+                          Text(_loadError.isNotEmpty ? _loadError : '暂无板块数据', style: const TextStyle(color: Colors.white38))
                         else
                           ..._sectors.take(20).map((sector) => _buildSectorItem(sector)),
                       ],

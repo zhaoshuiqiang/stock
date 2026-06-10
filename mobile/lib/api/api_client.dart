@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -8,11 +9,17 @@ import '../models/stock_models.dart';
 import '../validators/data_validator.dart';
 
 class ApiClient {
-  final http.Client _client = http.Client();
+  http.Client _client = http.Client();
   final Map<String, dynamic> _cache = {};
   final Duration _cacheDuration = const Duration(minutes: 5);
   final Map<String, Future> _inFlightRequests = {};
   static const int _maxCacheSize = 100;
+
+  /// 重建HTTP客户端（连接池失效时调用）
+  void _rebuildClient() {
+    try { _client.close(); } catch (_) {}
+    _client = http.Client();
+  }
 
   /// 公共 HTTP GET 请求方法，统一处理超时、重试和异常捕获
   Future<http.Response?> _httpGet(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 15), int retries = 2}) async {
@@ -23,10 +30,38 @@ class ApiClient {
         debugPrint('HTTP ${response.statusCode}: ${url.host}${url.path}');
       } catch (e) {
         debugPrint('HTTP attempt ${attempt + 1}/$retries failed: ${url.host}${url.path} - $e');
+        // 连接池失效时重建客户端
+        if (e.toString().contains('Connection closed') || e.toString().contains('Connection reset')) {
+          _rebuildClient();
+        }
         if (attempt < retries - 1) {
           await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
         }
       }
+    }
+    // http.Client全部失败时，回退到dart:io HttpClient
+    return _httpGetFallback(url, headers: headers, timeout: timeout);
+  }
+
+  /// 备用HTTP GET：使用dart:io HttpClient，避免http包连接池问题
+  Future<http.Response?> _httpGetFallback(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 15)}) async {
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = timeout;
+      client.idleTimeout = const Duration(seconds: 5);
+      try {
+        final request = await client.getUrl(url);
+        headers?.forEach((key, value) => request.headers.set(key, value));
+        final ioResponse = await request.close().timeout(timeout);
+        final bodyBytes = await ioResponse.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d)).then((b) => b.takeBytes());
+        if (ioResponse.statusCode == 200) {
+          return http.Response.bytes(bodyBytes, 200);
+        }
+      } finally {
+        client.close();
+      }
+    } catch (e) {
+      debugPrint('HTTP fallback failed: ${url.host}${url.path} - $e');
     }
     return null;
   }
@@ -332,7 +367,7 @@ class ApiClient {
       secid = code;
     }
 
-    final url = Uri.parse('https://push2.eastmoney.com/api/qt/ulist.np/get?fields=f62,f184,f66,f69,f72,f75,f78,f81,f84,f87&secids=$secid');
+    final url = Uri.parse('http://push2.eastmoney.com/api/qt/ulist.np/get?fields=f62,f184,f66,f69,f72,f75,f78,f81,f84,f87&secids=$secid');
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
     });
@@ -383,7 +418,7 @@ class ApiClient {
     }
 
     final url = Uri.parse(
-      'https://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fltt=2&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f170,f171',
+      'http://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fltt=2&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f170,f171',
     );
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
@@ -600,7 +635,7 @@ class ApiClient {
     }
 
     final url = Uri.parse(
-        'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=$secid&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=$days');
+        'http://push2his.eastmoney.com/api/qt/stock/kline/get?secid=$secid&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=$days');
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
     }, timeout: const Duration(seconds: 15));
@@ -658,7 +693,7 @@ class ApiClient {
     if (cached != null) return cached as MarketSentiment;
 
     final url = Uri.parse(
-      'https://push2.eastmoney.com/api/qt/ulist.np/get?fields=f1,f2,f3,f4,f6,f12,f13,f104,f105,f106&secids=1.000001,0.399001,0.399006',
+      'http://push2.eastmoney.com/api/qt/ulist.np/get?fields=f1,f2,f3,f4,f6,f12,f13,f104,f105,f106&secids=1.000001,0.399001,0.399006',
     );
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
@@ -867,7 +902,7 @@ class ApiClient {
     List<SectorInfo>? sectors;
     try {
       final url = Uri.parse(
-        'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
+        'http://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
       );
       final response = await _httpGet(url, headers: {
         'User-Agent': 'Mozilla/5.0',
@@ -922,32 +957,41 @@ class ApiClient {
     }, timeout: const Duration(seconds: 10));
     if (response != null) {
       final body = await _decodeGbk(response.bodyBytes);
-      // 新浪行业板块返回格式: var S_Finance_bankuai_sin498 = "板块名,代码,涨跌幅,...;..."
-      final regex = RegExp(r'"([^"]+)"');
-      final match = regex.firstMatch(body);
-      if (match != null) {
-        final dataStr = match.group(1)!;
-        final entries = dataStr.split(';');
-        final sectors = <SectorInfo>[];
-        for (final entry in entries) {
-          if (entry.trim().isEmpty) continue;
-          final parts = entry.split(',');
-          if (parts.length >= 3) {
-            final name = parts[0].trim();
-            final code = parts.length >= 4 ? parts[3].trim() : '';
-            final changePct = double.tryParse(parts[2].trim()) ?? 0.0;
-            if (name.isNotEmpty) {
-              sectors.add(SectorInfo(
-                name: name,
-                code: code,
-                changePct: changePct,
-              ));
+      // 新浪行业板块返回格式: var S_Finance_bankuai_sinaindustry = {"key":"key,板块名,股票数,均价,涨跌额,涨跌幅,...",...}
+      // 尝试JSON解析
+      try {
+        final jsonStart = body.indexOf('{');
+        final jsonEnd = body.lastIndexOf('}');
+        if (jsonStart >= 0 && jsonEnd > jsonStart) {
+          final jsonStr = body.substring(jsonStart, jsonEnd + 1);
+          final data = json.decode(jsonStr) as Map<String, dynamic>;
+          final sectors = <SectorInfo>[];
+          for (final entry in data.values) {
+            final parts = entry.toString().split(',');
+            if (parts.length >= 6) {
+              final name = parts[1].trim();
+              final changePct = double.tryParse(parts[5].trim()) ?? 0.0;
+              String leadStockName = '';
+              String leadStockCode = '';
+              if (parts.length >= 9) leadStockCode = parts[8].trim();
+              if (parts.length >= 10) leadStockName = parts[9].trim();
+              if (name.isNotEmpty) {
+                sectors.add(SectorInfo(
+                  name: name,
+                  code: parts[0].trim(),
+                  changePct: changePct,
+                  leadStockName: leadStockName,
+                  leadStockCode: addMarketPrefix(leadStockCode),
+                ));
+              }
             }
           }
+          // 按涨跌幅降序排列
+          sectors.sort((a, b) => b.changePct.compareTo(a.changePct));
+          return sectors;
         }
-        // 按涨跌幅降序排列
-        sectors.sort((a, b) => b.changePct.compareTo(a.changePct));
-        return sectors;
+      } catch (e) {
+        debugPrint('Sina sectors JSON parse failed: $e');
       }
     }
     return [];
@@ -963,7 +1007,7 @@ class ApiClient {
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         final url = Uri.parse(
-          'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=b:$sectorCode+f:!50&fields=f12,f14,f2,f3,f4,f15,f16,f17,f5,f6,f60',
+          'http://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=b:$sectorCode+f:!50&fields=f12,f14,f2,f3,f4,f15,f16,f17,f5,f6,f60',
         );
         final response = await _httpGet(url, headers: {
           'User-Agent': 'Mozilla/5.0',
@@ -1140,7 +1184,7 @@ class ApiClient {
     }
 
     final url = Uri.parse(
-      'https://push2his.eastmoney.com/api/qt/stock/trends2/get'
+      'http://push2his.eastmoney.com/api/qt/stock/trends2/get'
       '?secid=$secid'
       '&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13'
       '&fields2=f51,f52,f53,f54,f55,f56,f57,f58'
