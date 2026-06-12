@@ -10,6 +10,33 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.13.1',
+        'date': '2026-06-12',
+        'changes': [
+          '代码审计：策略指标准确性全面检查，修复评分Bug、评分偏向、信号重复等问题',
+          '修复评分系统旧阈值Bug（totalScore>=70→>=8），买入多指标共振分支正常触发',
+          '评分对称化：信号评分基础分从1.5→0，涨跌幅8档对称曲线，主力资金5档细化',
+          '信号检测去重：统一SignalDetector为唯一入口，删除重复的MACD背离检测(~67行)',
+          '新增WR(威廉指标)和CCI(商品通道指数)，纳入信号检测和共振评分',
+          '新增仓位管理(PositionManager)：基于ATR波动率动态计算建议仓位',
+          '新增策略回测框架(BacktestEngine)：MACD/MA金叉策略回测，胜率/盈亏比/最大回撤',
+          '机会界面评分说明更新为1-10分制+7档推荐+9维度共振',
+          '代码安全评审通过，无可利用安全漏洞',
+        ],
+      },
+      {
+        'version': 'v2.12.0',
+        'date': '2026-06-12',
+        'changes': [
+          '统一10级评分系统(1-10分)，7档推荐：强烈买入/买入/谨慎买入/观望/谨慎卖出/卖出/强烈卖出',
+          '分层信号检测：短期/中期/长期信号，MACD顶底背离检测',
+          '18种交易策略评估：短线(9种)/长线(6种)/特殊(3种)，含策略冲突检测',
+          '通达信数据源优先，降级策略：通达信→腾讯→东方财富→新浪',
+          '市场环境上下文获取(MarketContextProvider)，分层策略面板UI',
+          'analysis_result_card行情卡片+strategy_panel_long/short策略面板',
+        ],
+      },
+      {
         'version': 'v2.11.0',
         'date': '2026-06-11',
         'changes': [
@@ -356,10 +383,14 @@ class UpdateLogScreen extends StatelessWidget {
                         .map((change) => Padding(
                               padding: const EdgeInsets.symmetric(vertical: 4),
                               child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Icon(Icons.check_circle, size: 14, color: Colors.green),
+                                  const Padding(
+                                    padding: EdgeInsets.only(top: 2),
+                                    child: Icon(Icons.check_circle, size: 14, color: Colors.green),
+                                  ),
                                   const SizedBox(width: 8),
-                                  Text(change, style: textTheme.bodyMedium),
+                                  Expanded(child: Text(change, style: textTheme.bodyMedium)),
                                 ],
                               ),
                             ))

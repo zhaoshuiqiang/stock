@@ -98,9 +98,9 @@ class BacktestEngine {
 
     final wins = tradeReturns.where((r) => r > 0).toList();
     final losses = tradeReturns.where((r) => r < 0).toList();
-    final avgWinPct = wins.isNotEmpty ? wins.reduce((a, b) => a + b) / wins.length * 100 : 0;
-    final avgLossPct = losses.isNotEmpty ? losses.reduce((a, b) => a + b) / losses.length * 100 : 0;
-    final profitFactor = losses.isNotEmpty ? ((wins.isNotEmpty ? wins.reduce((a, b) => a + b) : 0) / losses.map((l) => l.abs()).reduce((a, b) => a + b)) : 0;
+    final double avgWinPct = wins.isNotEmpty ? wins.reduce((a, b) => a + b) / wins.length.toDouble() * 100 : 0;
+    final double avgLossPct = losses.isNotEmpty ? losses.reduce((a, b) => a + b) / losses.length.toDouble() * 100 : 0;
+    final double profitFactor = losses.isNotEmpty ? ((wins.isNotEmpty ? wins.reduce((a, b) => a + b) : 0) / losses.map((l) => l.abs()).reduce((a, b) => a + b).toDouble()) : 0;
 
     return BacktestResult(
       totalSignals: totalSignals,
@@ -167,9 +167,9 @@ class BacktestEngine {
     final winRate = tradeReturns.isNotEmpty ? winningTrades / tradeReturns.length : 0.0;
     final wins = tradeReturns.where((r) => r > 0).toList();
     final losses = tradeReturns.where((r) => r < 0).toList();
-    final avgWinPct = wins.isNotEmpty ? wins.reduce((a, b) => a + b) / wins.length * 100 : 0;
-    final avgLossPct = losses.isNotEmpty ? losses.reduce((a, b) => a + b) / losses.length * 100 : 0;
-    final profitFactor = losses.isNotEmpty ? (wins.isNotEmpty ? wins.reduce((a, b) => a + b) : 0) / losses.map((l) => l.abs()).reduce((a, b) => a + b) : 0;
+    final double avgWinPct = wins.isNotEmpty ? wins.reduce((a, b) => a + b) / wins.length.toDouble() * 100 : 0;
+    final double avgLossPct = losses.isNotEmpty ? losses.reduce((a, b) => a + b) / losses.length.toDouble() * 100 : 0;
+    final double profitFactor = losses.isNotEmpty ? (wins.isNotEmpty ? wins.reduce((a, b) => a + b) : 0) / losses.map((l) => l.abs()).reduce((a, b) => a + b).toDouble() : 0;
 
     return BacktestResult(
       totalSignals: totalSignals,
