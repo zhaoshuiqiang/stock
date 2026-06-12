@@ -7,21 +7,17 @@ class SignalDetector {
   static List<SignalItem> detectLayeredSignals(List<HistoryKline> data) {
     if (data.isEmpty || data.length < 20) return [];
 
-    final signals = <SignalItem>[];
     final last = data[data.length - 1];
     final prev = data[data.length - 2];
 
-    // 短期信号检测（2-5天）
-    signals.addAll(_detectShortTermSignals(data, last, prev));
+    // 收集所有基础信号
+    final baseSignals = <SignalItem>[];
+    baseSignals.addAll(_detectShortTermSignals(data, last, prev));
+    baseSignals.addAll(_detectMediumTermSignals(data, last, prev));
+    baseSignals.addAll(_detectLongTermSignals(data, last, prev));
 
-    // 中期信号检测（5-20天）
-    signals.addAll(_detectMediumTermSignals(data, last, prev));
-
-    // 长期信号检测（20-60天）
-    signals.addAll(_detectLongTermSignals(data, last, prev));
-
-    // 共振信号增强
-    signals.addAll(_detectConfluenceSignals(data, signals));
+    // 共振信号增强（替换为基础信号列表，避免重复）
+    final signals = _detectConfluenceSignals(data, baseSignals);
 
     signals.sort((a, b) => b.strength.compareTo(a.strength));
     return signals;
