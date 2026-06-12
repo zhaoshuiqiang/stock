@@ -494,6 +494,48 @@ List<HistoryKline> calcDMI(List<HistoryKline> data, {int period = 14}) {
   return result;
 }
 
+List<HistoryKline> calcWR(List<HistoryKline> data, {int period = 14}) {
+  if (data.length < period) return data;
+  final result = List<HistoryKline>.from(data);
+
+  for (int i = period - 1; i < data.length; i++) {
+    double highest = data[i].high;
+    double lowest = data[i].low;
+    for (int j = i - period + 1; j <= i; j++) {
+      if (data[j].high > highest) highest = data[j].high;
+      if (data[j].low < lowest) lowest = data[j].low;
+    }
+    final wr = (highest - lowest) > 0 ? (highest - data[i].close) / (highest - lowest) * 100 : 50.0;
+    result[i] = result[i].copyWith(wr14: wr);
+  }
+  return result;
+}
+
+List<HistoryKline> calcCCI(List<HistoryKline> data, {int period = 14}) {
+  if (data.length < period) return data;
+  final result = List<HistoryKline>.from(data);
+
+  for (int i = period - 1; i < data.length; i++) {
+    double tpSum = 0;
+    for (int j = i - period + 1; j <= i; j++) {
+      tpSum += (data[j].high + data[j].low + data[j].close) / 3;
+    }
+    final tpMa = tpSum / period;
+
+    double md = 0;
+    for (int j = i - period + 1; j <= i; j++) {
+      final tp = (data[j].high + data[j].low + data[j].close) / 3;
+      md += (tp - tpMa).abs();
+    }
+    md /= period;
+
+    final tp = (data[i].high + data[i].low + data[i].close) / 3;
+    final cci = md > 0 ? (tp - tpMa) / (0.015 * md) : 0.0;
+    result[i] = result[i].copyWith(cci14: cci);
+  }
+  return result;
+}
+
 List<HistoryKline> calcAllIndicators(List<HistoryKline> data) {
   if (data.isEmpty || data.length < 2) return data;
 
@@ -508,6 +550,8 @@ List<HistoryKline> calcAllIndicators(List<HistoryKline> data) {
   result = calcOBV(result);
   result = calcBIAS(result, [6, 12, 24]);
   result = calcDMI(result);
+  result = calcWR(result);
+  result = calcCCI(result);
 
   return result;
 }
@@ -648,6 +692,28 @@ Map<String, dynamic> getIndicatorSummary(List<HistoryKline> data) {
       summary['ADX信号'] = '盘整区间(ADX=${last.adx14.toStringAsFixed(1)})';
     } else {
       summary['ADX信号'] = '趋势形成中(ADX=${last.adx14.toStringAsFixed(1)})';
+    }
+  }
+
+  if (last.wr14 != null && last.wr14! > 0) {
+    summary['WR14'] = double.parse(last.wr14!.toStringAsFixed(2));
+    if (last.wr14! > 80) {
+      summary['WR信号'] = '超卖(WR=${last.wr14!.toStringAsFixed(1)})';
+    } else if (last.wr14! < 20) {
+      summary['WR信号'] = '超买(WR=${last.wr14!.toStringAsFixed(1)})';
+    } else {
+      summary['WR信号'] = '中性(WR=${last.wr14!.toStringAsFixed(1)})';
+    }
+  }
+
+  if (last.cci14 != null && last.cci14!.abs() > 0) {
+    summary['CCI14'] = double.parse(last.cci14!.toStringAsFixed(2));
+    if (last.cci14! > 100) {
+      summary['CCI信号'] = '超买(CCI=${last.cci14!.toStringAsFixed(1)})';
+    } else if (last.cci14! < -100) {
+      summary['CCI信号'] = '超卖(CCI=${last.cci14!.toStringAsFixed(1)})';
+    } else {
+      summary['CCI信号'] = '中性(CCI=${last.cci14!.toStringAsFixed(1)})';
     }
   }
 

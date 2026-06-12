@@ -211,6 +211,8 @@ class HistoryKline {
   final double minusDi14;
   final double dx;
   final double adx14;
+  final double? wr14;
+  final double? cci14;
 
   HistoryKline({
     required this.date,
@@ -255,6 +257,8 @@ class HistoryKline {
     this.minusDi14 = 0,
     this.dx = 0,
     this.adx14 = 0,
+    this.wr14,
+    this.cci14,
   });
 
   HistoryKline copyWith({
@@ -300,6 +304,8 @@ class HistoryKline {
     double? minusDi14,
     double? dx,
     double? adx14,
+    double? wr14,
+    double? cci14,
   }) {
     return HistoryKline(
       date: date ?? this.date,
@@ -344,6 +350,8 @@ class HistoryKline {
       minusDi14: minusDi14 ?? this.minusDi14,
       dx: dx ?? this.dx,
       adx14: adx14 ?? this.adx14,
+      wr14: wr14 ?? this.wr14,
+      cci14: cci14 ?? this.cci14,
     );
   }
 
@@ -396,6 +404,8 @@ class HistoryKline {
       minusDi14: QuoteData._parseDouble(json['minus_di14']),
       dx: QuoteData._parseDouble(json['dx']),
       adx14: QuoteData._parseDouble(json['adx14']),
+      wr14: QuoteData._parseDouble(json['wr14']),
+      cci14: QuoteData._parseDouble(json['cci14']),
     );
   }
 }

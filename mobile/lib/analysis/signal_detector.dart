@@ -170,6 +170,35 @@ class SignalDetector {
       }
     }
 
+    // WR超买超卖检测
+    if (last.wr14 != null && prev.wr14 != null) {
+      if (last.wr14! > 80 && prev.wr14! <= 80) {
+        signals.add(SignalItem(
+          type: 'buy',
+          indicator: 'WR',
+          signal: 'WR超卖',
+          description: '威廉指标进入超卖区(>80)，短期超跌，关注反弹',
+          strength: 70,
+          timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.7,
+          signalCount: 1,
+        ));
+      } else if (last.wr14! < 20 && prev.wr14! >= 20) {
+        signals.add(SignalItem(
+          type: 'sell',
+          indicator: 'WR',
+          signal: 'WR超买',
+          description: '威廉指标进入超买区(<20)，短期超涨，注意回调',
+          strength: 70,
+          timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.7,
+          signalCount: 1,
+        ));
+      }
+    }
+
     return signals;
   }
 
@@ -253,6 +282,35 @@ class SignalDetector {
           duration: SignalDuration.mediumTerm,
           confidence: 0.7,
           signalCount: 2,
+        ));
+      }
+    }
+
+    // CCI突破检测
+    if (last.cci14 != null && prev.cci14 != null) {
+      if (prev.cci14! < -100 && last.cci14! >= -100) {
+        signals.add(SignalItem(
+          type: 'buy',
+          indicator: 'CCI',
+          signal: 'CCI超卖回升',
+          description: 'CCI从超卖区(<-100)回升，短期反弹信号',
+          strength: 65,
+          timestamp: last.date,
+          duration: SignalDuration.mediumTerm,
+          confidence: 0.7,
+          signalCount: 1,
+        ));
+      } else if (prev.cci14! > 100 && last.cci14! <= 100) {
+        signals.add(SignalItem(
+          type: 'sell',
+          indicator: 'CCI',
+          signal: 'CCI超买回落',
+          description: 'CCI从超买区(>100)回落，短期回调信号',
+          strength: 65,
+          timestamp: last.date,
+          duration: SignalDuration.mediumTerm,
+          confidence: 0.7,
+          signalCount: 1,
         ));
       }
     }
