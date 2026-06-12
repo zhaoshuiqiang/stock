@@ -130,7 +130,7 @@ class SignalsScreenState extends State<SignalsScreen> {
                             Text(
                               '操作建议: ${_analysis!.recommendation}',
                               style: textTheme.titleMedium?.copyWith(
-                                color: _analysis!.score >= 60 ? upColor : downColor,
+                                color: _analysis!.score >= 6 ? upColor : downColor,
                               ),
                             ),
                             const SizedBox(height: 8),

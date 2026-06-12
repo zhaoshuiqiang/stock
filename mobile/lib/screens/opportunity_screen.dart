@@ -348,8 +348,8 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
       );
     }
 
-    final bullish = _opportunities.where((o) => o.recommendation == '强烈买入' || o.recommendation == '买入').toList();
-    final bearish = _opportunities.where((o) => o.recommendation == '卖出' || o.recommendation == '强烈卖出').toList();
+    final bullish = _opportunities.where((o) => o.recommendation == '强烈买入' || o.recommendation == '买入' || o.recommendation == '谨慎买入').toList();
+    final bearish = _opportunities.where((o) => o.recommendation == '卖出' || o.recommendation == '强烈卖出' || o.recommendation == '谨慎卖出').toList();
     final neutral = _opportunities.where((o) => o.recommendation == '观望').toList();
 
     return RefreshIndicator(
@@ -454,9 +454,9 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
   }
 
   Widget _buildOpportunityItem(_StockOpportunity o, TextTheme textTheme) {
-    final recColor = o.recommendation == '强烈买入' || o.recommendation == '买入'
+    final recColor = o.recommendation == '强烈买入' || o.recommendation == '买入' || o.recommendation == '谨慎买入'
         ? const Color(0xFFef5350)
-        : o.recommendation == '卖出' || o.recommendation == '强烈卖出'
+        : o.recommendation == '卖出' || o.recommendation == '强烈卖出' || o.recommendation == '谨慎卖出'
             ? const Color(0xFF26a69a)
             : Colors.orange;
 

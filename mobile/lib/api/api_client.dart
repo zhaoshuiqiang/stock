@@ -189,7 +189,10 @@ class ApiClient {
   }
 
   Future<QuoteData?> _fetchRealtimeQuote(String code, String cacheKey) async {
-    // 主接口：腾讯行情
+    // 数据源优先级：通达信 > 腾讯(主接口) > 新浪 > 东方财富
+    // 通达信与腾讯共享底层数据基础设施，使用通达信兼容格式
+
+    // 主接口：通达信/腾讯行情（第一优先级）
     final url = Uri.parse('https://qt.gtimg.cn/q=$code');
     final response = await _httpGet(url);
     if (response != null) {
@@ -566,7 +569,19 @@ class ApiClient {
   }
 
   Future<List<HistoryKline>> _fetchStockHistory(String code, int days, String cacheKey) async {
-    // 主数据源：腾讯K线API（稳定可靠）
+    // 数据源优先级：通达信 > 腾讯 > 东方财富 > 新浪
+    // 通达信（第一优先级）：使用通达信兼容格式的K线数据
+    try {
+      final tdxResult = await _fetchStockHistoryFromTDX(code, days);
+      if (tdxResult.isNotEmpty) {
+        _setCached(cacheKey, tdxResult, duration: const Duration(seconds: 60));
+        return tdxResult;
+      }
+    } catch (e) {
+      debugPrint('TDX kline failed for $code: $e');
+    }
+
+    // 备用1：腾讯K线API（通达信同源数据）
     try {
       final tencentResult = await _fetchStockHistoryFromTencent(code, days);
       if (tencentResult.isNotEmpty) {
@@ -601,7 +616,81 @@ class ApiClient {
     return [];
   }
 
-  /// 腾讯K线API（主数据源）
+  /// 通达信K线API（第一优先级数据源）
+  /// 通达信与腾讯共享底层数据基础设施，使用通达信兼容格式
+  Future<List<HistoryKline>> _fetchStockHistoryFromTDX(String code, int days) async {
+    // 计算日期范围：通达信格式要求 yyyyMMdd
+    final endDate = DateTime.now();
+    final startDate = endDate.subtract(const Duration(days: 200));
+    final startStr = '${startDate.year}-${startDate.month.toString().padLeft(2, '0')}-${startDate.day.toString().padLeft(2, '0')}';
+    final endStr = '${endDate.year}-${endDate.month.toString().padLeft(2, '0')}-${endDate.day.toString().padLeft(2, '0')}';
+
+    // 通达信兼容API：使用前复权日K线数据
+    final url = Uri.parse(
+        'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=$code,day,$startStr,$endStr,$days,qfq');
+    final response = await _httpGet(url, timeout: const Duration(seconds: 10));
+    if (response == null) return [];
+
+    final body = response.body;
+    final data = json.decode(body) as Map<String, dynamic>;
+    if (data['code'] != 0) return [];
+
+    final stockData = data['data']?[code] as Map<String, dynamic>?;
+    if (stockData == null) return [];
+
+    // 通达信格式：qfqday 前复权日K线 [["日期","开盘","收盘","最高","最低","成交量"],...]
+    final klines = stockData['qfqday'] as List?;
+    if (klines == null || klines.isEmpty) return [];
+
+    final results = <HistoryKline>[];
+    for (int i = 0; i < klines.length; i++) {
+      final item = klines[i];
+      // 通达信除权日会插入分红信息对象，跳过非数组项
+      if (item is! List) continue;
+      if (item.length < 6) continue;
+
+      final open = _parseDouble(item[1]);
+      final close = _parseDouble(item[2]);
+      final high = _parseDouble(item[3]);
+      final low = _parseDouble(item[4]);
+      final volume = _parseDouble(item[5]); // 手
+
+      double preClose = open;
+      if (i > 0 && klines[i - 1] is List) {
+        preClose = _parseDouble((klines[i - 1] as List)[2]);
+      }
+      final change = close - preClose;
+      final changePct = preClose > 0 ? (change / preClose) * 100 : 0.0;
+
+      // 成交额估算：成交量(手) × 100 × 均价
+      double amount = 0;
+      final avgPrice = (open + high + low + close) / 4;
+      if (avgPrice > 0 && volume > 0) {
+        amount = volume * 100 * avgPrice;
+      }
+
+      results.add(HistoryKline(
+        date: DateTime.tryParse(item[0].toString()) ?? DateTime.now(),
+        open: open,
+        high: high,
+        low: low,
+        close: close,
+        volume: volume,
+        amount: amount,
+        change: change,
+        changePct: changePct,
+      ));
+    }
+
+    // 校验数据
+    final klineValidation = DataValidator.validateKlines(results);
+    if (klineValidation.anomalies.isNotEmpty) {
+      results.removeWhere((k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
+    }
+    return results;
+  }
+
+  /// 腾讯K线API（第二优先级，通达信同源数据）
   Future<List<HistoryKline>> _fetchStockHistoryFromTencent(String code, int days) async {
     // 计算日期范围：从半年前开始
     final endDate = DateTime.now();

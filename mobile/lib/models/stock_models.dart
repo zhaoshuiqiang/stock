@@ -1,4 +1,12 @@
+import '../analysis/strategy_engine.dart';
+
 enum DataConfidence { high, medium, low }
+
+enum SignalDuration {
+  shortTerm,    // 短期：2-5天
+  mediumTerm,   // 中期：5-20天
+  longTerm,     // 长期：20-60天
+}
 
 class ValidatedQuoteData {
   final QuoteData quote;
@@ -117,6 +125,8 @@ class QuoteData {
     );
   }
 
+  static double parseDouble(dynamic value) => _parseDouble(value);
+
   static double _parseDouble(dynamic value) {
     if (value == null) return 0;
     if (value is double) return value;
@@ -127,6 +137,34 @@ class QuoteData {
 
   static QuoteData empty() {
     return QuoteData(code: '', name: '');
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'code': code,
+      'name': name,
+      'price': price,
+      'change': change,
+      'change_pct': changePct,
+      'open': open,
+      'high': high,
+      'low': low,
+      'pre_close': preClose,
+      'volume': volume,
+      'amount': amount,
+      'amplitude': amplitude,
+      'turnover': turnover,
+      'pe': pe,
+      'pb': pb,
+      'total_market_cap': totalMarketCap,
+      'circulating_market_cap': circulatingMarketCap,
+      'main_inflow': mainInflow,
+      'main_outflow': mainOutflow,
+      'main_net_flow': mainNetFlow,
+      'main_net_flow_rate': mainNetFlowRate,
+      'update_time': updateTime?.toIso8601String(),
+      'confidence': confidence,
+    };
   }
 }
 
@@ -371,6 +409,12 @@ class SignalItem {
   final int strength;
   final DateTime? timestamp;
 
+  // 新增字段
+  final SignalDuration? duration;           // 短期/中期/长期
+  final double? confidence;           // 推荐可信度（0.0-1.0）
+  final int signalCount;              // 共振信号数量（多指标共振度）
+  final DateTime? freshTime;          // 指标新鲜度（最近3-5天）
+
   SignalItem({
     required this.type,
     this.indicator = '',
@@ -379,6 +423,10 @@ class SignalItem {
     this.desc = '',
     this.strength = 0,
     this.timestamp,
+    this.duration,
+    this.confidence,
+    this.signalCount = 1,
+    this.freshTime,
   });
 
   factory SignalItem.fromJson(Map<String, dynamic> json) {
@@ -391,7 +439,166 @@ class SignalItem {
       desc: descValue,
       strength: json['strength'] is int ? json['strength'] : 0,
       timestamp: json['timestamp'] != null ? DateTime.tryParse(json['timestamp']) : null,
+      duration: json['duration'] != null
+          ? _parseDuration(json['duration'])
+          : null,
+      confidence: json['confidence'] is num ? (json['confidence'] as num).toDouble() : null,
+      signalCount: json['signal_count'] is int ? json['signal_count'] : 1,
+      freshTime: json['fresh_time'] != null ? DateTime.tryParse(json['fresh_time']) : null,
     );
+  }
+
+  static SignalDuration? _parseDuration(dynamic value) {
+    if (value == null) return null;
+    if (value is int) {
+      switch (value) {
+        case 2: return SignalDuration.shortTerm;
+        case 10: return SignalDuration.mediumTerm;
+        case 30: return SignalDuration.longTerm;
+        default: return null;
+      }
+    }
+    if (value is String) {
+      if (value.startsWith('short')) return SignalDuration.shortTerm;
+      if (value.startsWith('medium')) return SignalDuration.mediumTerm;
+      if (value.startsWith('long')) return SignalDuration.longTerm;
+    }
+    return null;
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'type': type,
+      'indicator': indicator,
+      'signal': signal,
+      'description': description,
+      'desc': desc,
+      'strength': strength,
+      'timestamp': timestamp?.toIso8601String(),
+      'duration': duration != null ? duration!.index.toString() : null,
+      'confidence': confidence?.toDouble(),
+      'signal_count': signalCount,
+      'fresh_time': freshTime?.toIso8601String(),
+    };
+  }
+
+  SignalItem copyWith({
+    String? type,
+    String? indicator,
+    String? signal,
+    String? description,
+    String? desc,
+    int? strength,
+    DateTime? timestamp,
+    SignalDuration? duration,
+    double? confidence,
+    int? signalCount,
+    DateTime? freshTime,
+  }) {
+    return SignalItem(
+      type: type ?? this.type,
+      indicator: indicator ?? this.indicator,
+      signal: signal ?? this.signal,
+      description: description ?? this.description,
+      desc: desc ?? this.desc,
+      strength: strength ?? this.strength,
+      timestamp: timestamp ?? this.timestamp,
+      duration: duration ?? this.duration,
+      confidence: confidence ?? this.confidence,
+      signalCount: signalCount ?? this.signalCount,
+      freshTime: freshTime ?? this.freshTime,
+    );
+  }
+}
+
+class MarketContext {
+  final double shIndexPct;          // 上证指数涨跌幅
+  final double szIndexPct;          // 深证成指涨跌幅
+  final double indexChange;         // 上证指数涨跌额
+  final String marketTrend;         // 大盘趋势（'strong_up' / 'up' / 'neutral' / 'down' / 'strong_down'）
+  final int upCount;                // 涨停家数
+  final int downCount;              // 跌停家数
+  final double avgChangePct;        // 平均涨跌幅
+  final DateTime updateTime;
+
+  MarketContext({
+    required this.shIndexPct,
+    required this.szIndexPct,
+    required this.indexChange,
+    required this.marketTrend,
+    required this.upCount,
+    required this.downCount,
+    required this.avgChangePct,
+    required this.updateTime,
+  });
+
+  factory MarketContext.fromJson(Map<String, dynamic> json) {
+    return MarketContext(
+      shIndexPct: QuoteData._parseDouble(json['sh_index_pct'] ?? json['上证指数'] ?? 0),
+      szIndexPct: QuoteData._parseDouble(json['sz_index_pct'] ?? json['深证成指'] ?? 0),
+      indexChange: QuoteData._parseDouble(json['index_change'] ?? 0),
+      marketTrend: json['market_trend'] ?? 'neutral',
+      upCount: json['up_count'] ?? 0,
+      downCount: json['down_count'] ?? 0,
+      avgChangePct: QuoteData.parseDouble(json['avg_change_pct'] ?? 0),
+      updateTime: json['update_time'] != null
+          ? (DateTime.tryParse(json['update_time']) ?? DateTime.now())
+          : DateTime.now(),
+    );
+  }
+
+  /// 获取市场调节系数（大盘上涨时，个股评分适当提高；大盘下跌时，评分降低）
+  double getMarketAdjustmentFactor() {
+    if (avgChangePct > 1.5) return 1.08;      // 强势上涨：+8%
+    if (avgChangePct > 0.5) return 1.04;      // 上涨：+4%
+    if (avgChangePct > -0.5) return 1.00;     // 震荡：+0%
+    if (avgChangePct > -1.5) return 0.96;     // 下跌：-4%
+    return 0.92;                              // 强势下跌：-8%
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'sh_index_pct': shIndexPct,
+      'sz_index_pct': szIndexPct,
+      'index_change': indexChange,
+      'market_trend': marketTrend,
+      'up_count': upCount,
+      'down_count': downCount,
+      'avg_change_pct': avgChangePct,
+      'update_time': updateTime?.toIso8601String(),
+    };
+  }
+}
+
+class RecommendationReason {
+  final String title;
+  final String description;
+  final double confidence;
+  final String duration;
+
+  RecommendationReason({
+    required this.title,
+    required this.description,
+    required this.confidence,
+    required this.duration,
+  });
+
+  factory RecommendationReason.fromJson(Map<String, dynamic> json) {
+    return RecommendationReason(
+      title: json['title'] ?? '',
+      description: json['description'] ?? '',
+      confidence: json['confidence'] is num ? (json['confidence'] as num).toDouble() : 0.5,
+      duration: json['duration'] ?? '未知',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'title': title,
+      'description': description,
+      'confidence': confidence,
+      'duration': duration,
+    };
   }
 }
 
@@ -448,6 +655,13 @@ class AnalysisResult {
   final List<String> reasons;
   final List<Map<String, String>> opportunities;
 
+  // 新增字段
+  final List<TradingStrategy> shortTermStrategies;   // 短线策略列表
+  final List<TradingStrategy> longTermStrategies;     // 长线策略列表
+  final MarketContext? marketContext;               // 市场环境
+  final double confidenceScore;                     // 推荐可信度（0.0-1.0）
+  final List<RecommendationReason> detailedReasons;  // 详细推荐理由
+
   AnalysisResult({
     this.quote,
     this.indicators = const {},
@@ -462,6 +676,11 @@ class AnalysisResult {
     this.confluenceDetails = const [],
     this.reasons = const [],
     this.opportunities = const [],
+    this.shortTermStrategies = const [],
+    this.longTermStrategies = const [],
+    this.marketContext,
+    this.confidenceScore = 0.5,
+    this.detailedReasons = const [],
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {
@@ -469,6 +688,20 @@ class AnalysisResult {
     if (json['signals'] != null && json['signals'] is List) {
       signals = (json['signals'] as List)
           .map((s) => SignalItem.fromJson(s as Map<String, dynamic>))
+          .toList();
+    }
+
+    List<TradingStrategy> shortTermStrategies = [];
+    if (json['short_term_strategies'] != null && json['short_term_strategies'] is List) {
+      shortTermStrategies = (json['short_term_strategies'] as List)
+          .map((s) => TradingStrategy.fromJson(s as Map<String, dynamic>))
+          .toList();
+    }
+
+    List<TradingStrategy> longTermStrategies = [];
+    if (json['long_term_strategies'] != null && json['long_term_strategies'] is List) {
+      longTermStrategies = (json['long_term_strategies'] as List)
+          .map((s) => TradingStrategy.fromJson(s as Map<String, dynamic>))
           .toList();
     }
 
@@ -487,7 +720,44 @@ class AnalysisResult {
       opportunities: json['opportunities'] != null
           ? (json['opportunities'] as List).map((e) => Map<String, String>.from(e as Map)).toList()
           : [],
+      shortTermStrategies: shortTermStrategies,
+      longTermStrategies: longTermStrategies,
+      marketContext: json['market_context'] != null
+          ? MarketContext.fromJson(json['market_context'] as Map<String, dynamic>)
+          : null,
+      confidenceScore: json['confidence_score'] is num ? (json['confidence_score'] as num).toDouble() : 0.5,
+      detailedReasons: json['detailed_reasons'] != null
+          ? (json['detailed_reasons'] as List).map((e) => RecommendationReason.fromJson(e as Map<String, dynamic>)).toList()
+          : [],
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'quote': quote?.toJson(),
+      'indicators': indicators,
+      'signals': signals.map((s) => s.toJson()).toList(),
+      'score': score,
+      'recommendation': recommendation,
+      'risk_level': riskLevel,
+      'risk_factors': riskFactors,
+      'suggestions': suggestions,
+      'trade_levels': tradeLevels,
+      'confluence_score': confluenceScore,
+      'confluence_details': confluenceDetails,
+      'reasons': reasons,
+      'opportunities': opportunities,
+      'short_term_strategies': shortTermStrategies.map((s) => s.toJson()).toList(),
+      'long_term_strategies': longTermStrategies.map((s) => s.toJson()).toList(),
+      'market_context': marketContext?.toJson(),
+      'confidence_score': confidenceScore,
+      'detailed_reasons': detailedReasons.map((r) => {
+        'title': r.title,
+        'description': r.description,
+        'confidence': r.confidence,
+        'duration': r.duration,
+      }).toList(),
+    };
   }
 }
 

@@ -1,5 +1,8 @@
 import '../models/stock_models.dart';
 import 'indicators.dart';
+import 'signal_detector.dart';
+import 'strategy_builder.dart';
+import 'strategy_engine.dart';
 
 List<SignalItem> detectSignals(List<HistoryKline> data) {
   if (data.isEmpty || data.length < 2) return [];
@@ -626,18 +629,19 @@ Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
   };
 }
 
-AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
+AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote, {MarketContext? marketContext}) {
   if (data.isEmpty) {
     return AnalysisResult(
       signals: [],
       indicators: {},
       recommendation: '观望',
-      score: 50,
+      score: 5,
       riskLevel: '中等',
       riskFactors: ['数据不足'],
       suggestions: ['等待更多数据'],
       reasons: ['数据不足，无法生成有效建议'],
       opportunities: [],
+      confidenceScore: 0.3,
     );
   }
 
@@ -648,9 +652,9 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
   final buySignals = signals.where((s) => s.type == 'buy').toList();
   final sellSignals = signals.where((s) => s.type == 'sell').toList();
 
-  // ========== 多维加权评分（三维度） ==========
+  // ========== 多维加权评分（10级制：1-10分） ==========
 
-  // 1. 信号评分 (0-30分) - 按信号强度加权
+  // 1. 信号评分 (0-3分) - 按信号强度加权
   int buyCount = buySignals.length;
   int sellCount = sellSignals.length;
 
@@ -661,12 +665,10 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
   for (final s in buySignals) {
     double strength = s.strength.toDouble();
     if (adx > 25) {
-      // 趋势市：趋势类信号权重×1.2
       if (s.indicator == 'MA' || s.indicator == 'MACD' || s.signal.contains('排列') || s.signal.contains('金叉') || s.signal.contains('死叉')) {
         strength *= 1.2;
       }
     } else if (adx > 0 && adx < 20) {
-      // 盘整市：震荡类信号权重×1.2
       if (s.indicator == 'RSI' || s.indicator == 'KDJ' || s.signal.contains('超买') || s.signal.contains('超卖')) {
         strength *= 1.2;
       }
@@ -686,22 +688,21 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
     }
     sellStrength += strength;
   }
-  // Normalize: max possible strength per signal is 100, typical 3-4 signals
   double maxTotal = 300.0;
-  double signalScore = 15 + (buyStrength - sellStrength) / maxTotal * 30;
-  signalScore = signalScore.clamp(0.0, 30.0);
+  double signalScore = 1.5 + (buyStrength - sellStrength) / maxTotal * 3;
+  signalScore = signalScore.clamp(0.0, 3.0);
 
-  // 2. 趋势强度评分 (0-20分) - 基于均线排列 + ADX趋势强度
+  // 2. 趋势强度评分 (0-2分) - 基于均线排列 + ADX趋势强度
   double trendScore = 0;
   if (last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0) {
     if (last.ma5 > last.ma10 && last.ma10 > last.ma20) {
-      trendScore = 18;
+      trendScore = 1.8;
     } else if (last.ma5 > last.ma10) {
-      trendScore = 11;
+      trendScore = 1.1;
     } else if (last.ma5 > last.ma20) {
-      trendScore = 7;
+      trendScore = 0.7;
     } else {
-      trendScore = 3;
+      trendScore = 0.3;
     }
   }
   if (last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0) {
@@ -709,132 +710,126 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
       trendScore = 0;
     }
   }
-  // ADX trend strength bonus
   if (last.adx14 > 25) {
-    trendScore += 5;
+    trendScore += 0.5;
   } else if (last.adx14 > 0 && last.adx14 < 20) {
-    trendScore -= 3;
+    trendScore -= 0.3;
   }
-  trendScore = trendScore.clamp(0.0, 20.0);
+  trendScore = trendScore.clamp(0.0, 2.0);
 
-  // 3. 动量评分 (0-20分) - 基于RSI + BIAS乖离率
-  double momentumScore = 10;
+  // 3. 动量评分 (0-2分) - 基于RSI + BIAS乖离率
+  double momentumScore = 1.0;
   if (last.rsi6 > 0) {
     if (last.rsi6 < 30) {
-      momentumScore = 16;
+      momentumScore = 1.6;
     } else if (last.rsi6 < 40) {
-      momentumScore = 13;
+      momentumScore = 1.3;
     } else if (last.rsi6 < 60) {
-      momentumScore = 10;
+      momentumScore = 1.0;
     } else if (last.rsi6 < 70) {
-      momentumScore = 7;
+      momentumScore = 0.7;
     } else {
-      momentumScore = 3;
+      momentumScore = 0.3;
     }
   }
-  // BIAS extreme deviation penalty
   if (last.bias6.abs() > 5) {
-    momentumScore -= 4;
+    momentumScore -= 0.4;
   } else if (last.bias6.abs() > 3) {
-    momentumScore -= 2;
+    momentumScore -= 0.2;
   }
-  momentumScore = momentumScore.clamp(0.0, 20.0);
+  momentumScore = momentumScore.clamp(0.0, 2.0);
 
-  // 4. 量价确认评分 (0-15分) - 基于量比 + OBV趋势
-  double volumeScore = 8;
+  // 4. 量价确认评分 (0-1.5分) - 基于量比 + OBV趋势
+  double volumeScore = 0.8;
   if (last.volMa5 > 0) {
     final volRatio = last.volume / last.volMa5;
     if (last.close >= last.open) {
       if (volRatio > 1.5) {
-        volumeScore = 14;
+        volumeScore = 1.4;
       } else if (volRatio > 1.0) {
-        volumeScore = 11;
+        volumeScore = 1.1;
       } else {
-        volumeScore = 6;
+        volumeScore = 0.6;
       }
     } else {
       if (volRatio > 1.5) {
-        volumeScore = 2;
+        volumeScore = 0.2;
       } else if (volRatio > 1.0) {
-        volumeScore = 5;
+        volumeScore = 0.5;
       } else {
-        volumeScore = 8;
+        volumeScore = 0.8;
       }
     }
   }
-  // OBV trend confirmation
   if (data.length >= 5 && last.obv != 0) {
     final obv5 = data[data.length - 5].obv;
     if (obv5 != 0) {
       if (last.obv > obv5 && last.close > data[data.length - 5].close) {
-        volumeScore += 3; // OBV confirms uptrend
+        volumeScore += 0.3;
       } else if (last.obv < obv5 && last.close < data[data.length - 5].close) {
-        volumeScore -= 2; // OBV confirms downtrend
+        volumeScore -= 0.2;
       }
     }
   }
-  volumeScore = volumeScore.clamp(0.0, 15.0);
+  volumeScore = volumeScore.clamp(0.0, 1.5);
 
-  // 5. 波动率评分 (0-15分) - 基于ATR
-  double volatilityScore = 8;
+  // 5. 波动率评分 (0-1.5分) - 基于ATR
+  double volatilityScore = 0.8;
   if (last.atr14 > 0 && last.close > 0) {
     final atrPct = last.atr14 / last.close * 100;
     if (atrPct < 2) {
-      volatilityScore = 13; // Low volatility, stable
+      volatilityScore = 1.3;
     } else if (atrPct < 3) {
-      volatilityScore = 11;
+      volatilityScore = 1.1;
     } else if (atrPct < 4) {
-      volatilityScore = 8;
+      volatilityScore = 0.8;
     } else if (atrPct < 5) {
-      volatilityScore = 5;
+      volatilityScore = 0.5;
     } else {
-      volatilityScore = 2; // High volatility, risky
+      volatilityScore = 0.2;
     }
   }
 
-  // K线信号基础分 (0-100)
-  final klineBaseScore = (signalScore + trendScore + momentumScore + volumeScore + volatilityScore).round().clamp(0, 100);
+  // K线信号基础分 (0-10)
+  final klineBaseScore = (signalScore + trendScore + momentumScore + volumeScore + volatilityScore).clamp(0.0, 10.0);
 
-  // ========== 5. 实时行情评分 (0-100) ==========
-  double realtimeScore = 50; // 中性基准
+  // ========== 实时行情评分 (0-10) ==========
+  double realtimeScore = 5.0;
   if (quote != null && quote.price > 0) {
-    // 涨跌幅权重
     final changePct = quote.changePct;
     if (changePct > 0 && changePct <= 3) {
-      realtimeScore += 10;
+      realtimeScore += 1.0;
     } else if (changePct > 3 && changePct <= 5) {
-      realtimeScore += 5;
+      realtimeScore += 0.5;
     } else if (changePct > 5) {
-      realtimeScore -= 5;
+      realtimeScore -= 0.5;
     } else if (changePct < 0 && changePct >= -3) {
-      realtimeScore -= 5;
+      realtimeScore -= 0.5;
     } else if (changePct < -3 && changePct >= -5) {
-      realtimeScore += 5;
+      realtimeScore += 0.5;
     } else if (changePct < -5) {
-      realtimeScore += 8;
+      realtimeScore += 0.8;
     }
 
-    // 资金流向权重
     if (quote.mainNetFlow != 0) {
       if (quote.mainNetFlow > 0) {
-        realtimeScore += (quote.mainNetFlowRate > 5 ? 8 : 5); // 主力净流入加分
+        realtimeScore += (quote.mainNetFlowRate > 5 ? 0.8 : 0.5);
       } else {
-        realtimeScore -= (quote.mainNetFlowRate < -5 ? 8 : 5); // 主力净流出减分
+        realtimeScore -= (quote.mainNetFlowRate < -5 ? 0.8 : 0.5);
       }
     }
 
-    // 换手率权重
     if (quote.turnover > 0) {
       if (quote.turnover >= 1 && quote.turnover <= 5) {
-        realtimeScore += 5; // 活跃但不过热
+        realtimeScore += 0.5;
       } else if (quote.turnover > 10) {
-        realtimeScore -= 5; // 过热风险
+        realtimeScore -= 0.5;
       } else if (quote.turnover < 0.5) {
-        realtimeScore -= 3; // 流动性不足
+        realtimeScore -= 0.3;
       }
     }
   }
-  realtimeScore = realtimeScore.clamp(0.0, 100.0);
+  realtimeScore = realtimeScore.clamp(0.0, 10.0);
 
   // ========== 共振评分（双向：多空对称） ==========
   int bullCount = 0;
@@ -868,22 +863,36 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
   if (hasBottomDivergence) bullCount += 2;
   if (hasTopDivergence) bearCount += 2;
 
-  // 双向共振：多空对称，范围[-8, 8]，映射到[0, 100]
-  final confluenceBonus = (50 + (bullCount - bearCount) / 8 * 50).clamp(0.0, 100.0);
+  // 双向共振：多空对称，范围[-8, 8]，映射到[0, 10]
+  final confluenceBonus = (5.0 + (bullCount - bearCount) / 8 * 5).clamp(0.0, 10.0);
 
-  // ========== 三维度加权总分 ==========
+  // ========== 三维度加权总分（10级制 1-10） ==========
   // K线信号(55%) + 实时行情(25%) + 共振评分(20%)
-  final totalScore = (klineBaseScore * 0.55 + realtimeScore * 0.25 + confluenceBonus * 0.20).round().clamp(0, 100);
+  final rawScore = (klineBaseScore * 0.55 + realtimeScore * 0.25 + confluenceBonus * 0.20).clamp(0.0, 10.0);
 
-  // ========== 5级推荐 ==========
+  // 市场环境调节
+  double marketAdjustment = 1.0;
+  if (marketContext != null) {
+    marketAdjustment = marketContext.getMarketAdjustmentFactor();
+  }
+  final adjustedScore = (rawScore * marketAdjustment).clamp(0.0, 10.0);
+
+  // 映射到10级整分（1-10）
+  final totalScore = (adjustedScore / 10.0 * 9 + 1).round().clamp(1, 10);
+
+  // ========== 10级推荐（7档） ==========
   String recommendation;
-  if (totalScore >= 80) {
+  if (totalScore >= 9) {
     recommendation = '强烈买入';
-  } else if (totalScore >= 65) {
+  } else if (totalScore >= 8) {
     recommendation = '买入';
-  } else if (totalScore >= 40) {
+  } else if (totalScore >= 7) {
+    recommendation = '谨慎买入';
+  } else if (totalScore >= 5) {
     recommendation = '观望';
-  } else if (totalScore >= 25) {
+  } else if (totalScore >= 4) {
+    recommendation = '谨慎卖出';
+  } else if (totalScore >= 3) {
     recommendation = '卖出';
   } else {
     recommendation = '强烈卖出';
@@ -1099,6 +1108,65 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
 
   final tradeLevels = calcTradeLevels(data);
 
+  // ========== 分层信号与策略（10级增强） ==========
+  // 使用SignalDetector获取分层信号，补充到signals中
+  try {
+    final layeredSignals = SignalDetector.detectLayeredSignals(data);
+    // 合并分层信号（去重）
+    final existingSignals = signals.map((s) => s.signal).toSet();
+    for (final ls in layeredSignals) {
+      if (!existingSignals.contains(ls.signal)) {
+        signals.add(ls);
+      }
+    }
+  } catch (_) {
+    // 分层信号检测失败时回退，不影响主流程
+  }
+
+  // 构建分层策略
+  List<TradingStrategy> shortTermStrategies = [];
+  List<TradingStrategy> longTermStrategies = [];
+  try {
+    shortTermStrategies = StrategyBuilder.buildLayeredStrategies(data, signals, SignalDuration.shortTerm);
+    longTermStrategies = StrategyBuilder.buildLayeredStrategies(data, signals, SignalDuration.longTerm);
+  } catch (_) {
+    // 策略构建失败时回退
+  }
+
+  // 推荐可信度计算
+  double confidenceScore = 0.5;
+  final signalCount = buyCount + sellCount;
+  if (signalCount > 0) {
+    final signalRatio = (buyCount - sellCount).abs() / signalCount;
+    confidenceScore = 0.5 + signalRatio * 0.3;
+  }
+  if (quote != null && quote.pe > 0 && quote.pe < 50) confidenceScore += 0.05;
+  if (quote != null && quote.pb > 0 && quote.pb < 5) confidenceScore += 0.05;
+  if (marketContext != null && marketContext.avgChangePct > 0.5) confidenceScore += 0.03;
+  if (marketContext != null && marketContext.avgChangePct < -0.5) confidenceScore -= 0.03;
+  confidenceScore = confidenceScore.clamp(0.3, 0.95);
+
+  // 详细推荐理由
+  final detailedReasons = <RecommendationReason>[];
+  for (final signal in signals.take(5)) {
+    if (signal.confidence != null) {
+      detailedReasons.add(RecommendationReason(
+        title: signal.signal,
+        description: signal.description,
+        confidence: signal.confidence!,
+        duration: signal.duration == SignalDuration.shortTerm ? '短期' : '长期',
+      ));
+    }
+  }
+  if (marketContext != null) {
+    detailedReasons.add(RecommendationReason(
+      title: '市场环境',
+      description: '上证${marketContext.shIndexPct.toStringAsFixed(2)}%，深证${marketContext.szIndexPct.toStringAsFixed(2)}%',
+      confidence: 0.7,
+      duration: '环境',
+    ));
+  }
+
   return AnalysisResult(
     signals: signals,
     indicators: indicators,
@@ -1112,5 +1180,10 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote) {
     confluenceDetails: confluenceDetails,
     reasons: reasons,
     opportunities: opportunities,
+    shortTermStrategies: shortTermStrategies,
+    longTermStrategies: longTermStrategies,
+    marketContext: marketContext,
+    confidenceScore: confidenceScore,
+    detailedReasons: detailedReasons,
   );
 }

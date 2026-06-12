@@ -1758,7 +1758,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                         Text(
                           analysis.recommendation,
                           style: textTheme.titleLarge?.copyWith(
-                            color: analysis.score >= 60 ? const Color(0xFFef5350) : const Color(0xFF26a69a),
+                            color: analysis.score >= 6 ? const Color(0xFFef5350) : const Color(0xFF26a69a),
                           ),
                         ),
                       ],

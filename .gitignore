@@ -13,6 +13,7 @@ Thumbs.db
 .android/
 .idea/
 .vscode/
+.claude/
 *.iml
 
 android-sdk/
