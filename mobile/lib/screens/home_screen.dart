@@ -1,8 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
-import '../analysis/signal_engine.dart';
-import '../analysis/indicators.dart';
+import '../analysis/sector_pick_engine.dart';
 import '../storage/database_service.dart';
 import 'quote_screen.dart';
 import 'sector_screen.dart';
@@ -17,6 +17,8 @@ class HomeScreen extends StatefulWidget {
 class HomeScreenState extends State<HomeScreen> {
   final ApiClient _apiClient = ApiClient();
   final DatabaseService _dbService = DatabaseService();
+  final SectorPickEngine _pickEngine = SectorPickEngine.instance;
+  StreamSubscription<SectorPickProgress>? _pickSubscription;
   List<QuoteData> _quotes = [];
   List<SectorInfo> _sectors = [];
   bool _isLoading = true;
@@ -31,12 +33,87 @@ class HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadData();
     _loadCachedPicks();
+    // 如果引擎正在运行，订阅进度流并恢复状态
+    if (_pickEngine.isRunning) {
+      _subscribeToPickProgress();
+      _restorePickProgress();
+    }
   }
 
   @override
   void dispose() {
     _apiClient.dispose();
+    // 不取消订阅，让引擎继续后台运行
+    _pickSubscription?.pause();
     super.dispose();
+  }
+
+  void _subscribeToPickProgress() {
+    _pickSubscription?.cancel();
+    _pickSubscription = _pickEngine.progressStream.listen(_onPickProgress);
+  }
+
+  /// 从 latestProgress 恢复状态
+  void _restorePickProgress() {
+    final lp = _pickEngine.latestProgress;
+    if (lp == null) return;
+    setState(() {
+      _isPickingSectors = true;
+      _pickProgress = lp.progress;
+      _pickTotal = lp.total;
+    });
+  }
+
+  void _onPickProgress(SectorPickProgress progress) {
+    if (!mounted) return; // 仅跳过setState，不取消订阅
+    switch (progress.status) {
+      case SectorPickStatus.analyzing:
+        setState(() {
+          _isPickingSectors = true;
+          _pickProgress = progress.progress;
+          _pickTotal = progress.total;
+        });
+        break;
+      case SectorPickStatus.saving:
+        break;
+      case SectorPickStatus.complete:
+        final picks = progress.picks ?? [];
+        final now = DateTime.now();
+        final hadPreviousCache = _cachedPicks.isNotEmpty;
+        setState(() {
+          _isPickingSectors = false;
+          _pickProgress = 0;
+          _pickTotal = 0;
+          if (picks.isNotEmpty) {
+            _cachedPicks = picks;
+            _pickLastTime = now;
+          }
+        });
+        // 如果之前没有缓存，现在分析完了直接展示
+        if (picks.isNotEmpty) {
+          _showPickResults(picks);
+        } else if (!hadPreviousCache) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('当前热门板块中暂无买入推荐')),
+          );
+        }
+        break;
+      case SectorPickStatus.error:
+        setState(() {
+          _isPickingSectors = false;
+          _pickProgress = 0;
+          _pickTotal = 0;
+        });
+        if (progress.message != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(progress.message!)),
+          );
+        }
+        break;
+      case SectorPickStatus.alreadyRunning:
+      case SectorPickStatus.idle:
+        break;
+    }
   }
 
   String _loadError = '';
@@ -192,10 +269,22 @@ class HomeScreenState extends State<HomeScreen> {
     if (_cachedPicks.isNotEmpty) {
       _showPickResults(_cachedPicks, hasCache: true);
       // 后台静默刷新
-      _pickSectors();
+      _startPickAnalysis();
     } else {
-      _pickSectors();
+      _startPickAnalysis();
     }
+  }
+
+  void _startPickAnalysis() {
+    if (_isPickingSectors) return;
+    setState(() {
+      _isPickingSectors = true;
+      _pickProgress = 0;
+      _pickTotal = _sectors.take(10).length;
+    });
+    _subscribeToPickProgress();
+    // 引擎独立运行，不await
+    _pickEngine.pick(_sectors);
   }
 
   Widget _buildMarketItem(String name, String code) {
@@ -266,111 +355,6 @@ class HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-  }
-
-  Future<void> _pickSectors() async {
-    final topSectors = _sectors.take(10).toList();
-    setState(() {
-      _isPickingSectors = true;
-      _pickProgress = 0;
-      _pickTotal = topSectors.length;
-    });
-
-    try {
-      final List<Map<String, dynamic>> picks = [];
-      final Set<String> seenCodes = {};
-
-      // Process sectors in batches of 5
-      for (int i = 0; i < topSectors.length; i += 5) {
-        if (!mounted) return;
-        final batch = topSectors.sublist(i, i + 5 > topSectors.length ? topSectors.length : i + 5);
-
-        // Fetch sector stocks in parallel
-        final sectorStocksList = await Future.wait(
-          batch.map((sector) => _apiClient.getSectorStocks(sector.code).catchError((_) => <QuoteData>[])),
-        );
-
-        for (int j = 0; j < batch.length; j++) {
-          if (!mounted) return;
-          final sector = batch[j];
-          // 只取涨幅前10的主板股票
-          final stocks = sectorStocksList[j].take(10).toList();
-
-          setState(() {
-            _pickProgress = (i + j + 1).clamp(0, _pickTotal);
-          });
-
-          // Analyze all stocks in parallel (max 10 per sector)
-          final analyses = await Future.wait(
-            stocks.map((stock) async {
-              try {
-                final klineData = await _apiClient.getStockHistory(stock.code);
-                if (klineData.length < 20) return null;
-                final analysis = generateAnalysis(calcAllIndicators(klineData), stock);
-                if (analysis.recommendation.contains('买入')) {
-                  return {
-                    'code': stock.code,
-                    'name': stock.name,
-                    'recommendation': analysis.recommendation,
-                    'score': analysis.score,
-                    'sector': sector.name,
-                  };
-                }
-                return null;
-              } catch (_) {
-                return null;
-              }
-            }),
-          );
-
-          for (final result in analyses) {
-            if (result != null) {
-              final code = result['code'] as String;
-              if (!seenCodes.contains(code)) {
-                seenCodes.add(code);
-                picks.add(result);
-              }
-            }
-          }
-        }
-      }
-
-      // Sort by score descending
-      picks.sort((a, b) => (b['score'] as int).compareTo(a['score'] as int));
-
-      if (!mounted) return;
-
-      // 保存到数据库
-      if (picks.isNotEmpty) {
-        final now = DateTime.now();
-        final maps = picks.map((p) => {
-          ...p,
-          'analyzed_at': now.millisecondsSinceEpoch,
-        }).toList();
-        await _dbService.replaceSectorPickResults(maps);
-        setState(() {
-          _cachedPicks = picks;
-          _pickLastTime = now;
-        });
-      }
-
-      // 如果之前没有缓存，现在分析完了直接展示
-      if (_cachedPicks.isNotEmpty || picks.isNotEmpty) {
-        _showPickResults(picks.isNotEmpty ? picks : _cachedPicks);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('当前热门板块中暂无买入推荐')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isPickingSectors = false;
-          _pickProgress = 0;
-          _pickTotal = 0;
-        });
-      }
-    }
   }
 
   void _showPickResults(List<Map<String, dynamic>> picks, {bool hasCache = false}) {

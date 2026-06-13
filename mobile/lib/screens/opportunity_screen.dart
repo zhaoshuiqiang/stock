@@ -1,92 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import '../api/api_client.dart';
+import '../analysis/opportunity_engine.dart';
 import '../models/stock_models.dart';
-import '../analysis/indicators.dart';
-import '../analysis/signal_detector.dart';
-import '../analysis/signal_engine.dart';
-import '../analysis/strategy_engine.dart';
 import '../storage/database_service.dart';
 import 'quote_screen.dart';
-
-class _StockOpportunity {
-  final String code;
-  final String name;
-  final double price;
-  final double changePct;
-  final int score;
-  final String recommendation;
-  final String riskLevel;
-  final int buySignalCount;
-  final int sellSignalCount;
-  final int activeStrategyCount;
-  final int confluenceScore;
-  final Map<String, dynamic>? tradeLevels;
-  final List<String> topSignals;
-
-  _StockOpportunity({
-    required this.code,
-    required this.name,
-    required this.price,
-    required this.changePct,
-    required this.score,
-    required this.recommendation,
-    required this.riskLevel,
-    required this.buySignalCount,
-    required this.sellSignalCount,
-    required this.activeStrategyCount,
-    required this.confluenceScore,
-    this.tradeLevels,
-    this.topSignals = const [],
-  });
-
-  Map<String, dynamic> toMap([DateTime? analyzedAt]) {
-    return {
-      'code': code,
-      'name': name,
-      'price': price,
-      'change_pct': changePct,
-      'score': score,
-      'recommendation': recommendation,
-      'risk_level': riskLevel,
-      'buy_signal_count': buySignalCount,
-      'sell_signal_count': sellSignalCount,
-      'active_strategy_count': activeStrategyCount,
-      'confluence_score': confluenceScore,
-      'trade_levels_json': tradeLevels != null ? jsonEncode(tradeLevels) : null,
-      'top_signals': topSignals.join('  '),
-      'analyzed_at': (analyzedAt ?? DateTime.now()).millisecondsSinceEpoch,
-    };
-  }
-
-  static _StockOpportunity fromMap(Map<String, dynamic> map) {
-    Map<String, dynamic>? tradeLevels;
-    if (map['trade_levels_json'] != null && (map['trade_levels_json'] as String).isNotEmpty) {
-      try {
-        tradeLevels = jsonDecode(map['trade_levels_json'] as String);
-      } catch (_) {}
-    }
-    List<String> topSignals = [];
-    if (map['top_signals'] != null && (map['top_signals'] as String).isNotEmpty) {
-      topSignals = (map['top_signals'] as String).split('  ').where((s) => s.isNotEmpty).toList();
-    }
-    return _StockOpportunity(
-      code: map['code'] as String,
-      name: map['name'] as String,
-      price: (map['price'] as num?)?.toDouble() ?? 0,
-      changePct: (map['change_pct'] as num?)?.toDouble() ?? 0,
-      score: (map['score'] as num?)?.toInt() ?? 0,
-      recommendation: map['recommendation'] as String? ?? '',
-      riskLevel: map['risk_level'] as String? ?? '',
-      buySignalCount: (map['buy_signal_count'] as num?)?.toInt() ?? 0,
-      sellSignalCount: (map['sell_signal_count'] as num?)?.toInt() ?? 0,
-      activeStrategyCount: (map['active_strategy_count'] as num?)?.toInt() ?? 0,
-      confluenceScore: (map['confluence_score'] as num?)?.toInt() ?? 0,
-      tradeLevels: tradeLevels,
-      topSignals: topSignals,
-    );
-  }
-}
 
 class OpportunityScreen extends StatefulWidget {
   const OpportunityScreen({super.key});
@@ -96,9 +14,10 @@ class OpportunityScreen extends StatefulWidget {
 }
 
 class _OpportunityScreenState extends State<OpportunityScreen> {
-  final ApiClient _apiClient = ApiClient();
   final DatabaseService _dbService = DatabaseService();
-  List<_StockOpportunity> _opportunities = [];
+  final OpportunityEngine _engine = OpportunityEngine.instance;
+  StreamSubscription<OpportunityProgress>? _subscription;
+  List<OpportunityResult> _opportunities = [];
   static const _buyRecommendations = ['强烈买入', '买入', '谨慎买入'];
   static const _sellRecommendations = ['卖出', '强烈卖出', '谨慎卖出'];
   static const _neutralRecommendations = ['观望'];
@@ -113,6 +32,82 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
   void initState() {
     super.initState();
     _loadFromDb();
+    // 如果引擎正在运行，订阅进度流并恢复状态
+    if (_engine.isRunning) {
+      _subscribeToProgress();
+      _restoreProgress();
+    }
+  }
+
+  @override
+  void dispose() {
+    // 不取消订阅，让引擎继续后台运行
+    _subscription?.pause();
+    super.dispose();
+  }
+
+  void _subscribeToProgress() {
+    _subscription?.cancel();
+    _subscription = _engine.progressStream.listen(_onProgress);
+  }
+
+  /// 从 latestProgress 恢复状态
+  void _restoreProgress() {
+    final lp = _engine.latestProgress;
+    if (lp == null) return;
+    setState(() {
+      _isAnalyzing = true;
+      _completedCount = lp.completedCount;
+      _totalCount = lp.totalCount;
+    });
+  }
+
+  void _onProgress(OpportunityProgress progress) {
+    if (!mounted) return; // 仅跳过setState，不取消订阅
+    switch (progress.status) {
+      case OpportunityStatus.fetching:
+        setState(() {
+          _isAnalyzing = true;
+        });
+        break;
+      case OpportunityStatus.analyzing:
+        setState(() {
+          _isAnalyzing = true;
+          _completedCount = progress.completedCount;
+          _totalCount = progress.totalCount;
+        });
+        break;
+      case OpportunityStatus.saving:
+        break;
+      case OpportunityStatus.complete:
+        _opportunities = progress.results ?? [];
+        _lastAnalyzed = DateTime.now();
+        setState(() {
+          _isAnalyzing = false;
+          _completedCount = progress.totalCount;
+          _totalCount = progress.totalCount;
+        });
+        break;
+      case OpportunityStatus.error:
+        setState(() {
+          _isAnalyzing = false;
+        });
+        if (progress.message != null) {
+          _showSnack(progress.message!);
+        }
+        break;
+      case OpportunityStatus.alreadyRunning:
+      case OpportunityStatus.idle:
+        break;
+    }
+  }
+
+  void _showSnack(String msg) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg)),
+      );
+    }
   }
 
   Future<void> _loadFromDb() async {
@@ -120,7 +115,7 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
     final lastTime = await _dbService.getOpportunityLastTime();
     if (mounted) {
       setState(() {
-        _opportunities = results.map((r) => _StockOpportunity.fromMap(r)).toList();
+        _opportunities = results.map((r) => OpportunityResult.fromMap(r)).toList();
         _lastAnalyzed = lastTime;
       });
     }
@@ -134,122 +129,12 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
       _completedCount = 0;
     });
 
-    try {
-      final watchlist = await _dbService.getWatchlist();
-      if (watchlist.isEmpty) {
-        setState(() {
-          _opportunities = [];
-          _totalCount = 0;
-        });
-        return;
-      }
-
-      setState(() {
-        _totalCount = watchlist.length;
-      });
-
-      // Batch fetch all quotes first
-      final prefixedCodes = watchlist.map((item) => _apiClient.addMarketPrefix(item.code)).toList();
-      List<QuoteData> batchQuotes;
-      try {
-        batchQuotes = await _apiClient.getBatchRealtimeQuotes(prefixedCodes);
-      } catch (e) {
-        batchQuotes = [];
-      }
-
-      final quoteMap = <String, QuoteData>{};
-      for (final q in batchQuotes) {
-        quoteMap[q.code] = q;
-      }
-
-      // Batch analysis with concurrency limit of 5
-      const batchSize = 5;
-      final results = <_StockOpportunity?>[];
-      for (int i = 0; i < watchlist.length; i += batchSize) {
-        if (!mounted) return;
-        final batch = watchlist.sublist(i, (i + batchSize).clamp(0, watchlist.length));
-        final batchResults = await Future.wait(
-          batch.map((item) async {
-            try {
-              final prefixedCode = _apiClient.addMarketPrefix(item.code);
-              QuoteData? quote = quoteMap[prefixedCode];
-              if (quote == null) {
-                try {
-                  quote = await _apiClient.getRealtimeQuote(prefixedCode);
-                } catch (e) {
-                  // ignore
-                }
-              }
-
-              final klines = await _apiClient.getStockHistory(prefixedCode, days: 120);
-              if (klines.isEmpty) return null;
-
-              final calculated = calcAllIndicators(klines);
-              final signals = SignalDetector.detectLayeredSignals(calculated);
-              final analysis = generateAnalysis(calculated, quote);
-              final strategies = evaluateStrategies(calculated, signals);
-              final activeStrategies = strategies.where((s) => s.isActive).length;
-
-              final last = calculated.last;
-              final topSignals = signals.take(2).map((s) =>
-                  '${s.type == 'buy' ? '▲' : '▼'}${s.signal}').toList();
-
-              return _StockOpportunity(
-                code: item.code,
-                name: item.name,
-                price: quote?.price ?? last.close,
-                changePct: quote?.changePct ?? last.changePct,
-                score: analysis.score,
-                recommendation: analysis.recommendation,
-                riskLevel: analysis.riskLevel,
-                buySignalCount: signals.where((s) => s.type == 'buy').length,
-                sellSignalCount: signals.where((s) => s.type == 'sell').length,
-                activeStrategyCount: activeStrategies,
-                confluenceScore: analysis.confluenceScore,
-                tradeLevels: analysis.tradeLevels,
-                topSignals: topSignals,
-              );
-            } catch (e) {
-              return null;
-            }
-          }),
-        );
-        results.addAll(batchResults);
-
-        if (mounted) {
-          setState(() {
-            _completedCount = (i + batchSize).clamp(0, watchlist.length);
-          });
-        }
-      }
-
-      final opportunities = results.whereType<_StockOpportunity>().toList();
-      opportunities.sort((a, b) => b.score.compareTo(a.score));
-
-      // 保存到数据库
-      final now = DateTime.now();
-      final maps = opportunities.map((o) => o.toMap(now)).toList();
-      await _dbService.replaceOpportunityResults(maps);
-
-      if (mounted) {
-        setState(() {
-          _opportunities = opportunities;
-          _completedCount = _totalCount;
-          _lastAnalyzed = now;
-        });
-      }
-    } catch (e) {
-      // 异常已在 finally 中处理 _isAnalyzing 重置
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isAnalyzing = false;
-        });
-      }
-    }
+    _subscribeToProgress();
+    // 引擎独立运行，不await
+    _engine.analyze();
   }
 
-  Future<void> _archiveOpportunity(_StockOpportunity o) async {
+  Future<void> _archiveOpportunity(OpportunityResult o) async {
     final record = ArchiveRecord(
       code: o.code,
       name: o.name,
@@ -305,7 +190,7 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
     }
   }
 
-  List<_StockOpportunity> _getFilteredOpportunities() {
+  List<OpportunityResult> _getFilteredOpportunities() {
     switch (_filterType) {
       case '买入':
         return _opportunities.where((o) => _buyRecommendations.contains(o.recommendation)).toList();
@@ -602,7 +487,7 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
     );
   }
 
-  Widget _buildOpportunityItem(_StockOpportunity o, TextTheme textTheme) {
+  Widget _buildOpportunityItem(OpportunityResult o, TextTheme textTheme) {
     final recColor = o.recommendation == '强烈买入' || o.recommendation == '买入' || o.recommendation == '谨慎买入'
         ? const Color(0xFFef5350)
         : o.recommendation == '卖出' || o.recommendation == '强烈卖出' || o.recommendation == '谨慎卖出'
