@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
@@ -22,7 +23,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -100,6 +101,15 @@ class DatabaseService {
               score INTEGER NOT NULL,
               sector TEXT NOT NULL,
               analyzed_at INTEGER NOT NULL
+            )
+          ''');
+        }
+        if (oldVersion < 6) {
+          await db.execute('''
+            CREATE TABLE home_cache (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL,
+              updated_at INTEGER NOT NULL
             )
           ''');
         }
@@ -194,6 +204,14 @@ class DatabaseService {
         score INTEGER NOT NULL,
         sector TEXT NOT NULL,
         analyzed_at INTEGER NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE home_cache (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
       )
     ''');
   }
@@ -492,5 +510,56 @@ class DatabaseService {
       return DateTime.fromMillisecondsSinceEpoch(result.first['last_time'] as int);
     }
     return null;
+  }
+
+  // ========== 首页缓存 CRUD ==========
+
+  Future<void> saveHomeCache(String key, String value) async {
+    final db = await database;
+    await db.insert(
+      'home_cache',
+      {'key': key, 'value': value, 'updated_at': DateTime.now().millisecondsSinceEpoch},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<String?> getHomeCache(String key) async {
+    final db = await database;
+    final result = await db.query('home_cache', where: 'key = ?', whereArgs: [key], limit: 1);
+    if (result.isNotEmpty) return result.first['value'] as String;
+    return null;
+  }
+
+  Future<DateTime?> getHomeCacheTime(String key) async {
+    final db = await database;
+    final result = await db.query('home_cache', where: 'key = ?', whereArgs: [key], limit: 1);
+    if (result.isNotEmpty && result.first['updated_at'] != null) {
+      return DateTime.fromMillisecondsSinceEpoch(result.first['updated_at'] as int);
+    }
+    return null;
+  }
+
+  Future<void> saveMarketQuotesCache(List<QuoteData> quotes) async {
+    final json = jsonEncode(quotes.map((q) => q.toJson()).toList());
+    await saveHomeCache('market_quotes', json);
+  }
+
+  Future<List<QuoteData>> getMarketQuotesCache() async {
+    final json = await getHomeCache('market_quotes');
+    if (json == null) return [];
+    final list = jsonDecode(json) as List;
+    return list.map((e) => QuoteData.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<void> saveSectorsCache(List<SectorInfo> sectors) async {
+    final json = jsonEncode(sectors.map((s) => s.toJson()).toList());
+    await saveHomeCache('hot_sectors', json);
+  }
+
+  Future<List<SectorInfo>> getSectorsCache() async {
+    final json = await getHomeCache('hot_sectors');
+    if (json == null) return [];
+    final list = jsonDecode(json) as List;
+    return list.map((e) => SectorInfo.fromJson(e as Map<String, dynamic>)).toList();
   }
 }

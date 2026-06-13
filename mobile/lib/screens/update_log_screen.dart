@@ -10,6 +10,18 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.18.0',
+        'date': '2026-06-14',
+        'changes': [
+          '首页缓存优先架构：进入首页不再自动刷新，使用本地缓存数据，下拉刷新才更新',
+          '热门板块精选同样使用缓存，点击刷新才更新',
+          '新增 home_cache 数据库表，缓存大盘行情和板块数据',
+          'SectorInfo 新增 toJson/fromJson 序列化支持',
+          '修复 onTabVisible 订阅恢复条件：pause 后切回首页正确恢复订阅和进度',
+          '修复 _loadFromCache 条件判断：任一缓存为空即触发API加载',
+        ],
+      },
+      {
         'version': 'v2.15.0',
         'date': '2026-06-13',
         'changes': [

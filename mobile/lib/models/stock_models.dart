@@ -1019,6 +1019,24 @@ class SectorInfo {
     this.leadStockCode = '',
     this.stockCount = 0,
   });
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'code': code,
+    'change_pct': changePct,
+    'lead_stock_name': leadStockName,
+    'lead_stock_code': leadStockCode,
+    'stock_count': stockCount,
+  };
+
+  factory SectorInfo.fromJson(Map<String, dynamic> json) => SectorInfo(
+    name: json['name'] ?? '',
+    code: json['code'] ?? '',
+    changePct: (json['change_pct'] as num?)?.toDouble() ?? 0,
+    leadStockName: json['lead_stock_name'] ?? '',
+    leadStockCode: json['lead_stock_code'] ?? '',
+    stockCount: (json['stock_count'] as num?)?.toInt() ?? 0,
+  );
 }
 
 class ExploreResult {

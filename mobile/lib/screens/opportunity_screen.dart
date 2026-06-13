@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../analysis/opportunity_engine.dart';
 import '../models/stock_models.dart';
@@ -147,7 +146,7 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
       sellSignalCount: o.sellSignalCount,
       activeStrategyCount: o.activeStrategyCount,
       confluenceScore: o.confluenceScore,
-      tradeLevelsJson: o.tradeLevels != null ? jsonEncode(o.tradeLevels) : null,
+      tradeLevelsJson: o.tradeLevels != null ? _encodeTradeLevels(o.tradeLevels!) : null,
       topSignals: o.topSignals.join('  '),
       archivedAt: DateTime.now(),
     );
@@ -157,6 +156,12 @@ class _OpportunityScreenState extends State<OpportunityScreen> {
         SnackBar(content: Text('${o.name} 已留档')),
       );
     }
+  }
+
+  String _encodeTradeLevels(Map<String, dynamic> tradeLevels) {
+    // 简单JSON编码
+    final parts = tradeLevels.entries.map((e) => '"${e.key}":${e.value is String ? '"${e.value}"' : e.value}');
+    return '{${parts.join(',')}}';
   }
 
   Future<void> _archiveAll() async {

@@ -14,14 +14,14 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => HomeScreenState();
 }
 
-class HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final ApiClient _apiClient = ApiClient();
   final DatabaseService _dbService = DatabaseService();
   final SectorPickEngine _pickEngine = SectorPickEngine.instance;
   StreamSubscription<SectorPickProgress>? _pickSubscription;
   List<QuoteData> _quotes = [];
   List<SectorInfo> _sectors = [];
-  bool _isLoading = true;
+  bool _isLoading = false;
   bool _isPickingSectors = false;
   int _pickProgress = 0;
   int _pickTotal = 0;
@@ -31,7 +31,8 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    WidgetsBinding.instance.addObserver(this);
+    _loadFromCache();
     _loadCachedPicks();
     // 如果引擎正在运行，订阅进度流并恢复状态
     if (_pickEngine.isRunning) {
@@ -41,7 +42,26 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 不自动刷新，用户需手动下拉刷新
+  }
+
+  /// Tab切换到首页时调用，仅恢复引擎订阅，不自动刷新
+  void onTabVisible() {
+    if (_pickEngine.isRunning) {
+      if (_pickSubscription?.isPaused == true) {
+        _pickSubscription!.resume();
+        _restorePickProgress();
+      } else if (_pickSubscription == null) {
+        _subscribeToPickProgress();
+        _restorePickProgress();
+      }
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _apiClient.dispose();
     // 不取消订阅，让引擎继续后台运行
     _pickSubscription?.pause();
@@ -118,6 +138,23 @@ class HomeScreenState extends State<HomeScreen> {
 
   String _loadError = '';
 
+  /// 从本地缓存加载，无缓存时才从API获取
+  Future<void> _loadFromCache() async {
+    final cachedQuotes = await _dbService.getMarketQuotesCache();
+    final cachedSectors = await _dbService.getSectorsCache();
+    if (mounted) {
+      setState(() {
+        _quotes = cachedQuotes;
+        _sectors = cachedSectors;
+      });
+    }
+    // 任一缓存为空时从API加载
+    if (cachedQuotes.isEmpty || cachedSectors.isEmpty) {
+      await _loadData();
+    }
+  }
+
+  /// 从API加载数据并保存到缓存
   Future<void> _loadData() async {
     setState(() {
       _isLoading = true;
@@ -129,10 +166,15 @@ class HomeScreenState extends State<HomeScreen> {
       final codes = ['sh000001', 'sz399001', 'sz399006'];
       final futures = codes.map((code) => _apiClient.getRealtimeQuote(code));
       final results = await Future.wait(futures);
+      final quotes = results.where((q) => q != null).cast<QuoteData>().toList();
       if (mounted) {
         setState(() {
-          _quotes = results.where((q) => q != null).cast<QuoteData>().toList();
+          _quotes = quotes;
         });
+      }
+      // 保存到缓存
+      if (quotes.isNotEmpty) {
+        await _dbService.saveMarketQuotesCache(quotes);
       }
     } catch (e) {
       debugPrint('Load market data failed: $e');
@@ -145,6 +187,10 @@ class HomeScreenState extends State<HomeScreen> {
           _sectors = sectors;
           if (sectors.isEmpty) _loadError = '板块数据加载失败，下拉刷新重试';
         });
+      }
+      // 保存到缓存
+      if (sectors.isNotEmpty) {
+        await _dbService.saveSectorsCache(sectors);
       }
     } catch (e) {
       debugPrint('Load sectors failed: $e');
@@ -184,12 +230,10 @@ class HomeScreenState extends State<HomeScreen> {
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
 
-    return _isLoading
+    return _isLoading && _quotes.isEmpty && _sectors.isEmpty
         ? const Center(child: CircularProgressIndicator())
         : RefreshIndicator(
-            onRefresh: () async {
-              await _loadData();
-            },
+            onRefresh: _loadData,
             child: ListView(
               padding: const EdgeInsets.all(8),
               children: [
@@ -226,7 +270,7 @@ class HomeScreenState extends State<HomeScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text('热门板块', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                            if (_sectors.isNotEmpty)
+                            if (_sectors.isNotEmpty || _cachedPicks.isNotEmpty)
                               GestureDetector(
                                 onTap: _isPickingSectors ? null : _onPickTapped,
                                 child: Container(
@@ -243,7 +287,7 @@ class HomeScreenState extends State<HomeScreen> {
                                         ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange))
                                         : const Icon(Icons.auto_awesome, color: Colors.orange, size: 14),
                                       const SizedBox(width: 4),
-                                      Text(_isPickingSectors ? '分析中$_pickProgress/$_pickTotal' : '精选', style: const TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.w600)),
+                                      Text(_isPickingSectors ? '分析中$_pickProgress/$_pickTotal' : (_cachedPicks.isNotEmpty ? '精选(${_cachedPicks.length})' : '精选'), style: const TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.w600)),
                                     ],
                                   ),
                                 ),
@@ -267,11 +311,19 @@ class HomeScreenState extends State<HomeScreen> {
   /// 点击精选：有缓存则先展示缓存，同时后台刷新；无缓存则直接分析
   void _onPickTapped() {
     if (_cachedPicks.isNotEmpty) {
-      _showPickResults(_cachedPicks, hasCache: true);
+      _showPickResults(_cachedPicks);
       // 后台静默刷新
+      if (_sectors.isNotEmpty) {
+        _startPickAnalysis();
+      }
+    } else if (_sectors.isNotEmpty) {
+      // 无缓存但有板块数据，启动分析
       _startPickAnalysis();
     } else {
-      _startPickAnalysis();
+      // 无缓存也无板块数据，提示用户
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('板块数据加载中，请稍后再试')),
+      );
     }
   }
 
@@ -357,7 +409,7 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showPickResults(List<Map<String, dynamic>> picks, {bool hasCache = false}) {
+  void _showPickResults(List<Map<String, dynamic>> picks) {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1a1a2e),

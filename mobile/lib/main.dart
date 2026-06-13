@@ -32,17 +32,22 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   int _currentIndex = 0;
+  final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
 
   void _onTabChanged(int index) {
     setState(() {
       _currentIndex = index;
     });
+    // 切回首页时自动刷新数据
+    if (index == 0) {
+      _homeKey.currentState?.onTabVisible();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final pages = [
-      const HomeScreen(),
+      HomeScreen(key: _homeKey),
       const WatchlistScreen(),
       const OpportunityScreen(),
       const NewsScreen(),
