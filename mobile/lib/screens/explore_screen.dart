@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../analysis/explore_engine.dart';
 import '../models/stock_models.dart';
@@ -13,7 +15,8 @@ class ExploreScreen extends StatefulWidget {
 
 class _ExploreScreenState extends State<ExploreScreen> {
   final DatabaseService _dbService = DatabaseService();
-  ExploreEngine? _engine;
+  final ExploreEngine _engine = ExploreEngine.instance;
+  StreamSubscription<ExploreProgress>? _subscription;
   List<ExploreResult> _results = [];
   bool _isLoading = false;
   bool _isAnalyzing = false;
@@ -30,12 +33,114 @@ class _ExploreScreenState extends State<ExploreScreen> {
   void initState() {
     super.initState();
     _loadFromDb();
+    // 如果引擎正在运行，订阅进度流
+    if (_engine.isRunning) {
+      _subscribeToProgress();
+      _restoreProgress();
+    }
   }
 
   @override
   void dispose() {
-    _engine?.dispose();
+    // 不取消订阅，让引擎继续后台运行
+    _subscription?.pause();
     super.dispose();
+  }
+
+  /// 不取消订阅，引擎在后台继续运行
+  void _subscribeToProgress() {
+    _subscription?.cancel();
+    _subscription = _engine.progressStream.listen(_onProgress);
+  }
+
+  /// 从 latestProgress 恢复状态
+  void _restoreProgress() {
+    final lp = _engine.latestProgress;
+    if (lp == null) return;
+    setState(() {
+      _isAnalyzing = true;
+      _isLoading = true;
+      _totalStocks = lp.totalStocks;
+      _analyzedStocks = lp.analyzedStocks;
+      _foundStocks = lp.foundStocks;
+      _currentStock = lp.currentStock ?? '';
+      _statusText = _progressToText(lp);
+    });
+  }
+
+  String _progressToText(ExploreProgress p) {
+    switch (p.status) {
+      case ExploreStatus.fetchingSectors:
+        return '正在获取热门板块...';
+      case ExploreStatus.fetchingStocks:
+        return '正在获取板块成分股...';
+      case ExploreStatus.analyzing:
+        return '正在分析 $_analyzedStocks/$_totalStocks';
+      case ExploreStatus.saving:
+        return '保存分析结果...';
+      default:
+        return '分析中...';
+    }
+  }
+
+  void _onProgress(ExploreProgress progress) {
+    if (!mounted) return; // 仅跳过setState，不取消订阅
+    switch (progress.status) {
+      case ExploreStatus.fetchingSectors:
+        setState(() => _statusText = '正在获取热门板块...');
+        break;
+      case ExploreStatus.fetchingStocks:
+        setState(() {
+          _statusText = '正在获取板块成分股...';
+          _totalStocks = progress.totalStocks;
+        });
+        break;
+      case ExploreStatus.analyzing:
+        setState(() {
+          _statusText = '正在分析 $_analyzedStocks/$_totalStocks';
+          _totalStocks = progress.totalStocks;
+          _analyzedStocks = progress.analyzedStocks;
+          _foundStocks = progress.foundStocks;
+          _currentStock = progress.currentStock ?? _currentStock;
+        });
+        break;
+      case ExploreStatus.saving:
+        setState(() => _statusText = '保存分析结果...');
+        break;
+      case ExploreStatus.complete:
+        _results = progress.results ?? [];
+        _lastAnalyzed = DateTime.now();
+        setState(() {
+          _isAnalyzing = false;
+          _isLoading = false;
+          _statusText = '';
+          _totalStocks = progress.totalStocks;
+          _analyzedStocks = progress.analyzedStocks;
+          _foundStocks = progress.foundStocks;
+        });
+        break;
+      case ExploreStatus.error:
+        setState(() {
+          _isAnalyzing = false;
+          _isLoading = _results.isEmpty;
+          _statusText = progress.message ?? '分析失败';
+        });
+        if (progress.message != null) {
+          _showSnack(progress.message!);
+        }
+        break;
+      case ExploreStatus.alreadyRunning:
+      case ExploreStatus.idle:
+        break;
+    }
+  }
+
+  void _showSnack(String msg) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg)),
+      );
+    }
   }
 
   Future<void> _loadFromDb() async {
@@ -84,85 +189,20 @@ class _ExploreScreenState extends State<ExploreScreen> {
       _currentStock = '';
     });
 
-    _engine = ExploreEngine();
-    final stream = _engine!.explore();
-
-    await for (final progress in stream) {
-      if (!mounted) break;
-
-      switch (progress.status) {
-        case ExploreStatus.fetchingSectors:
-          setState(() => _statusText = '正在获取热门板块...');
-          break;
-        case ExploreStatus.fetchingStocks:
-          setState(() {
-            _statusText = '正在获取板块成分股...';
-            _totalStocks = progress.totalStocks;
-          });
-          break;
-        case ExploreStatus.analyzing:
-          setState(() {
-            _statusText = '正在分析 $_analyzedStocks/$_totalStocks';
-            _totalStocks = progress.totalStocks;
-            _analyzedStocks = progress.analyzedStocks;
-            _foundStocks = progress.foundStocks;
-            _currentStock = progress.currentStock ?? _currentStock;
-          });
-          break;
-        case ExploreStatus.saving:
-          setState(() => _statusText = '保存分析结果...');
-          break;
-        case ExploreStatus.complete:
-          _results = progress.results ?? [];
-          _lastAnalyzed = DateTime.now();
-          setState(() {
-            _isAnalyzing = false;
-            _isLoading = false;
-            _statusText = '';
-            _totalStocks = progress.totalStocks;
-            _analyzedStocks = progress.analyzedStocks;
-            _foundStocks = progress.foundStocks;
-          });
-          break;
-        case ExploreStatus.error:
-          setState(() {
-            _isAnalyzing = false;
-            _isLoading = _results.isEmpty;
-            _statusText = progress.message ?? '分析失败';
-          });
-          if (mounted && progress.message != null) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(progress.message!)),
-            );
-          }
-          break;
-        case ExploreStatus.alreadyRunning:
-          break;
-        case ExploreStatus.idle:
-          break;
-      }
-    }
+    _subscribeToProgress();
+    // 引擎独立运行，不await
+    _engine.explore();
   }
 
   Future<void> _toggleWatchlist(ExploreResult item) async {
     final isIn = await _dbService.isInWatchlist(item.code);
     if (isIn) {
       await _dbService.removeFromWatchlist(item.code);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已从自选移除：${item.name}')),
-        );
-      }
+      _showSnack('已从自选移除：${item.name}');
     } else {
       await _dbService.addToWatchlist(item.code, item.name);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已加入自选：${item.name}')),
-        );
-      }
+      _showSnack('已加入自选：${item.name}');
     }
-    // 刷新结果以更新自选状态
-    await _loadFromDb();
   }
 
   String _formatTime(DateTime? time) {
@@ -273,11 +313,8 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
     return Column(
       children: [
-        // 状态栏
         _buildStatusBar(),
-        // 排序栏
         _buildSortBar(),
-        // 结果列表
         Expanded(
           child: RefreshIndicator(
             onRefresh: () async {
@@ -292,7 +329,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
             ),
           ),
         ),
-        // 底部操作栏
         _buildBottomBar(),
       ],
     );
@@ -431,7 +467,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
           children: [
             Row(
               children: [
-                // 排名
                 Container(
                   width: 24,
                   height: 24,
@@ -450,7 +485,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   ),
                 ),
                 const SizedBox(width: 10),
-                // 名称和代码
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -467,7 +501,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                     ],
                   ),
                 ),
-                // 推荐标签
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
@@ -482,16 +515,13 @@ class _ExploreScreenState extends State<ExploreScreen> {
               ],
             ),
             const SizedBox(height: 10),
-            // 价格和评分信息
             Row(
               children: [
-                // 价格
                 Text(
                   item.price > 0 ? '¥${item.price.toStringAsFixed(2)}' : '--',
                   style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(width: 12),
-                // 涨跌幅
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
@@ -510,7 +540,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   ),
                 ),
                 const Spacer(),
-                // PE/PB
                 if (item.pe > 0)
                   Text(
                     'PE:${item.pe.toStringAsFixed(1)}',
@@ -523,7 +552,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                     style: const TextStyle(color: Colors.white38, fontSize: 11),
                   ),
                 const SizedBox(width: 12),
-                // 评分
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
@@ -538,7 +566,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
               ],
             ),
             const SizedBox(height: 10),
-            // 操作按钮
             Row(
               children: [
                 _buildActionButton(

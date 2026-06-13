@@ -9,23 +9,35 @@ import 'indicators.dart';
 import 'signal_engine.dart';
 
 /// 探索引擎：后台批量分析沪深主板股票，筛选买入级别以上标的
+/// 使用全局单例 + BroadcastStream，确保切换Tab不中断分析
 class ExploreEngine {
+  static final ExploreEngine _instance = ExploreEngine._();
+  static ExploreEngine get instance => _instance;
+
   final ApiClient _apiClient;
   final DatabaseService _dbService;
   bool _isRunning = false;
 
-  ExploreEngine({ApiClient? apiClient, DatabaseService? dbService})
-      : _apiClient = apiClient ?? ApiClient(),
-        _dbService = dbService ?? DatabaseService();
+  final StreamController<ExploreProgress> _progressController =
+      StreamController<ExploreProgress>.broadcast();
+
+  ExploreEngine._()
+      : _apiClient = ApiClient(),
+        _dbService = DatabaseService();
 
   bool get isRunning => _isRunning;
 
-  /// 执行探索分析
-  /// [onProgress] 回调：(已分析数, 总数, 当前股票名)
-  /// [onComplete] 回调：(结果列表)
-  Stream<ExploreProgress> explore() async* {
+  /// 进度广播流，切换Tab后重新订阅可获取最新进度
+  Stream<ExploreProgress> get progressStream => _progressController.stream;
+
+  /// 最新进度快照，切换Tab回来后恢复状态
+  ExploreProgress? _latestProgress;
+  ExploreProgress? get latestProgress => _latestProgress;
+
+  /// 执行探索分析（异步，通过 progressStream 广播进度）
+  Future<void> explore() async {
     if (_isRunning) {
-      yield ExploreProgress(status: ExploreStatus.alreadyRunning);
+      _emit(ExploreProgress(status: ExploreStatus.alreadyRunning));
       return;
     }
 
@@ -34,18 +46,18 @@ class ExploreEngine {
 
     try {
       // 1. 获取热门板块列表
-      yield ExploreProgress(status: ExploreStatus.fetchingSectors);
+      _emit(ExploreProgress(status: ExploreStatus.fetchingSectors));
       final sectors = await _apiClient.getHotSectors();
       final topSectors = sectors.take(20).toList();
 
       if (topSectors.isEmpty) {
-        yield ExploreProgress(status: ExploreStatus.error, message: '无法获取板块数据');
+        _emit(ExploreProgress(status: ExploreStatus.error, message: '无法获取板块数据'));
         _isRunning = false;
         return;
       }
 
       // 2. 并发获取板块成分股
-      yield ExploreProgress(status: ExploreStatus.fetchingStocks, totalStocks: 0);
+      _emit(ExploreProgress(status: ExploreStatus.fetchingStocks, totalStocks: 0));
 
       final allStocks = <QuoteData>[];
       final seenCodes = <String>{};
@@ -66,31 +78,30 @@ class ExploreEngine {
           for (final stock in sectorStocksList[j]) {
             if (seenCodes.contains(stock.code)) continue;
             if (!_apiClient.isMainBoardStock(stock.code)) continue;
-            // 过滤掉无价格或异常的数据
             if (stock.price <= 0 || stock.name.isEmpty) continue;
             seenCodes.add(stock.code);
             allStocks.add(stock);
           }
         }
 
-        yield ExploreProgress(
+        _emit(ExploreProgress(
           status: ExploreStatus.fetchingStocks,
           totalStocks: allStocks.length,
-        );
+        ));
       }
 
       if (allStocks.isEmpty) {
-        yield ExploreProgress(status: ExploreStatus.error, message: '未获取到有效股票数据');
+        _emit(ExploreProgress(status: ExploreStatus.error, message: '未获取到有效股票数据'));
         _isRunning = false;
         return;
       }
 
       // 3. 分批分析
-      yield ExploreProgress(
+      _emit(ExploreProgress(
         status: ExploreStatus.analyzing,
         totalStocks: allStocks.length,
         analyzedStocks: 0,
-      );
+      ));
 
       final results = <ExploreResult>[];
       const analyzeBatchSize = 10;
@@ -109,51 +120,53 @@ class ExploreEngine {
           }
         }
 
-        yield ExploreProgress(
+        _emit(ExploreProgress(
           status: ExploreStatus.analyzing,
           totalStocks: allStocks.length,
           analyzedStocks: end,
           foundStocks: results.length,
           currentStock: batch.last.name,
-        );
+        ));
       }
 
       // 4. 按评分降序排列
       results.sort((a, b) => b.score.compareTo(a.score));
 
       // 5. 持久化到数据库
-      yield ExploreProgress(status: ExploreStatus.saving);
+      _emit(ExploreProgress(status: ExploreStatus.saving));
       await _dbService.replaceExploreResults(results);
 
       final elapsed = DateTime.now().difference(startTime);
       debugPrint('Explore completed: ${results.length} stocks in ${elapsed.inSeconds}s');
 
-      yield ExploreProgress(
+      _emit(ExploreProgress(
         status: ExploreStatus.complete,
         results: results,
         totalStocks: allStocks.length,
         foundStocks: results.length,
         elapsedSeconds: elapsed.inSeconds,
-      );
+      ));
     } catch (e) {
       debugPrint('ExploreEngine error: $e');
-      yield ExploreProgress(status: ExploreStatus.error, message: '分析出错：$e');
+      _emit(ExploreProgress(status: ExploreStatus.error, message: '分析出错：$e'));
     } finally {
       _isRunning = false;
     }
   }
 
+  void _emit(ExploreProgress progress) {
+    _latestProgress = progress;
+    _progressController.add(progress);
+  }
+
   /// 分析单只股票，返回 ExploreResult 或 null（不满足条件）
   Future<ExploreResult?> _analyzeSingle(QuoteData stock) async {
     try {
-      // 获取K线数据（至少20条）
       final klineData = await _apiClient.getStockHistory(stock.code);
       if (klineData.length < 20) return null;
 
-      // 计算技术指标
       final indicators = calcAllIndicators(klineData);
 
-      // 获取实时行情（含PE/PB）
       QuoteData? quote;
       try {
         quote = await _apiClient.getRealtimeQuote(stock.code);
@@ -161,15 +174,12 @@ class ExploreEngine {
         quote = stock;
       }
 
-      // PE/PB估值过滤
       if (quote != null && !_passValuationFilter(quote)) {
         return null;
       }
 
-      // 生成分析结果
       final analysis = generateAnalysis(indicators, quote);
 
-      // 仅保留买入级别以上
       if (!_isBuyRecommendation(analysis.recommendation)) {
         return null;
       }
@@ -192,23 +202,15 @@ class ExploreEngine {
     }
   }
 
-  /// PE/PB估值过滤
   static bool _passValuationFilter(QuoteData quote) {
-    // PE为0表示亏损或不适用，跳过估值过滤
     if (quote.pe <= 0) return true;
-    // PE在合理区间(0-80)且PB>0
     if (quote.pe < 80 && quote.pb > 0) return true;
     return false;
   }
 
-  /// 判断是否为买入推荐
   static bool _isBuyRecommendation(String recommendation) {
     const buyRecs = ['强烈买入', '买入', '谨慎买入'];
     return buyRecs.contains(recommendation);
-  }
-
-  void dispose() {
-    _apiClient.dispose();
   }
 }
 
