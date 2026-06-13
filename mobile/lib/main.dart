@@ -84,7 +84,7 @@ class _MyAppState extends State<MyApp> {
         appBar: AppBar(
           title: Text(titles[_currentIndex]),
           actions: _currentIndex == 0
-              ? [
+            ? [
                   IconButton(
                     icon: const Icon(Icons.notifications_outlined),
                     onPressed: () {
@@ -104,7 +104,16 @@ class _MyAppState extends State<MyApp> {
                     },
                   ),
                 ]
-              : null,
+            : _currentIndex == 5
+                ? [
+                    IconButton(
+                      icon: const Icon(Icons.help_outline),
+                      onPressed: () {
+                        ExploreScreen.showHelp(context);
+                      },
+                    ),
+                  ]
+                : null,
         ),
         body: pages[_currentIndex],
         bottomNavigationBar: BottomNavigationBar(

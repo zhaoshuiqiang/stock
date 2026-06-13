@@ -9,6 +9,52 @@ import 'quote_screen.dart';
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
 
+  static void showHelp(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a1a2e),
+        title: const Text('探索功能说明', style: TextStyle(color: Colors.white, fontSize: 16)),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildHelpSection('功能概述', '智能选股引擎，自动扫描沪深主板优质标的，筛选买入级别以上推荐。'),
+              const SizedBox(height: 12),
+              _buildHelpSection('筛选流程', '1. 获取当日热门板块（前20个）\n2. 获取板块成分股（仅沪深主板）\n3. 逐只进行技术分析\n4. 过滤PE>80的高估值标的\n5. 仅保留买入级别推荐'),
+              const SizedBox(height: 12),
+              _buildHelpSection('评分体系', '总分 = K线评分×50% + 实时行情×30% + 共振评分×20%\n\n• K线评分：信号、趋势、动量、量价、波动率5维度加权\n• 实时行情：涨跌幅、资金流向、换手率\n• 共振评分：10维度多空共振（MA/MACD/RSI/KDJ/BOLL/量价/WR/CCI/背离/缺口）'),
+              const SizedBox(height: 12),
+              _buildHelpSection('推荐等级', '• 9-10分：强烈买入\n• 8分：买入\n• 7分：谨慎买入\n• 5-6分及以下：不入选'),
+              const SizedBox(height: 12),
+              _buildHelpSection('使用提示', '• 分析在后台运行，切换Tab不会中断\n• 结果自动保存，下次进入直接展示\n• 点击"刷新"可重新分析\n• 点击股票可查看详细分析'),
+              const SizedBox(height: 12),
+              Text('※ 以上分析基于历史数据和技术指标，仅供参考，不构成投资建议', style: TextStyle(color: Colors.orange.withOpacity(0.8), fontSize: 11)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('知道了', style: TextStyle(color: Colors.blue)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static Widget _buildHelpSection(String title, String content) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(color: Colors.blue, fontSize: 13, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text(content, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.5)),
+      ],
+    );
+  }
+
   @override
   State<ExploreScreen> createState() => _ExploreScreenState();
 }
@@ -18,6 +64,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   final ExploreEngine _engine = ExploreEngine.instance;
   StreamSubscription<ExploreProgress>? _subscription;
   List<ExploreResult> _results = [];
+  Set<String> _watchlistCodes = {};
   bool _isLoading = false;
   bool _isAnalyzing = false;
   String _statusText = '';
@@ -33,6 +80,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   void initState() {
     super.initState();
     _loadFromDb();
+    _loadWatchlistCodes();
     // 如果引擎正在运行，订阅进度流
     if (_engine.isRunning) {
       _subscribeToProgress();
@@ -154,6 +202,15 @@ class _ExploreScreenState extends State<ExploreScreen> {
     }
   }
 
+  Future<void> _loadWatchlistCodes() async {
+    final watchlist = await _dbService.getWatchlist();
+    if (mounted) {
+      setState(() {
+        _watchlistCodes = watchlist.map((item) => item.code).toSet();
+      });
+    }
+  }
+
   List<ExploreResult> get _sortedResults {
     final sorted = List<ExploreResult>.from(_results);
     switch (_sortBy) {
@@ -195,12 +252,14 @@ class _ExploreScreenState extends State<ExploreScreen> {
   }
 
   Future<void> _toggleWatchlist(ExploreResult item) async {
-    final isIn = await _dbService.isInWatchlist(item.code);
+    final isIn = _watchlistCodes.contains(item.code);
     if (isIn) {
       await _dbService.removeFromWatchlist(item.code);
+      setState(() => _watchlistCodes.remove(item.code));
       _showSnack('已从自选移除：${item.name}');
     } else {
       await _dbService.addToWatchlist(item.code, item.name);
+      setState(() => _watchlistCodes.add(item.code));
       _showSnack('已加入自选：${item.name}');
     }
   }
@@ -568,11 +627,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
             const SizedBox(height: 10),
             Row(
               children: [
-                _buildActionButton(
-                  icon: Icons.star_outline,
-                  label: '加自选',
-                  onTap: () => _toggleWatchlist(item),
-                ),
+                _buildWatchlistButton(item),
                 const SizedBox(width: 8),
                 _buildActionButton(
                   icon: Icons.visibility,
@@ -588,6 +643,29 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ),
               ],
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWatchlistButton(ExploreResult item) {
+    final isIn = _watchlistCodes.contains(item.code);
+    return GestureDetector(
+      onTap: () => _toggleWatchlist(item),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isIn ? Colors.orange.withOpacity(0.15) : Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: isIn ? Colors.orange.withOpacity(0.5) : Colors.white.withOpacity(0.1)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(isIn ? Icons.star : Icons.star_outline, color: isIn ? Colors.orange : Colors.white54, size: 14),
+            const SizedBox(width: 4),
+            Text(isIn ? '已加自选' : '加自选', style: TextStyle(color: isIn ? Colors.orange : Colors.white54, fontSize: 12)),
           ],
         ),
       ),

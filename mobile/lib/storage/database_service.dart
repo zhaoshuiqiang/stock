@@ -22,7 +22,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -69,6 +69,36 @@ class DatabaseService {
               recommendation TEXT NOT NULL,
               sector TEXT DEFAULT '',
               confluence_score INTEGER DEFAULT 0,
+              analyzed_at INTEGER NOT NULL
+            )
+          ''');
+        }
+        if (oldVersion < 5) {
+          await db.execute('''
+            CREATE TABLE opportunity_results (
+              code TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              price REAL NOT NULL,
+              change_pct REAL NOT NULL,
+              score INTEGER NOT NULL,
+              recommendation TEXT NOT NULL,
+              risk_level TEXT NOT NULL,
+              buy_signal_count INTEGER NOT NULL DEFAULT 0,
+              sell_signal_count INTEGER NOT NULL DEFAULT 0,
+              active_strategy_count INTEGER NOT NULL DEFAULT 0,
+              confluence_score INTEGER NOT NULL DEFAULT 0,
+              trade_levels_json TEXT,
+              top_signals TEXT DEFAULT '',
+              analyzed_at INTEGER NOT NULL
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE sector_pick_results (
+              code TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              recommendation TEXT NOT NULL,
+              score INTEGER NOT NULL,
+              sector TEXT NOT NULL,
               analyzed_at INTEGER NOT NULL
             )
           ''');
@@ -133,6 +163,36 @@ class DatabaseService {
         recommendation TEXT NOT NULL,
         sector TEXT DEFAULT '',
         confluence_score INTEGER DEFAULT 0,
+        analyzed_at INTEGER NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE opportunity_results (
+        code TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        price REAL NOT NULL,
+        change_pct REAL NOT NULL,
+        score INTEGER NOT NULL,
+        recommendation TEXT NOT NULL,
+        risk_level TEXT NOT NULL,
+        buy_signal_count INTEGER NOT NULL DEFAULT 0,
+        sell_signal_count INTEGER NOT NULL DEFAULT 0,
+        active_strategy_count INTEGER NOT NULL DEFAULT 0,
+        confluence_score INTEGER NOT NULL DEFAULT 0,
+        trade_levels_json TEXT,
+        top_signals TEXT DEFAULT '',
+        analyzed_at INTEGER NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE sector_pick_results (
+        code TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        recommendation TEXT NOT NULL,
+        score INTEGER NOT NULL,
+        sector TEXT NOT NULL,
         analyzed_at INTEGER NOT NULL
       )
     ''');
@@ -378,5 +438,59 @@ class DatabaseService {
   Future<void> clearExploreResults() async {
     final db = await database;
     await db.delete('explore_results');
+  }
+
+  // ========== 机会结果缓存 CRUD ==========
+
+  Future<void> replaceOpportunityResults(List<Map<String, dynamic>> results) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('opportunity_results');
+      for (final r in results) {
+        await txn.insert('opportunity_results', r);
+      }
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getOpportunityResults() async {
+    final db = await database;
+    final result = await db.query('opportunity_results', orderBy: 'score DESC');
+    return result;
+  }
+
+  Future<DateTime?> getOpportunityLastTime() async {
+    final db = await database;
+    final result = await db.rawQuery('SELECT MAX(analyzed_at) as last_time FROM opportunity_results');
+    if (result.isNotEmpty && result.first['last_time'] != null) {
+      return DateTime.fromMillisecondsSinceEpoch(result.first['last_time'] as int);
+    }
+    return null;
+  }
+
+  // ========== 板块精选结果缓存 CRUD ==========
+
+  Future<void> replaceSectorPickResults(List<Map<String, dynamic>> results) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('sector_pick_results');
+      for (final r in results) {
+        await txn.insert('sector_pick_results', r);
+      }
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getSectorPickResults() async {
+    final db = await database;
+    final result = await db.query('sector_pick_results', orderBy: 'score DESC');
+    return result;
+  }
+
+  Future<DateTime?> getSectorPickLastTime() async {
+    final db = await database;
+    final result = await db.rawQuery('SELECT MAX(analyzed_at) as last_time FROM sector_pick_results');
+    if (result.isNotEmpty && result.first['last_time'] != null) {
+      return DateTime.fromMillisecondsSinceEpoch(result.first['last_time'] as int);
+    }
+    return null;
   }
 }

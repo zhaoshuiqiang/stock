@@ -27,8 +27,20 @@ class SignalDetector {
   static List<SignalItem> _detectShortTermSignals(
       List<HistoryKline> data, HistoryKline last, HistoryKline prev) {
     final signals = <SignalItem>[];
+    signals.addAll(_detectKDJSignals(last, prev));
+    signals.addAll(_detectRSISignals(last, prev));
+    signals.addAll(_detectMASignals(data, last));
+    signals.addAll(_detectMACDSignals(last, prev));
+    signals.addAll(_detectVolumeSignals(last, prev));
+    signals.addAll(_detectWRSignals(last));
+    signals.addAll(_detectGapSignals(data, last, prev));
+    signals.addAll(_detectCandlestickPatterns(data, last, prev));
+    return signals;
+  }
 
-    // 1. KDJ金叉/死叉（短线快速反应）
+  /// KDJ金叉/死叉检测
+  static List<SignalItem> _detectKDJSignals(HistoryKline last, HistoryKline prev) {
+    final signals = <SignalItem>[];
     if (last.k > last.d && prev.k <= prev.d) {
       signals.add(SignalItem(
         type: 'buy',
@@ -39,7 +51,7 @@ class SignalDetector {
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
         confidence: _calculateKDJConfidence(last, prev),
-        signalCount: _countKDJConfidence(data),
+        signalCount: 1,
       ));
     } else if (last.k < last.d && prev.k >= prev.d && prev.k > 70) {
       signals.add(SignalItem(
@@ -51,11 +63,15 @@ class SignalDetector {
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
         confidence: _calculateKDJConfidence(last, prev),
-        signalCount: _countKDJConfidence(data),
+        signalCount: 1,
       ));
     }
+    return signals;
+  }
 
-    // 2. RSI超卖回升/超买回落
+  /// RSI超卖回升/超买回落检测
+  static List<SignalItem> _detectRSISignals(HistoryKline last, HistoryKline prev) {
+    final signals = <SignalItem>[];
     if (prev.rsi6 <= 30 && last.rsi6 > 30) {
       signals.add(SignalItem(
         type: 'buy',
@@ -81,8 +97,14 @@ class SignalDetector {
         signalCount: 1,
       ));
     }
+    return signals;
+  }
 
-    // 3. MA5金叉/死叉（快速趋势反转）
+  /// MA5金叉/死叉检测
+  static List<SignalItem> _detectMASignals(List<HistoryKline> data, HistoryKline last) {
+    final signals = <SignalItem>[];
+    if (data.length < 2) return signals;
+    final prev = data[data.length - 2];
     if (last.ma5 > last.ma10 && prev.ma5 <= prev.ma10) {
       signals.add(SignalItem(
         type: 'buy',
@@ -108,9 +130,18 @@ class SignalDetector {
         signalCount: 2,
       ));
     }
+    return signals;
+  }
 
-    // 4. MACD金叉/死叉（趋势反转）
-    if (last.macdDif > last.macdDea && prev.macdDif <= prev.macdDif) {
+  /// MACD金叉/死叉检测
+  static List<SignalItem> _detectMACDSignals(HistoryKline last, HistoryKline prev) {
+    final signals = <SignalItem>[];
+    double confidence = 0.75;
+    if (last.macdDif > 0 && last.macdDea > 0) confidence += 0.05;
+    if (last.macdHist.abs() > 1) confidence += 0.05;
+    confidence = confidence.clamp(0.6, 0.9);
+
+    if (last.macdDif > last.macdDea && prev.macdDif <= prev.macdDea) {
       signals.add(SignalItem(
         type: 'buy',
         indicator: 'MACD',
@@ -119,10 +150,10 @@ class SignalDetector {
         strength: 85,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
-        confidence: _calculateMACDConfidence(last, prev, data),
+        confidence: confidence,
         signalCount: 2,
       ));
-    } else if (last.macdDif < last.macdDea && prev.macdDif >= prev.macdDif) {
+    } else if (last.macdDif < last.macdDea && prev.macdDif >= prev.macdDea) {
       signals.add(SignalItem(
         type: 'sell',
         indicator: 'MACD',
@@ -131,12 +162,16 @@ class SignalDetector {
         strength: 85,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
-        confidence: _calculateMACDConfidence(last, prev, data),
+        confidence: confidence,
         signalCount: 2,
       ));
     }
+    return signals;
+  }
 
-    // 5. 成交量异动（放量/缩量）
+  /// 成交量异动检测
+  static List<SignalItem> _detectVolumeSignals(HistoryKline last, HistoryKline prev) {
+    final signals = <SignalItem>[];
     if (last.volMa5 > 0) {
       final volRatio = last.volume / last.volMa5;
       if (volRatio > 2 && last.close > prev.close) {
@@ -165,10 +200,14 @@ class SignalDetector {
         ));
       }
     }
+    return signals;
+  }
 
-    // WR超买超卖检测
-    if (last.wr14 != null && prev.wr14 != null) {
-      if (last.wr14! > 80 && prev.wr14! <= 80) {
+  /// WR超买超卖检测
+  static List<SignalItem> _detectWRSignals(HistoryKline last) {
+    final signals = <SignalItem>[];
+    if (last.wr14 != null) {
+      if (last.wr14! > 80) {
         signals.add(SignalItem(
           type: 'buy',
           indicator: 'WR',
@@ -180,7 +219,7 @@ class SignalDetector {
           confidence: 0.7,
           signalCount: 1,
         ));
-      } else if (last.wr14! < 20 && prev.wr14! >= 20) {
+      } else if (last.wr14! < 20) {
         signals.add(SignalItem(
           type: 'sell',
           indicator: 'WR',
@@ -194,7 +233,6 @@ class SignalDetector {
         ));
       }
     }
-
     return signals;
   }
 
@@ -311,6 +349,9 @@ class SignalDetector {
       }
     }
 
+    // 成交量趋势分析
+    signals.addAll(_detectVolumeTrends(data, last));
+
     return signals;
   }
 
@@ -349,7 +390,7 @@ class SignalDetector {
     }
 
     // 2. MACD零轴上方金叉（强势多头）
-    if (last.macdDif > last.macdDea && prev.macdDif <= prev.macdDif && last.macdDif > 0) {
+    if (last.macdDif > last.macdDea && prev.macdDif <= prev.macdDea && last.macdDif > 0) {
       signals.add(SignalItem(
         type: 'buy',
         indicator: 'MACD',
@@ -516,30 +557,231 @@ class SignalDetector {
     return peaks;
   }
 
-  // 辅助方法：统计KDJ信号数量
-  static int _countKDJConfidence(List<HistoryKline> data) {
-    int count = 0;
-    for (int i = data.length - 5; i < data.length; i++) {
-      if (i >= 0 && data[i].k > 0 && data[i].d > 0) {
-        if (data[i].k > data[i].d && data[i-1].k <= data[i-1].d) count++;
-        else if (data[i].k < data[i].d && data[i-1].k >= data[i-1].d) count++;
-      }
-    }
-    return count;
-  }
-
-  // 辅助方法：计算MACD置信度
-  static double _calculateMACDConfidence(HistoryKline last, HistoryKline prev, List<HistoryKline> data) {
-    double base = 0.75;
-    if (last.macdDif > 0 && last.macdDea > 0) base += 0.05;  // 零轴上方，可靠性更高
-    if (last.macdHist.abs() > 1) base += 0.05;  // 柱子足够长
-    return base.clamp(0.6, 0.9);
-  }
-
   // 辅助方法：计算MA置信度
   static double _calculateMAConfidence(HistoryKline last, HistoryKline prev, List<HistoryKline> data) {
     double base = 0.75;
     if (last.close > last.ma10 && last.volume > last.volMa5 * 1.2) base += 0.05;  // 量价配合
     return base.clamp(0.7, 0.9);
+  }
+
+  /// 跳空缺口检测
+  static List<SignalItem> _detectGapSignals(
+      List<HistoryKline> data, HistoryKline last, HistoryKline prev) {
+    final signals = <SignalItem>[];
+    if (prev.high <= 0 || prev.low <= 0 || last.open <= 0) return signals;
+
+    final gapUpSize = (last.low - prev.high) / prev.high * 100;
+    final gapDownSize = (prev.low - last.high) / prev.low * 100;
+
+    // 向上跳空（中缺口以上>2%才生成信号）
+    if (gapUpSize > 2) {
+      final level = gapUpSize > 5 ? '大' : '中';
+      signals.add(SignalItem(
+        type: 'buy',
+        indicator: '缺口',
+        signal: '向上跳空突破',
+        description: '${level}缺口${gapUpSize.toStringAsFixed(1)}%，跳空高开突破，短线强势信号',
+        strength: gapUpSize > 5 ? 85 : 75,
+        timestamp: last.date,
+        duration: SignalDuration.shortTerm,
+        confidence: 0.75,
+        signalCount: 1,
+      ));
+    }
+
+    // 向下跳空（中缺口以上>2%才生成信号）
+    if (gapDownSize > 2) {
+      final level = gapDownSize > 5 ? '大' : '中';
+      signals.add(SignalItem(
+        type: 'sell',
+        indicator: '缺口',
+        signal: '向下跳空破位',
+        description: '${level}缺口${gapDownSize.toStringAsFixed(1)}%，跳空低开破位，短线弱势信号',
+        strength: gapDownSize > 5 ? 85 : 75,
+        timestamp: last.date,
+        duration: SignalDuration.shortTerm,
+        confidence: 0.75,
+        signalCount: 1,
+      ));
+    }
+
+    return signals;
+  }
+
+  /// K线形态识别
+  static List<SignalItem> _detectCandlestickPatterns(
+      List<HistoryKline> data, HistoryKline last, HistoryKline prev) {
+    final signals = <SignalItem>[];
+    if (last.open <= 0 || prev.open <= 0) return signals;
+
+    final body = (last.close - last.open).abs();
+    final bodyPct = body / last.open * 100;
+    final upperShadow = last.high - (last.close > last.open ? last.close : last.open);
+    final lowerShadow = (last.close > last.open ? last.open : last.close) - last.low;
+    final isBullish = last.close > last.open;
+    final isBearish = last.close < last.open;
+    final prevBullish = prev.close > prev.open;
+    final prevBearish = prev.close < prev.open;
+
+    // 判断趋势（近5日涨跌）
+    bool inDowntrend = false;
+    bool inUptrend = false;
+    if (data.length >= 6) {
+      final price5ago = data[data.length - 6].close;
+      if (price5ago > 0) {
+        final change5d = (last.close / price5ago - 1) * 100;
+        inDowntrend = change5d < -3 || (last.ma10 > 0 && last.close < last.ma10);
+        inUptrend = change5d > 3 || (last.ma10 > 0 && last.close > last.ma10);
+      }
+    }
+
+    // 锤子线（底部反转）- 小实体、长下影线、下跌趋势中
+    if (bodyPct < 1.0 && lowerShadow > body * 2 && upperShadow < body * 0.5 && inDowntrend) {
+      signals.add(SignalItem(
+        type: 'buy',
+        indicator: 'K线形态',
+        signal: '底部锤子线',
+        description: '小实体+长下影线，下跌趋势中出现，底部反转信号',
+        strength: 70,
+        timestamp: last.date,
+        duration: SignalDuration.shortTerm,
+        confidence: 0.7,
+        signalCount: 1,
+      ));
+    }
+
+    // 吊颈线（顶部反转）- 小实体、长下影线、上涨趋势中
+    if (bodyPct < 1.0 && lowerShadow > body * 2 && upperShadow < body * 0.5 && inUptrend) {
+      signals.add(SignalItem(
+        type: 'sell',
+        indicator: 'K线形态',
+        signal: '顶部吊颈线',
+        description: '小实体+长下影线，上涨趋势中出现，顶部反转信号',
+        strength: 70,
+        timestamp: last.date,
+        duration: SignalDuration.shortTerm,
+        confidence: 0.7,
+        signalCount: 1,
+      ));
+    }
+
+    // 乌云盖顶（顶部反转）- 前阳后阴、高开低走
+    if (prevBullish && isBearish) {
+      if (last.open > prev.high && last.close < (prev.open + prev.close) / 2) {
+        signals.add(SignalItem(
+          type: 'sell',
+          indicator: 'K线形态',
+          signal: '乌云盖顶',
+          description: '前日阳线后今日高开低走收阴，收盘低于前日实体中点，顶部反转信号',
+          strength: 75,
+          timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.75,
+          signalCount: 2,
+        ));
+      }
+    }
+
+    // 刺透形态（底部反转）- 前阴后阳、低开高走
+    if (prevBearish && isBullish) {
+      if (last.open < prev.low && last.close > (prev.open + prev.close) / 2) {
+        signals.add(SignalItem(
+          type: 'buy',
+          indicator: 'K线形态',
+          signal: '刺透形态',
+          description: '前日阴线后今日低开高走收阳，收盘高于前日实体中点，底部反转信号',
+          strength: 75,
+          timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.75,
+          signalCount: 2,
+        ));
+      }
+    }
+
+    return signals;
+  }
+
+  /// 成交量趋势分析
+  static List<SignalItem> _detectVolumeTrends(List<HistoryKline> data, HistoryKline last) {
+    final signals = <SignalItem>[];
+    if (data.length < 20 || last.volMa5 <= 0) return signals;
+
+    final recent10 = data.sublist(data.length - 10);
+    final recent3 = data.sublist(data.length - 3);
+    final recent5 = data.sublist(data.length - 5);
+
+    final priceChange10d = (last.close / data[data.length - 11].close - 1) * 100;
+
+    // 吸筹形态：10日下跌>5% + 量能递减 + 近3日企稳放量
+    if (priceChange10d < -5) {
+      bool volDeclining = true;
+      for (int i = 1; i < 5; i++) {
+        if (recent10[recent10.length - i].volume >= recent10[recent10.length - i - 1].volume) {
+          volDeclining = false;
+          break;
+        }
+      }
+      final avgVol3 = recent3.map((d) => d.volume).reduce((a, b) => a + b) / 3;
+      final avgVol5 = recent5.map((d) => d.volume).reduce((a, b) => a + b) / 5;
+      final priceStable = (last.close / data[data.length - 4].close - 1).abs() < 2;
+      
+      if (volDeclining && avgVol3 > avgVol5 * 1.2 && priceStable) {
+        signals.add(SignalItem(
+          type: 'buy',
+          indicator: '量价趋势',
+          signal: '主力吸筹迹象',
+          description: '下跌${priceChange10d.toStringAsFixed(1)}%后量能萎缩递减，近3日企稳且量能放大，主力可能在吸筹',
+          strength: 70,
+          timestamp: last.date,
+          duration: SignalDuration.mediumTerm,
+          confidence: 0.7,
+          signalCount: 2,
+        ));
+      }
+    }
+
+    // 派发形态：10日上涨>5% + 量能递减 + 近3日缩量
+    if (priceChange10d > 5) {
+      bool volDeclining = true;
+      for (int i = 1; i < 5; i++) {
+        if (recent10[recent10.length - i].volume >= recent10[recent10.length - i - 1].volume) {
+          volDeclining = false;
+          break;
+        }
+      }
+      final avgVol3 = recent3.map((d) => d.volume).reduce((a, b) => a + b) / 3;
+      if (volDeclining && avgVol3 < last.volMa5 * 0.7) {
+        signals.add(SignalItem(
+          type: 'sell',
+          indicator: '量价趋势',
+          signal: '主力派发迹象',
+          description: '上涨${priceChange10d.toStringAsFixed(1)}%但量能持续萎缩，近3日缩量至均量70%以下，主力可能在派发',
+          strength: 70,
+          timestamp: last.date,
+          duration: SignalDuration.mediumTerm,
+          confidence: 0.7,
+          signalCount: 2,
+        ));
+      }
+    }
+
+    // 地量见底：成交量创近20日最低 + 价格在MA20附近或下方
+    final minVol20 = data.sublist(data.length - 20).map((d) => d.volume).reduce((a, b) => a < b ? a : b);
+    if (last.volume <= minVol20 && last.ma20 > 0 && last.close <= last.ma20 * 1.02) {
+      signals.add(SignalItem(
+        type: 'buy',
+        indicator: '量价趋势',
+        signal: '地量见底',
+        description: '成交量创近20日新低，价格在MA20(${last.ma20.toStringAsFixed(2)})附近，卖盘枯竭',
+        strength: 65,
+        timestamp: last.date,
+        duration: SignalDuration.mediumTerm,
+        confidence: 0.65,
+        signalCount: 1,
+      ));
+    }
+
+    return signals;
   }
 }

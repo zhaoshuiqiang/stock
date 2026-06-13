@@ -4,6 +4,8 @@ import 'signal_detector.dart';
 import 'position_manager.dart';
 import 'strategy_builder.dart';
 import 'strategy_engine.dart';
+import 'backtest_engine.dart';
+import 'sr_quality.dart';
 
 List<SignalItem> detectSignals(List<HistoryKline> data) {
   if (data.isEmpty || data.length < 2) return [];
@@ -170,7 +172,12 @@ Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
   final risk = entryMid - stopLoss;
   final riskRewardRatio = risk > 0 ? reward / risk : 0.0;
 
-  return {
+  final support = nearestSupport ?? 0;
+  final support2 = supports.length > 1 ? supports[1] : 0.0;
+  final resistance = nearestResistance ?? 0;
+  final resistance2 = resistances.length > 1 ? resistances[1] : 0.0;
+
+  final tradeLevels = <String, dynamic>{
     'entry_low': entryLow,
     'entry_high': entryHigh,
     'target': target,
@@ -179,6 +186,29 @@ Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
     'has_support': nearestSupport != null,
     'has_resistance': nearestResistance != null,
   };
+
+  // 支撑压力位质量评估
+  if (data.length >= 30) {
+    final supportsList = [support, support2].where((s) => s > 0).toList();
+    final resistancesList = [resistance, resistance2].where((r) => r > 0).toList();
+    for (int i = 0; i < supportsList.length; i++) {
+      final quality = SRQualityEvaluator.evaluateSupport(data, supportsList[i]);
+      tradeLevels.addAll({
+        'support_${i + 1}_quality': quality.quality,
+        'support_${i + 1}_test_count': quality.testCount,
+        'support_${i + 1}_reliability': quality.reliability,
+      });
+    }
+    for (int i = 0; i < resistancesList.length; i++) {
+      final quality = SRQualityEvaluator.evaluateResistance(data, resistancesList[i]);
+      tradeLevels.addAll({
+        'resistance_${i + 1}_quality': quality.quality,
+        'resistance_${i + 1}_test_count': quality.testCount,
+        'resistance_${i + 1}_reliability': quality.reliability,
+      });
+    }
+  }
+  return tradeLevels;
 }
 
 AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote, {MarketContext? marketContext}) {
@@ -450,17 +480,21 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote, {Mark
   final cciBear = last.cci14 != null && last.cci14! < -100;
   if (cciBull) bullCount++;
   if (cciBear) bearCount++;
+  final hasGapUp = signals.any((s) => s.signal.contains('向上跳空'));
+  final hasGapDown = signals.any((s) => s.signal.contains('向下跳空'));
+  if (hasGapUp) bullCount++;
+  if (hasGapDown) bearCount++;
   final hasBottomDivergence = signals.any((s) => s.signal.contains('底背离'));
   final hasTopDivergence = signals.any((s) => s.signal.contains('顶背离'));
   if (hasBottomDivergence) bullCount += 2;
   if (hasTopDivergence) bearCount += 2;
 
-  // 双向共振：多空对称，范围[-8, 8]，映射到[0, 10]
-  final confluenceBonus = (5.0 + (bullCount - bearCount) / 8 * 5).clamp(0.0, 10.0);
+  // 双向共振：多空对称，范围[-10, 10]，映射到[0, 10]
+  final confluenceBonus = (5.0 + (bullCount - bearCount) / 10 * 5).clamp(0.0, 10.0);
 
   // ========== 三维度加权总分（10级制 1-10） ==========
-  // K线信号(55%) + 实时行情(25%) + 共振评分(20%)
-  final rawScore = (klineBaseScore * 0.55 + realtimeScore * 0.25 + confluenceBonus * 0.20).clamp(0.0, 10.0);
+  // K线信号(50%) + 实时行情(30%) + 共振评分(20%)
+  final rawScore = (klineBaseScore * 0.50 + realtimeScore * 0.30 + confluenceBonus * 0.20).clamp(0.0, 10.0);
 
   // 市场环境调节
   double marketAdjustment = 1.0;
@@ -470,7 +504,7 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote, {Mark
   final adjustedScore = (rawScore * marketAdjustment).clamp(0.0, 10.0);
 
   // 映射到10级整分（1-10）
-  final totalScore = (adjustedScore / 10.0 * 9 + 1).round().clamp(1, 10);
+  final totalScore = (adjustedScore / 10.0 * 8 + 1).round().clamp(1, 10);
 
   // ========== 10级推荐（7档） ==========
   String recommendation;
@@ -696,7 +730,20 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote, {Mark
     // 仓位计算失败不影响主流程
   }
 
-  // ========== 多指标共振详情（7维度） ==========
+  // 回测统计（选取代表性策略回测）
+  Map<String, BacktestResult> backtestResults = {};
+  try {
+    if (data.length >= 60) {
+      backtestResults['MACD金叉'] = BacktestEngine.backtestMACDCross(data);
+      backtestResults['MA金叉'] = BacktestEngine.backtestMACross(data);
+      backtestResults['KDJ超卖'] = BacktestEngine.backtestKDJOversoldCross(data);
+      backtestResults['RSI超卖'] = BacktestEngine.backtestRSIOversoldRecovery(data);
+    }
+  } catch (_) {
+    backtestResults = {};
+  }
+
+  // ========== 多指标共振详情（10维度） ==========
   final confluenceDetails = <Map<String, dynamic>>[];
   confluenceDetails.add({'name': 'MA', 'bull': maBull, 'bear': maBear});
   confluenceDetails.add({'name': 'MACD', 'bull': macdBull, 'bear': macdBear});
@@ -706,6 +753,7 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote, {Mark
   confluenceDetails.add({'name': '量价', 'bull': volBull, 'bear': volBear});
   confluenceDetails.add({'name': 'WR', 'bull': wrBull, 'bear': wrBear});
   confluenceDetails.add({'name': 'CCI', 'bull': cciBull, 'bear': cciBear});
+  confluenceDetails.add({'name': '缺口', 'bull': hasGapUp, 'bear': hasGapDown});
   confluenceDetails.add({'name': '背离', 'bull': hasBottomDivergence, 'bear': hasTopDivergence, 'weighted': true});
 
   final tradeLevels = calcTradeLevels(data);
@@ -741,7 +789,7 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote, {Mark
         title: signal.signal,
         description: signal.description,
         confidence: signal.confidence!,
-        duration: signal.duration == SignalDuration.shortTerm ? '短期' : '长期',
+        duration: signal.duration == SignalDuration.shortTerm ? '短期' : signal.duration == SignalDuration.mediumTerm ? '中期' : '长期',
       ));
     }
   }
@@ -772,5 +820,6 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote, {Mark
     marketContext: marketContext,
     confidenceScore: confidenceScore,
     detailedReasons: detailedReasons,
+    backtestResults: backtestResults,
   );
 }

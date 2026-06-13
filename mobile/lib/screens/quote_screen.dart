@@ -7,6 +7,7 @@ import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import '../analysis/indicators.dart';
 import '../analysis/signal_engine.dart';
+import '../analysis/backtest_engine.dart';
 import '../storage/database_service.dart';
 import '../widgets/signal_card.dart';
 import '../widgets/technical_indicators_panel.dart';
@@ -1929,6 +1930,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               ),
             ),
           ),
+        if (analysis.backtestResults != null)
+          _buildBacktestSummary(analysis.backtestResults!),
         if (analysis.confluenceDetails.isNotEmpty)
           Card(
             margin: const EdgeInsets.all(8),
@@ -2011,6 +2014,51 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         Text(label, style: const TextStyle(color: Colors.white54, fontSize: 13)),
         Text(value, style: TextStyle(color: valueColor, fontSize: 14, fontWeight: FontWeight.bold)),
       ],
+    );
+  }
+
+  Widget _buildBacktestSummary(Map<String, BacktestResult>? backtestResults) {
+    if (backtestResults == null || backtestResults.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.analytics, size: 16, color: Colors.cyan),
+              const SizedBox(width: 6),
+              Text('历史回测统计', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.cyan.shade200)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...backtestResults.entries.map((entry) {
+            final r = entry.value;
+            if (r.totalSignals == 0) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  SizedBox(width: 80, child: Text(entry.key, style: const TextStyle(fontSize: 12, color: Colors.white70))),
+                  Expanded(
+                    child: Text(
+                      '胜率${(r.winRate * 100).toStringAsFixed(0)}% | 盈亏比${r.profitFactor.toStringAsFixed(2)} | 最大回撤${r.maxDrawdown.toStringAsFixed(1)}%',
+                      style: TextStyle(fontSize: 11, color: r.winRate > 0.4 ? Colors.green.shade300 : Colors.orange.shade300),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
     );
   }
 

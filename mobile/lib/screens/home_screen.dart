@@ -16,17 +16,21 @@ class HomeScreen extends StatefulWidget {
 
 class HomeScreenState extends State<HomeScreen> {
   final ApiClient _apiClient = ApiClient();
+  final DatabaseService _dbService = DatabaseService();
   List<QuoteData> _quotes = [];
   List<SectorInfo> _sectors = [];
   bool _isLoading = true;
   bool _isPickingSectors = false;
   int _pickProgress = 0;
   int _pickTotal = 0;
+  List<Map<String, dynamic>> _cachedPicks = [];
+  DateTime? _pickLastTime;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _loadCachedPicks();
   }
 
   @override
@@ -81,6 +85,23 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _loadCachedPicks() async {
+    final results = await _dbService.getSectorPickResults();
+    final lastTime = await _dbService.getSectorPickLastTime();
+    if (mounted && results.isNotEmpty) {
+      setState(() {
+        _cachedPicks = results;
+        _pickLastTime = lastTime;
+      });
+    }
+  }
+
+  String _formatTime(DateTime? time) {
+    if (time == null) return '';
+    return '${time.month.toString().padLeft(2, '0')}-${time.day.toString().padLeft(2, '0')} '
+        '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -130,7 +151,7 @@ class HomeScreenState extends State<HomeScreen> {
                             Text('热门板块', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                             if (_sectors.isNotEmpty)
                               GestureDetector(
-                                onTap: _isPickingSectors ? null : _pickSectors,
+                                onTap: _isPickingSectors ? null : _onPickTapped,
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                   decoration: BoxDecoration(
@@ -164,6 +185,17 @@ class HomeScreenState extends State<HomeScreen> {
               ],
             ),
           );
+  }
+
+  /// 点击精选：有缓存则先展示缓存，同时后台刷新；无缓存则直接分析
+  void _onPickTapped() {
+    if (_cachedPicks.isNotEmpty) {
+      _showPickResults(_cachedPicks, hasCache: true);
+      // 后台静默刷新
+      _pickSectors();
+    } else {
+      _pickSectors();
+    }
   }
 
   Widget _buildMarketItem(String name, String code) {
@@ -308,12 +340,27 @@ class HomeScreenState extends State<HomeScreen> {
 
       if (!mounted) return;
 
-      if (picks.isEmpty) {
+      // 保存到数据库
+      if (picks.isNotEmpty) {
+        final now = DateTime.now();
+        final maps = picks.map((p) => {
+          ...p,
+          'analyzed_at': now.millisecondsSinceEpoch,
+        }).toList();
+        await _dbService.replaceSectorPickResults(maps);
+        setState(() {
+          _cachedPicks = picks;
+          _pickLastTime = now;
+        });
+      }
+
+      // 如果之前没有缓存，现在分析完了直接展示
+      if (_cachedPicks.isNotEmpty || picks.isNotEmpty) {
+        _showPickResults(picks.isNotEmpty ? picks : _cachedPicks);
+      } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('当前热门板块中暂无买入推荐')),
         );
-      } else {
-        _showPickResults(picks);
       }
     } finally {
       if (mounted) {
@@ -326,7 +373,7 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _showPickResults(List<Map<String, dynamic>> picks) {
+  void _showPickResults(List<Map<String, dynamic>> picks, {bool hasCache = false}) {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1a1a2e),
@@ -353,7 +400,15 @@ class HomeScreenState extends State<HomeScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('板块精选（${picks.length}只）', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                  Row(
+                    children: [
+                      Text('板块精选（${picks.length}只）', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                      if (_pickLastTime != null) ...[
+                        const SizedBox(width: 8),
+                        Text(_formatTime(_pickLastTime), style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                      ],
+                    ],
+                  ),
                   IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: Colors.white54)),
                 ],
               ),

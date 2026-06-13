@@ -4,6 +4,23 @@ import 'strategy_engine.dart';
 /// 策略构建器
 /// 负责生成分层策略库（短线/长线/特殊）
 class StrategyBuilder {
+  /// 计算ATR止损价（买入策略）
+  static double? _calcATRStopLoss(HistoryKline last, double atrMultiplier, String strategyType) {
+    if (last.atr14 <= 0) {
+      // 降级为固定百分比
+      return strategyType == 'short' ? last.close * 0.97 : last.close * 0.95;
+    }
+    return last.close - last.atr14 * atrMultiplier;
+  }
+
+  /// 计算ATR止盈目标价
+  static double? _calcATRTarget(HistoryKline last, double atrMultiplier, String strategyType) {
+    if (last.atr14 <= 0) {
+      return strategyType == 'short' ? last.close * 1.05 : last.close * 1.10;
+    }
+    return last.close + last.atr14 * atrMultiplier;
+  }
+
   /// 生成分层策略库
   static List<TradingStrategy> buildLayeredStrategies(
     List<HistoryKline> data,
@@ -50,7 +67,7 @@ class StrategyBuilder {
         description: 'KDJ在超卖区（K<30）形成金叉，短线反弹信号，适合1-3天操作',
         entryRule: 'K线上穿D线且K值<30，立即入场',
         exitRule: 'K值>80或K线下穿D线，立即离场',
-        stopLossRule: '跌破金叉前最低点3%',
+        stopLossRule: '跌破入场价-1xATR(${(last.atr14 > 0 ? last.atr14.toStringAsFixed(2) : "3%")})',
         isActive: true,
         signalStrength: 75,
         strategyType: 'short',
@@ -60,6 +77,9 @@ class StrategyBuilder {
         minConfidence: 0.65,
         riskRewardRatio: 2.0,
         compatibleIndicators: ['KDJ', 'RSI'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        targetPrice: _calcATRTarget(last, 2.0, 'short'),
       ));
     }
 
@@ -73,7 +93,7 @@ class StrategyBuilder {
         description: '股价创新低但MACD不创新低，下跌动能衰竭，短线反弹机会',
         entryRule: '底背离确认后，DIF开始拐头向上时入场',
         exitRule: 'DIF再次向下拐头或跌破入场价',
-        stopLossRule: '背离最低点下方2%',
+        stopLossRule: '跌破入场价-1xATR',
         isActive: true,
         signalStrength: 80,
         strategyType: 'short',
@@ -83,6 +103,9 @@ class StrategyBuilder {
         minConfidence: 0.7,
         riskRewardRatio: 2.5,
         compatibleIndicators: ['MACD', 'RSI'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        targetPrice: _calcATRTarget(last, 2.0, 'short'),
       ));
     }
 
@@ -98,7 +121,7 @@ class StrategyBuilder {
         description: '上涨趋势中缩量回调，抛压减轻，短线逢低买入机会',
         entryRule: '量能萎缩至均量70%以下，股价回踩均线企稳',
         exitRule: '放量下跌或跌破MA20',
-        stopLossRule: '跌破MA20或近期最低点3%',
+        stopLossRule: '跌破入场价-1xATR',
         isActive: true,
         signalStrength: 70,
         strategyType: 'short',
@@ -108,6 +131,9 @@ class StrategyBuilder {
         minConfidence: 0.6,
         riskRewardRatio: 2.0,
         compatibleIndicators: ['MA', '量价'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        targetPrice: _calcATRTarget(last, 2.0, 'short'),
       ));
     }
 
@@ -120,7 +146,7 @@ class StrategyBuilder {
         description: 'RSI从超卖区回升突破30，短线反弹信号',
         entryRule: 'RSI6从30以下回升突破30',
         exitRule: 'RSI6>70或RSI6再次跌破50',
-        stopLossRule: '跌破RSI超卖时的最低点3%',
+        stopLossRule: '跌破入场价-1xATR',
         isActive: true,
         signalStrength: 65,
         strategyType: 'short',
@@ -130,6 +156,9 @@ class StrategyBuilder {
         minConfidence: 0.6,
         riskRewardRatio: 1.8,
         compatibleIndicators: ['RSI'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        targetPrice: _calcATRTarget(last, 2.0, 'short'),
       ));
     }
 
@@ -142,7 +171,7 @@ class StrategyBuilder {
         description: '股价向上突破5日均线，短期走势转强',
         entryRule: '股价站上MA5',
         exitRule: '股价跌破MA5',
-        stopLossRule: '跌破MA5下方2%',
+        stopLossRule: '跌破入场价-1xATR',
         isActive: true,
         signalStrength: 60,
         strategyType: 'short',
@@ -152,6 +181,9 @@ class StrategyBuilder {
         minConfidence: 0.55,
         riskRewardRatio: 1.5,
         compatibleIndicators: ['MA'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        targetPrice: _calcATRTarget(last, 2.0, 'short'),
       ));
     }
 
@@ -165,7 +197,7 @@ class StrategyBuilder {
         description: '成交量放大至均量2倍以上，股价上涨，短线买入信号',
         entryRule: '量比>2且股价上涨',
         exitRule: '连续3日缩量或跌破突破日收盘价',
-        stopLossRule: '跌破突破日最低点3%',
+        stopLossRule: '跌破入场价-1xATR',
         isActive: true,
         signalStrength: 75,
         strategyType: 'short',
@@ -175,6 +207,9 @@ class StrategyBuilder {
         minConfidence: 0.65,
         riskRewardRatio: 2.0,
         compatibleIndicators: ['量价', 'MA'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        targetPrice: _calcATRTarget(last, 2.0, 'short'),
       ));
     }
 
@@ -186,7 +221,6 @@ class StrategyBuilder {
       List<HistoryKline> data, List<SignalItem> signals) {
     final strategies = <TradingStrategy>[];
     final last = data.last;
-    final prev = data[data.length - 2];
 
     // 1. 均线多头排列
     final maMultiHead = last.ma5 > last.ma10 && last.ma10 > last.ma20 && last.ma20 > 0 &&
@@ -199,7 +233,7 @@ class StrategyBuilder {
         description: 'MA5>MA10>MA20>MA60，长期上升趋势，中线持股为主',
         entryRule: '多头排列形成后，股价回踩MA10附近企稳',
         exitRule: 'MA5下穿MA10或跌破MA20',
-        stopLossRule: '跌破MA20',
+        stopLossRule: '跌破入场价-2xATR',
         isActive: true,
         signalStrength: 85,
         strategyType: 'long',
@@ -209,6 +243,9 @@ class StrategyBuilder {
         minConfidence: 0.7,
         riskRewardRatio: 2.0,
         compatibleIndicators: ['MA', 'MACD'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 2.0, 'long'),
+        targetPrice: _calcATRTarget(last, 3.0, 'long'),
       ));
     }
 
@@ -221,7 +258,7 @@ class StrategyBuilder {
         description: 'MACD在零轴上方形成金叉，多头趋势强劲，中线持股为主',
         entryRule: 'MACD在零轴上方DIF上穿DEA',
         exitRule: 'MACD柱连续缩短3日或DIF下穿DEA',
-        stopLossRule: '跌破金叉日最低价或MA20',
+        stopLossRule: '跌破入场价-2xATR',
         isActive: true,
         signalStrength: 90,
         strategyType: 'long',
@@ -231,6 +268,9 @@ class StrategyBuilder {
         minConfidence: 0.75,
         riskRewardRatio: 2.0,
         compatibleIndicators: ['MACD', 'MA'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 2.0, 'long'),
+        targetPrice: _calcATRTarget(last, 3.0, 'long'),
       ));
     }
 
@@ -243,7 +283,7 @@ class StrategyBuilder {
         description: 'RSI在40-60区间运行，中轨附近企稳，长期持有',
         entryRule: 'RSI12在40-60区间，股价回踩MA10企稳',
         exitRule: 'RSI12>70或RSI12<30',
-        stopLossRule: 'RSI12<30或跌破MA20',
+        stopLossRule: '跌破入场价-2xATR',
         isActive: true,
         signalStrength: 70,
         strategyType: 'long',
@@ -253,11 +293,13 @@ class StrategyBuilder {
         minConfidence: 0.65,
         riskRewardRatio: 1.8,
         compatibleIndicators: ['RSI', 'MA'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 2.0, 'long'),
+        targetPrice: _calcATRTarget(last, 3.0, 'long'),
       ));
     }
 
     // 4. 布林带突破
-    final bollSqueeze = signals.any((s) => s.signal.contains('布林带收口'));
     final bollBreakout = signals.any((s) => s.signal.contains('布林带') && s.signal.contains('突破'));
     if (bollBreakout && last.close > last.bollUpper) {
       strategies.add(TradingStrategy(
@@ -267,7 +309,7 @@ class StrategyBuilder {
         description: '布林带收口后放量突破上轨，向上趋势确立，中线持有',
         entryRule: '布林带收口后放量突破上轨',
         exitRule: '股价回落至中轨下方',
-        stopLossRule: '跌破布林带中轨',
+        stopLossRule: '跌破入场价-2xATR',
         isActive: true,
         signalStrength: 80,
         strategyType: 'long',
@@ -277,6 +319,9 @@ class StrategyBuilder {
         minConfidence: 0.7,
         riskRewardRatio: 2.0,
         compatibleIndicators: ['BOLL', 'MACD'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 2.0, 'long'),
+        targetPrice: _calcATRTarget(last, 3.0, 'long'),
       ));
     }
 
@@ -289,7 +334,7 @@ class StrategyBuilder {
         description: 'ADX>25，趋势明确，可顺势而为，长期持有',
         entryRule: 'ADX>25，趋势强度强劲',
         exitRule: 'ADX<20或趋势转弱',
-        stopLossRule: '跌破近期重要支撑',
+        stopLossRule: '跌破入场价-2xATR',
         isActive: true,
         signalStrength: 75,
         strategyType: 'long',
@@ -299,6 +344,9 @@ class StrategyBuilder {
         minConfidence: 0.75,
         riskRewardRatio: 1.8,
         compatibleIndicators: ['ADX', 'MA'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 2.0, 'long'),
+        targetPrice: _calcATRTarget(last, 3.0, 'long'),
       ));
     }
 
@@ -313,7 +361,7 @@ class StrategyBuilder {
         description: '均线多头排列后回踩MA10企稳，最佳入场时机，中线持有',
         entryRule: '多头排列后回踩MA10附近不破',
         exitRule: 'MA5下穿MA10或跌破MA20',
-        stopLossRule: '跌破MA10下方2%',
+        stopLossRule: '跌破入场价-2xATR',
         isActive: true,
         signalStrength: 85,
         strategyType: 'long',
@@ -323,6 +371,9 @@ class StrategyBuilder {
         minConfidence: 0.7,
         riskRewardRatio: 2.0,
         compatibleIndicators: ['MA', 'MACD'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 2.0, 'long'),
+        targetPrice: _calcATRTarget(last, 3.0, 'long'),
       ));
     }
 
@@ -333,6 +384,7 @@ class StrategyBuilder {
   static List<TradingStrategy> _buildSpecialStrategies(
       List<HistoryKline> data, List<SignalItem> signals) {
     final strategies = <TradingStrategy>[];
+    if (data.length < 11) return strategies;
     final last = data.last;
 
     // 1. 缩量止跌
@@ -348,7 +400,7 @@ class StrategyBuilder {
         description: '前期大幅下跌后量能萎缩，价格企稳，止跌信号',
         entryRule: '前期跌幅超10%后量能萎缩至均量50%以下，价格企稳',
         exitRule: '放量上涨或跌破企稳价位',
-        stopLossRule: '跌破企稳价位3%',
+        stopLossRule: '跌破入场价-1.5xATR',
         isActive: true,
         signalStrength: 65,
         strategyType: 'both',
@@ -358,6 +410,8 @@ class StrategyBuilder {
         minConfidence: 0.6,
         riskRewardRatio: 1.8,
         compatibleIndicators: ['量价', 'MACD'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 1.5, 'both'),
       ));
     }
 
@@ -371,7 +425,7 @@ class StrategyBuilder {
         description: '成交量放大至均量2倍以上，股价上涨，主力资金介入',
         entryRule: '量比>2且股价上涨',
         exitRule: '连续3日缩量或跌破突破日收盘价',
-        stopLossRule: '跌破突破日最低价3%',
+        stopLossRule: '跌破入场价-1.5xATR',
         isActive: true,
         signalStrength: 75,
         strategyType: 'short',
@@ -381,6 +435,8 @@ class StrategyBuilder {
         minConfidence: 0.65,
         riskRewardRatio: 2.0,
         compatibleIndicators: ['量价', 'MA'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 1.5, 'both'),
       ));
     }
 
