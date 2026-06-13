@@ -10,6 +10,55 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.15.0',
+        'date': '2026-06-13',
+        'changes': [
+          '新增"探索"功能：底部导航第6Tab，智能选股推荐',
+          'Backend自动分析沪深主板股票，按评分排序仅推荐买入级别以上标的',
+          '数据来源：通达信热门板块扫描，覆盖约500只活跃主板股票',
+          '分析维度：技术面(MACD/KDJ/RSI/BOLL/MA/量价)+PE/PB估值过滤',
+          '分析进度：实时显示板块获取→股票列表→逐只分析→结果保存全流程',
+          '结果排序：支持按评分/涨幅/名称排序，可切换升降序',
+          '数据持久化：分析结果保存SQLite，退出不丢失，下次打开直接展示',
+          '股票交互：支持加入/移出自选，点击查看个股详情',
+          '性能优化：批量并发分析(每批10只)，单次分析<30秒',
+          '新增ExploreResult数据模型、ExploreEngine分析引擎、explore_results表',
+        ],
+      },
+      {
+        'version': 'v2.14.1',
+        'date': '2026-06-13',
+        'changes': [
+          '代码评审修复：8项代码质量问题修复，提升系统稳定性',
+          '删除 strategy_builder.dart 中未使用的 _calcATRStopLossSell 死代码',
+          'sr_quality.dart 支撑压力位质量评估集成到 calcTradeLevels，评估结果加入交易计划',
+          '个股详情页新增历史回测统计卡片，展示 MACD/MA/KDJ/RSI 策略胜率与盈亏比',
+          '_getFilteredOpportunities 硬编码中文推荐字符串替换为常量列表，提升可维护性',
+          'backtestMACDCross/backtestMACross 重构使用统一的 _buildResult/_emptyResult 辅助函数',
+          '回测函数新增 ATR 止损逻辑，回测结果与实际策略停止损规则保持一致',
+          '_detectShortTermSignals 方法拆分为9个独立子方法，代码可维护性大幅提升',
+          '移除 _buildResult 中冗余的 .toDouble() 调用',
+        ],
+      },
+      {
+        'version': 'v2.14.0',
+        'date': '2026-06-13',
+        'changes': [
+          '短中线交易策略深度优化：从实战股民视角端到端审计，7大核心改进',
+          '致命Bug修复：机会页面信号源从detectSignals→SignalDetector.detectLayeredSignals，恢复完整买卖信号',
+          '评分映射合理化：中性区间加宽，5分真正对应观望，消除天然看多偏见',
+          '新增跳空缺口检测：向上/向下跳空突破信号，纳入共振评分第10维',
+          '新增K线形态识别：锤子线、吊颈线、乌云盖顶、刺透形态4种经典形态',
+          '新增成交量趋势分析：吸筹/派发/地量见底3种主力资金行为模式',
+          '策略体系重构：去重合并18→16个唯一策略，以StrategyBuilder为统一引擎',
+          'ATR动态止损改造：短线1x/中线1.5x/长线2x ATR止损，告别固定百分比',
+          '回测引擎扩展：新增KDJ/RSI/BOLL/MA多头4种策略回测，结果集成到分析中',
+          '支撑压力位质量评估：评估被测试次数+成交量特征+时间衰减，区分强弱',
+          '机会页面筛选增强：按推荐类型（买入/卖出/观望）快速筛选自选股',
+          '评分权重微调：K线55%→50%、实时行情25%→30%，更贴近短中线实战',
+        ],
+      },
+      {
         'version': 'v2.13.1',
         'date': '2026-06-12',
         'changes': [

@@ -22,7 +22,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -53,6 +53,23 @@ class DatabaseService {
               trade_levels_json TEXT,
               top_signals TEXT DEFAULT '',
               archived_at INTEGER NOT NULL
+            )
+          ''');
+        }
+        if (oldVersion < 4) {
+          await db.execute('''
+            CREATE TABLE explore_results (
+              code TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              price REAL NOT NULL,
+              change_pct REAL NOT NULL,
+              pe REAL DEFAULT 0,
+              pb REAL DEFAULT 0,
+              score INTEGER NOT NULL,
+              recommendation TEXT NOT NULL,
+              sector TEXT DEFAULT '',
+              confluence_score INTEGER DEFAULT 0,
+              analyzed_at INTEGER NOT NULL
             )
           ''');
         }
@@ -101,6 +118,22 @@ class DatabaseService {
         trade_levels_json TEXT,
         top_signals TEXT DEFAULT '',
         archived_at INTEGER NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE explore_results (
+        code TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        price REAL NOT NULL,
+        change_pct REAL NOT NULL,
+        pe REAL DEFAULT 0,
+        pb REAL DEFAULT 0,
+        score INTEGER NOT NULL,
+        recommendation TEXT NOT NULL,
+        sector TEXT DEFAULT '',
+        confluence_score INTEGER DEFAULT 0,
+        analyzed_at INTEGER NOT NULL
       )
     ''');
   }
@@ -313,5 +346,37 @@ class DatabaseService {
       await db.close();
       _database = null;
     }
+  }
+
+  // ========== 探索结果 CRUD ==========
+
+  Future<void> replaceExploreResults(List<ExploreResult> results) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('explore_results');
+      for (final r in results) {
+        await txn.insert('explore_results', r.toMap());
+      }
+    });
+  }
+
+  Future<List<ExploreResult>> getExploreResults() async {
+    final db = await database;
+    final result = await db.query('explore_results', orderBy: 'score DESC');
+    return result.map((row) => ExploreResult.fromMap(row)).toList();
+  }
+
+  Future<DateTime?> getExploreLastTime() async {
+    final db = await database;
+    final result = await db.rawQuery('SELECT MAX(analyzed_at) as last_time FROM explore_results');
+    if (result.isNotEmpty && result.first['last_time'] != null) {
+      return DateTime.fromMillisecondsSinceEpoch(result.first['last_time'] as int);
+    }
+    return null;
+  }
+
+  Future<void> clearExploreResults() async {
+    final db = await database;
+    await db.delete('explore_results');
   }
 }

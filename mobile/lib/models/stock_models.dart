@@ -1,4 +1,5 @@
 import '../analysis/strategy_engine.dart';
+import '../analysis/backtest_engine.dart';
 
 enum DataConfidence { high, medium, low }
 
@@ -671,6 +672,7 @@ class AnalysisResult {
   final MarketContext? marketContext;               // 市场环境
   final double confidenceScore;                     // 推荐可信度（0.0-1.0）
   final List<RecommendationReason> detailedReasons;  // 详细推荐理由
+  final Map<String, BacktestResult>? backtestResults; // 回测结果
 
   AnalysisResult({
     this.quote,
@@ -691,6 +693,7 @@ class AnalysisResult {
     this.marketContext,
     this.confidenceScore = 0.5,
     this.detailedReasons = const [],
+    this.backtestResults,
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {
@@ -739,6 +742,9 @@ class AnalysisResult {
       detailedReasons: json['detailed_reasons'] != null
           ? (json['detailed_reasons'] as List).map((e) => RecommendationReason.fromJson(e as Map<String, dynamic>)).toList()
           : [],
+      backtestResults: json['backtest_results'] != null
+          ? (json['backtest_results'] as Map<String, dynamic>).map((k, v) => MapEntry(k, BacktestResult.fromJson(v as Map<String, dynamic>)))
+          : null,
     );
   }
 
@@ -767,6 +773,7 @@ class AnalysisResult {
         'confidence': r.confidence,
         'duration': r.duration,
       }).toList(),
+      'backtest_results': backtestResults?.map((k, v) => MapEntry(k, v.toJson())),
     };
   }
 }
@@ -1012,4 +1019,64 @@ class SectorInfo {
     this.leadStockCode = '',
     this.stockCount = 0,
   });
+}
+
+class ExploreResult {
+  final String code;
+  final String name;
+  final double price;
+  final double changePct;
+  final double pe;
+  final double pb;
+  final int score;
+  final String recommendation;
+  final String sector;
+  final int confluenceScore;
+  final DateTime analyzedAt;
+
+  ExploreResult({
+    required this.code,
+    required this.name,
+    this.price = 0,
+    this.changePct = 0,
+    this.pe = 0,
+    this.pb = 0,
+    this.score = 0,
+    this.recommendation = '',
+    this.sector = '',
+    this.confluenceScore = 0,
+    required this.analyzedAt,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'code': code,
+      'name': name,
+      'price': price,
+      'change_pct': changePct,
+      'pe': pe,
+      'pb': pb,
+      'score': score,
+      'recommendation': recommendation,
+      'sector': sector,
+      'confluence_score': confluenceScore,
+      'analyzed_at': analyzedAt.millisecondsSinceEpoch,
+    };
+  }
+
+  factory ExploreResult.fromMap(Map<String, dynamic> map) {
+    return ExploreResult(
+      code: map['code'] as String,
+      name: map['name'] as String? ?? '',
+      price: (map['price'] as num?)?.toDouble() ?? 0,
+      changePct: (map['change_pct'] as num?)?.toDouble() ?? 0,
+      pe: (map['pe'] as num?)?.toDouble() ?? 0,
+      pb: (map['pb'] as num?)?.toDouble() ?? 0,
+      score: (map['score'] as num?)?.toInt() ?? 0,
+      recommendation: map['recommendation'] as String? ?? '',
+      sector: map['sector'] as String? ?? '',
+      confluenceScore: (map['confluence_score'] as num?)?.toInt() ?? 0,
+      analyzedAt: DateTime.fromMillisecondsSinceEpoch((map['analyzed_at'] as num?)?.toInt() ?? 0),
+    );
+  }
 }

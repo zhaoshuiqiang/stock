@@ -5,11 +5,12 @@ import 'package:stock_analyzer/screens/watchlist_screen.dart';
 import 'package:stock_analyzer/screens/news_screen.dart';
 import 'package:stock_analyzer/screens/opportunity_screen.dart';
 import 'package:stock_analyzer/screens/archive_screen.dart';
+import 'package:stock_analyzer/screens/explore_screen.dart';
 import 'package:stock_analyzer/screens/alerts_screen.dart';
 import 'package:stock_analyzer/screens/update_log_screen.dart';
 import 'package:stock_analyzer/services/notification_service.dart';
 
-const String appVersion = 'v2.12.0';
+const String appVersion = 'v2.15.0';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +47,7 @@ class _MyAppState extends State<MyApp> {
       const OpportunityScreen(),
       const NewsScreen(),
       const ArchiveScreen(),
+      const ExploreScreen(),
     ];
 
     final titles = [
@@ -54,6 +56,7 @@ class _MyAppState extends State<MyApp> {
       '机会',
       '资讯',
       '留档',
+      '探索',
     ];
 
     return MaterialApp(
@@ -128,6 +131,10 @@ class _MyAppState extends State<MyApp> {
             BottomNavigationBarItem(
               icon: Icon(Icons.bookmark),
               label: '留档',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.explore),
+              label: '探索',
             ),
           ],
         ),
