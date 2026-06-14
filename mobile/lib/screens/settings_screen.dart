@@ -24,7 +24,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           children: [
             Card(
-              color: const Color(0xFF16213e),
+              color: const Color(0xFF161B22),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -51,7 +51,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 20),
             Card(
-              color: const Color(0xFF16213e),
+              color: const Color(0xFF161B22),
               child: InkWell(
                 onTap: () {
                   Navigator.push(

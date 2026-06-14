@@ -119,7 +119,7 @@ class SearchScreenState extends State<SearchScreen> {
                             onTap: () => _onStockTap(stock),
                             child: Card(
                               margin: const EdgeInsets.symmetric(vertical: 4),
-                              color: const Color(0xFF16213e),
+                              color: const Color(0xFF161B22),
                               child: Padding(
                                 padding: const EdgeInsets.all(12),
                                 child: Row(

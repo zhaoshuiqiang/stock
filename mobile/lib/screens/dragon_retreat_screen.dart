@@ -35,7 +35,7 @@ class _DragonRetreatScreenState extends State<DragonRetreatScreen> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: const Color(0xFF0f3460),
+      color: const Color(0xFF161B22),
       padding: const EdgeInsets.all(16),
       child: isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -92,7 +92,7 @@ class _DragonRetreatScreenState extends State<DragonRetreatScreen> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: const Color(0xFF16213e),
+            color: const Color(0xFF161B22),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Column(

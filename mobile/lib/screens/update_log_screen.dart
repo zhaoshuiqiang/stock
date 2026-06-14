@@ -10,6 +10,18 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.20.0',
+        'date': '2026-06-14',
+        'changes': [
+          '融合机会与探索界面为"发现"页面，顶部Tab切换自选分析/智能探索',
+          '自选分析Tab新增编辑模式，可多选后批量移出自选',
+          '智能探索Tab新增"一键加自选"按钮，批量添加优质标的',
+          '自选界面全面升级：卡片式布局、左滑删除、长按编辑、实时行情刷新',
+          '整体UI重新设计：现代简约风格，新色彩体系，胶囊Tab切换器',
+          '底部导航从6个Tab精简为5个（首页/自选/发现/资讯/留档）',
+        ],
+      },
+      {
         'version': 'v2.19.2',
         'date': '2026-06-14',
         'changes': [
@@ -445,7 +457,7 @@ class UpdateLogScreen extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: updates.map((update) {
           return Card(
-            color: const Color(0xFF16213e),
+            color: const Color(0xFF161B22),
             margin: const EdgeInsets.symmetric(vertical: 8),
             child: Padding(
               padding: const EdgeInsets.all(16),

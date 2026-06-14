@@ -3,14 +3,13 @@ import 'package:stock_analyzer/core/navigator_key.dart';
 import 'package:stock_analyzer/screens/home_screen.dart';
 import 'package:stock_analyzer/screens/watchlist_screen.dart';
 import 'package:stock_analyzer/screens/news_screen.dart';
-import 'package:stock_analyzer/screens/opportunity_screen.dart';
+import 'package:stock_analyzer/screens/discover_screen.dart';
 import 'package:stock_analyzer/screens/archive_screen.dart';
-import 'package:stock_analyzer/screens/explore_screen.dart';
 import 'package:stock_analyzer/screens/alerts_screen.dart';
 import 'package:stock_analyzer/screens/update_log_screen.dart';
 import 'package:stock_analyzer/services/notification_service.dart';
 
-const String appVersion = 'v2.15.0';
+const String appVersion = 'v2.20.0';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -49,19 +48,17 @@ class _MyAppState extends State<MyApp> {
     final pages = [
       HomeScreen(key: _homeKey),
       const WatchlistScreen(),
-      const OpportunityScreen(),
+      const DiscoverScreen(),
       const NewsScreen(),
       const ArchiveScreen(),
-      const ExploreScreen(),
     ];
 
     final titles = [
       '首页',
       '自选',
-      '机会',
+      '发现',
       '资讯',
       '留档',
-      '探索',
     ];
 
     return MaterialApp(
@@ -70,19 +67,28 @@ class _MyAppState extends State<MyApp> {
       theme: ThemeData(
         primarySwatch: Colors.blue,
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF1a1a2e),
-        cardColor: const Color(0xFF16213e),
+        scaffoldBackgroundColor: const Color(0xFF0D1117),
+        cardColor: const Color(0xFF161B22),
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF0f3460),
+          backgroundColor: Color(0xFF0D1117),
+          elevation: 0,
+          titleTextStyle: TextStyle(color: Color(0xFFF0F6FC), fontSize: 20, fontWeight: FontWeight.w500),
+          iconTheme: IconThemeData(color: Color(0xFFF0F6FC)),
         ),
         bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-          backgroundColor: Color(0xFF0f3460),
+          backgroundColor: Color(0xFF0D1117),
+          selectedItemColor: Color(0xFF58A6FF),
+          unselectedItemColor: Color(0xFF8B949E),
+          type: BottomNavigationBarType.fixed,
         ),
         textTheme: const TextTheme(
-          bodyLarge: TextStyle(color: Colors.white),
-          bodyMedium: TextStyle(color: Colors.white),
-          titleLarge: TextStyle(color: Colors.white),
-          titleMedium: TextStyle(color: Colors.white),
+          bodyLarge: TextStyle(color: Color(0xFFF0F6FC)),
+          bodyMedium: TextStyle(color: Color(0xFFF0F6FC)),
+          titleLarge: TextStyle(color: Color(0xFFF0F6FC)),
+          titleMedium: TextStyle(color: Color(0xFFF0F6FC)),
+        ),
+        snackBarTheme: const SnackBarThemeData(
+          backgroundColor: Color(0xFF161B22),
         ),
       ),
       home: Builder(builder: (context) => Scaffold(
@@ -109,16 +115,7 @@ class _MyAppState extends State<MyApp> {
                     },
                   ),
                 ]
-            : _currentIndex == 5
-                ? [
-                    IconButton(
-                      icon: const Icon(Icons.help_outline),
-                      onPressed: () {
-                        ExploreScreen.showHelp(context);
-                      },
-                    ),
-                  ]
-                : null,
+            : null,
         ),
         body: pages[_currentIndex],
         bottomNavigationBar: BottomNavigationBar(
@@ -135,8 +132,8 @@ class _MyAppState extends State<MyApp> {
               label: '自选',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.trending_up),
-              label: '机会',
+              icon: Icon(Icons.explore),
+              label: '发现',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.article),
@@ -145,10 +142,6 @@ class _MyAppState extends State<MyApp> {
             BottomNavigationBarItem(
               icon: Icon(Icons.bookmark),
               label: '留档',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.explore),
-              label: '探索',
             ),
           ],
         ),

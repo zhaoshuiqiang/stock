@@ -24,7 +24,7 @@ class StrategyPanelShort extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFF0f3460),
+            color: const Color(0xFF161B22),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
@@ -50,7 +50,7 @@ class StrategyPanelShort extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFF0f3460),
+              color: const Color(0xFF161B22),
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Center(child: Text('当前无短线策略信号', style: TextStyle(color: Colors.white54, fontSize: 13))),
@@ -62,8 +62,8 @@ class StrategyPanelShort extends StatelessWidget {
         if (inactive.isNotEmpty) ...[
           ExpansionTile(
             title: const Text('其他短线策略', style: TextStyle(color: Colors.white54, fontSize: 13)),
-            backgroundColor: const Color(0xFF0f3460),
-            collapsedBackgroundColor: const Color(0xFF0f3460),
+            backgroundColor: const Color(0xFF161B22),
+            collapsedBackgroundColor: const Color(0xFF161B22),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             children: inactive.map((s) => _buildStrategyCard(context, s, compact: true)).toList(),
           ),
@@ -116,7 +116,7 @@ class StrategyPanelShort extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF0f3460),
+        color: const Color(0xFF161B22),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: catColor.withOpacity(0.3)),
       ),
@@ -169,7 +169,7 @@ class StrategyPanelShort extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFF16213e),
+                color: const Color(0xFF161B22),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Row(

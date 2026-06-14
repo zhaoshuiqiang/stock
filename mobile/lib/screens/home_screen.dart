@@ -412,7 +412,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _showPickResults(List<Map<String, dynamic>> picks) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1a1a2e),
+      backgroundColor: const Color(0xFF0D1117),
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
@@ -463,7 +463,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     margin: const EdgeInsets.only(bottom: 6),
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0f3460),
+                      color: const Color(0xFF161B22),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: recColor.withOpacity(0.3)),
                     ),

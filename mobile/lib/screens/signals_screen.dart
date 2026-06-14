@@ -90,7 +90,7 @@ class SignalsScreenState extends State<SignalsScreen> {
             children: [
               Card(
                 margin: const EdgeInsets.all(8),
-                color: const Color(0xFF16213e),
+                color: const Color(0xFF161B22),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Column(
@@ -100,7 +100,7 @@ class SignalsScreenState extends State<SignalsScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF0f3460),
+                            color: const Color(0xFF161B22),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Row(

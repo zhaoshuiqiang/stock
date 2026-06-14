@@ -97,7 +97,7 @@ class _SectorScreenState extends State<SectorScreen> {
                           margin: const EdgeInsets.only(bottom: 6),
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF0f3460),
+                            color: const Color(0xFF161B22),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Row(

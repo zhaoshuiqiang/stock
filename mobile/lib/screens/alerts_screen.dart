@@ -21,7 +21,7 @@ class _AboutDialog extends StatelessWidget {
 
     return AlertDialog(
       title: const Text('关于'),
-      backgroundColor: const Color(0xFF16213e),
+      backgroundColor: const Color(0xFF161B22),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -163,7 +163,7 @@ class AlertsScreenState extends State<AlertsScreen> {
                 child: ElevatedButton(
                   onPressed: _createAlert,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0f3460),
+                    backgroundColor: const Color(0xFF161B22),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                   child: const Text('+ 添加预警', style: TextStyle(fontSize: 16)),
@@ -180,7 +180,7 @@ class AlertsScreenState extends State<AlertsScreen> {
                 ..._alerts.map((alert) {
                   return Card(
                     margin: const EdgeInsets.symmetric(vertical: 4),
-                    color: const Color(0xFF16213e),
+                    color: const Color(0xFF161B22),
                     child: Padding(
                       padding: const EdgeInsets.all(12),
                       child: Column(

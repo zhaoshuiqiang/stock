@@ -128,7 +128,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             }
 
             return Dialog(
-              backgroundColor: const Color(0xFF1a1a2e),
+              backgroundColor: const Color(0xFF0D1117),
               insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 48),
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -149,7 +149,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                               )
                             : null,
                         filled: true,
-                        fillColor: const Color(0xFF0f3460),
+                        fillColor: const Color(0xFF161B22),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide.none,
@@ -718,7 +718,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFF0f3460),
+              color: const Color(0xFF161B22),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Column(
@@ -1069,7 +1069,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF0f3460),
+        color: const Color(0xFF161B22),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -1201,7 +1201,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: _showFibonacci ? const Color(0xFF26a69a) : const Color(0xFF16213e),
+            color: _showFibonacci ? const Color(0xFF26a69a) : const Color(0xFF161B22),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: _showFibonacci ? const Color(0xFF26a69a) : Colors.white24),
           ),
@@ -1227,7 +1227,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: _showBoll ? const Color(0xFF00BCD4) : const Color(0xFF16213e),
+            color: _showBoll ? const Color(0xFF00BCD4) : const Color(0xFF161B22),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: _showBoll ? const Color(0xFF00BCD4) : Colors.white24),
           ),
@@ -1250,7 +1250,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       final color = isUp ? Colors.red : Colors.green;
       selectedInfo = Container(
         padding: const EdgeInsets.all(8),
-        color: const Color(0xFF0f3460),
+        color: const Color(0xFF161B22),
         child: Column(
           children: [
             Row(
@@ -1734,7 +1734,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       children: [
         Card(
           margin: const EdgeInsets.all(8),
-          color: const Color(0xFF16213e),
+          color: const Color(0xFF161B22),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -1746,7 +1746,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                   height: 120,
                   decoration: const BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Color(0xFF0f3460),
+                    color: Color(0xFF161B22),
                   ),
                   child: Center(
                     child: Column(
@@ -1772,7 +1772,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         ),
         Card(
           margin: const EdgeInsets.all(8),
-          color: const Color(0xFF16213e),
+          color: const Color(0xFF161B22),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -1797,7 +1797,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         if (quote != null)
           Card(
             margin: const EdgeInsets.all(8),
-            color: const Color(0xFF16213e),
+            color: const Color(0xFF161B22),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -1812,7 +1812,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         if (quote != null && quote.mainNetFlow != 0)
           Card(
             margin: const EdgeInsets.all(8),
-            color: const Color(0xFF16213e),
+            color: const Color(0xFF161B22),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -1826,7 +1826,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           ),
         Card(
           margin: const EdgeInsets.all(8),
-          color: const Color(0xFF16213e),
+          color: const Color(0xFF161B22),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -1842,7 +1842,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         if (analysis.signals.where((s) => s.type == 'buy').isNotEmpty)
           Card(
             margin: const EdgeInsets.all(8),
-            color: const Color(0xFF16213e),
+            color: const Color(0xFF161B22),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -1878,7 +1878,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         if (analysis.indicators.isNotEmpty)
           Card(
             margin: const EdgeInsets.all(8),
-            color: const Color(0xFF16213e),
+            color: const Color(0xFF161B22),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -1903,7 +1903,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         if (analysis.tradeLevels != null && analysis.tradeLevels!.isNotEmpty)
           Card(
             margin: const EdgeInsets.all(8),
-            color: const Color(0xFF16213e),
+            color: const Color(0xFF161B22),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -1935,7 +1935,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         if (analysis.confluenceDetails.isNotEmpty)
           Card(
             margin: const EdgeInsets.all(8),
-            color: const Color(0xFF16213e),
+            color: const Color(0xFF161B22),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -2130,7 +2130,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: const Color(0xFF0f3460).withOpacity(0.5),
+            color: const Color(0xFF161B22).withOpacity(0.5),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Text(

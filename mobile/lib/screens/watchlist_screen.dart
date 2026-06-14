@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
+import '../widgets/stock_card.dart';
 import 'quote_screen.dart';
 
 class WatchlistScreen extends StatefulWidget {
@@ -11,26 +13,87 @@ class WatchlistScreen extends StatefulWidget {
   State<WatchlistScreen> createState() => WatchlistScreenState();
 }
 
-class WatchlistScreenState extends State<WatchlistScreen> {
+class WatchlistScreenState extends State<WatchlistScreen>
+    with WidgetsBindingObserver {
   final DatabaseService _dbService = DatabaseService();
   final ApiClient _apiClient = ApiClient();
   final TextEditingController _searchController = TextEditingController();
   List<WatchlistItem> _watchlist = [];
   List<QuoteData> _quotes = [];
   bool _isLoading = true;
-  
+
   // 排序相关状态
   String _sortBy = 'default'; // 'default', 'change_pct'
-  bool _sortAscending = false; // false=降序(从高到低), true=升序(从低到高)
+  bool _sortAscending = false;
 
   // 批量删除相关状态
   bool _isEditMode = false;
   Set<String> _selectedCodes = {};
 
+  // 筛选：全部/看多/看空/观望
+  String _filterType = '全部';
+
+  // 30秒自动刷新
+  Timer? _refreshTimer;
+
+  // 颜色常量
+  static const Color _bgColor = Color(0xFF0D1117);
+  static const Color _cardColor = Color(0xFF161B22);
+  static const Color _accentColor = Color(0xFF58A6FF);
+  static const Color _upColor = Color(0xFFE74C3C);
+  static const Color _downColor = Color(0xFF2ECC71);
+  static const Color _textPrimary = Color(0xFFF0F6FC);
+  static const Color _textSecondary = Color(0xFF8B949E);
+  static const Color _borderColor = Color(0xFF30363D);
+  static const Color _darkSurface = Color(0xFF21262D);
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadWatchlist();
+    _startRefreshTimer();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _refreshTimer?.cancel();
+    } else if (state == AppLifecycleState.resumed) {
+      _startRefreshTimer();
+      _loadWatchlist();
+    }
+  }
+
+  void _startRefreshTimer() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _refreshQuotes();
+    });
+  }
+
+  Future<void> _refreshQuotes() async {
+    if (_watchlist.isEmpty) return;
+    try {
+      final codes =
+          _watchlist.map((item) => _apiClient.addMarketPrefix(item.code)).toList();
+      final futures = codes.map((code) => _apiClient.getRealtimeQuote(code));
+      final results = await Future.wait(futures);
+      final quotes = results.where((q) => q != null).cast<QuoteData>().toList();
+      if (mounted) {
+        setState(() {
+          _quotes = quotes;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadWatchlist() async {
@@ -47,17 +110,20 @@ class WatchlistScreenState extends State<WatchlistScreen> {
           _quotes = [];
         });
       } else {
-        final codes = watchlist.map((item) => _apiClient.addMarketPrefix(item.code)).toList();
+        final codes = watchlist
+            .map((item) => _apiClient.addMarketPrefix(item.code))
+            .toList();
         final futures = codes.map((code) => _apiClient.getRealtimeQuote(code));
         final results = await Future.wait(futures);
-        final quotes = results.where((q) => q != null).cast<QuoteData>().toList();
+        final quotes =
+            results.where((q) => q != null).cast<QuoteData>().toList();
 
         setState(() {
           _watchlist = watchlist;
           _quotes = quotes;
         });
       }
-    } catch (e) {
+    } catch (_) {
       // ignore
     } finally {
       setState(() {
@@ -83,25 +149,20 @@ class WatchlistScreenState extends State<WatchlistScreen> {
     );
   }
 
-  // 切换排序方式
   void _toggleSort() {
     setState(() {
       if (_sortBy == 'change_pct') {
-        // 如果已经是涨跌幅排序，切换升序/降序
         _sortAscending = !_sortAscending;
       } else {
-        // 切换到涨跌幅排序，默认降序（从高到低）
         _sortBy = 'change_pct';
         _sortAscending = false;
       }
     });
   }
 
-  // 获取排序后的股票列表
-  List<Map<String, dynamic>> _getSortedWatchlist() {
-    // 将watchlist和quotes组合成map列表
+  List<Map<String, dynamic>> _getFilteredAndSortedWatchlist() {
     final items = <Map<String, dynamic>>[];
-    
+
     for (var i = 0; i < _watchlist.length; i++) {
       final item = _watchlist[i];
       final codeWithPrefix = _apiClient.addMarketPrefix(item.code);
@@ -109,318 +170,510 @@ class WatchlistScreenState extends State<WatchlistScreen> {
         (q) => q.code == codeWithPrefix,
         orElse: () => QuoteData.empty(),
       );
-      
+
+      // 筛选
+      if (_filterType == '看多' && quote.changePct <= 0) continue;
+      if (_filterType == '看空' && quote.changePct >= 0) continue;
+      if (_filterType == '观望' && quote.changePct != 0) continue;
+
       items.add({
         'item': item,
         'quote': quote,
         'codeWithPrefix': codeWithPrefix,
       });
     }
-    
-    // 根据排序规则排序
+
+    // 排序
     if (_sortBy == 'change_pct') {
       items.sort((a, b) {
         final changeA = a['quote'].changePct;
         final changeB = b['quote'].changePct;
-        
-        if (_sortAscending) {
-          return changeA.compareTo(changeB); // 升序：从低到高
-        } else {
-          return changeB.compareTo(changeA); // 降序：从高到低
-        }
+        return _sortAscending
+            ? changeA.compareTo(changeB)
+            : changeB.compareTo(changeA);
       });
     }
-    
+
     return items;
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final textTheme = theme.textTheme;
-    final isDark = theme.brightness == Brightness.dark;
-    final upColor = isDark ? const Color(0xFFef5350) : const Color(0xFFc62828);
-    final downColor = isDark ? const Color(0xFF26a69a) : const Color(0xFF2e7d32);
+    return Container(
+      color: _bgColor,
+      child: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(color: _accentColor))
+          : Column(
+              children: [
+                _buildSearchBar(),
+                _buildFilterAndSortBar(),
+                Expanded(child: _buildList()),
+                if (_isEditMode) _buildEditBottomBar(),
+              ],
+            ),
+    );
+  }
 
-    return _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : Column(
-            children: [
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.all(8),
-                  children: [
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        style: textTheme.bodyLarge?.copyWith(color: Colors.white),
-                        decoration: InputDecoration(
-                          hintText: '搜索股票',
-                          hintStyle: textTheme.bodyMedium?.copyWith(color: Colors.grey),
-                          border: const OutlineInputBorder(
-                            borderSide: BorderSide(color: Colors.grey),
-                          ),
-                          enabledBorder: const OutlineInputBorder(
-                            borderSide: BorderSide(color: Colors.grey),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                          filled: true,
-                          fillColor: const Color(0xFF16213e),
-                        ),
-                        onSubmitted: _searchAndAddStock,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: () => _searchAndAddStock(_searchController.text),
-                      child: const Text('添加'),
-                    ),
-                  ],
-                ),
-              ),
-              // 排序按钮行
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Text(
-                      '共 ${_watchlist.length} 只股票',
-                      style: textTheme.bodyMedium?.copyWith(color: Colors.grey),
-                    ),
-                    const Spacer(),
-                    // 编辑按钮
-                    if (_watchlist.isNotEmpty)
-                      TextButton(
-                        onPressed: () {
-                          setState(() {
-                            _isEditMode = !_isEditMode;
-                            if (!_isEditMode) _selectedCodes.clear();
-                          });
-                        },
-                        child: Text(_isEditMode ? '完成' : '编辑', style: const TextStyle(color: Colors.white70)),
-                      ),
-                    const SizedBox(width: 4),
-                    // 排序按钮
-                    InkWell(
-                      onTap: _toggleSort,
-                      borderRadius: BorderRadius.circular(4),
+  Widget _buildSearchBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      decoration: BoxDecoration(
+        color: _darkSurface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: _borderColor),
+      ),
+      child: TextField(
+        controller: _searchController,
+        style: const TextStyle(color: _textPrimary, fontSize: 15),
+        decoration: const InputDecoration(
+          hintText: '搜索股票名称或代码',
+          hintStyle: TextStyle(color: _textSecondary, fontSize: 15),
+          prefixIcon: Icon(Icons.search, color: _textSecondary, size: 22),
+          border: InputBorder.none,
+          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        ),
+        onSubmitted: _searchAndAddStock,
+      ),
+    );
+  }
+
+  Widget _buildFilterAndSortBar() {
+    final filters = ['全部', '看多', '看空', '观望'];
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: Row(
+        children: [
+          // 筛选 Chips
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: filters.map((f) {
+                  final isSelected = _filterType == f;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onTap: () => setState(() => _filterType = f),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(
-                          color: _sortBy == 'change_pct' 
-                              ? const Color(0xFF0f3460) 
+                          color: isSelected
+                              ? _accentColor.withOpacity(0.15)
                               : Colors.transparent,
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: BorderRadius.circular(16),
                           border: Border.all(
-                            color: _sortBy == 'change_pct' 
-                                ? Colors.blue 
-                                : Colors.grey.withOpacity(0.3),
+                            color: isSelected
+                                ? _accentColor
+                                : _borderColor,
                           ),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.sort,
-                              size: 16,
-                              color: _sortBy == 'change_pct' 
-                                  ? Colors.blue 
-                                  : Colors.grey,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              _sortBy == 'change_pct' 
-                                  ? '涨跌幅' 
-                                  : '默认排序',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: _sortBy == 'change_pct' 
-                                    ? Colors.blue 
-                                    : Colors.grey,
-                                fontWeight: _sortBy == 'change_pct' 
-                                    ? FontWeight.bold 
-                                    : FontWeight.normal,
-                              ),
-                            ),
-                            if (_sortBy == 'change_pct') ...[
-                              const SizedBox(width: 4),
-                              Icon(
-                                _sortAscending 
-                                    ? Icons.arrow_upward 
-                                    : Icons.arrow_downward,
-                                size: 14,
-                                color: Colors.blue,
-                              ),
-                            ],
-                          ],
+                        child: Text(
+                          f,
+                          style: TextStyle(
+                            color: isSelected
+                                ? _accentColor
+                                : _textSecondary,
+                            fontSize: 13,
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (_watchlist.isEmpty)
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      children: [
-                        Text('暂无自选股', style: textTheme.titleMedium),
-                        const SizedBox(height: 16),
-                        Text('在上方搜索框输入股票名称或代码添加', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                ..._getSortedWatchlist().map((data) {
-                  final item = data['item'] as WatchlistItem;
-                  final quote = data['quote'] as QuoteData;
-                  final codeWithPrefix = data['codeWithPrefix'] as String;
-                  final isUp = quote.changePct >= 0;
-                  final color = isUp ? upColor : downColor;
-
-                  return Card(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    color: const Color(0xFF16213e),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          if (_isEditMode)
-                            Checkbox(
-                              value: _selectedCodes.contains(item.code),
-                              onChanged: (checked) {
-                                setState(() {
-                                  if (checked == true) {
-                                    _selectedCodes.add(item.code);
-                                  } else {
-                                    _selectedCodes.remove(item.code);
-                                  }
-                                });
-                              },
-                              fillColor: WidgetStateProperty.resolveWith((states) =>
-                                  states.contains(WidgetState.selected) ? Colors.orange : Colors.white38),
-                            ),
-                          Expanded(
-                            child: InkWell(
-                              onTap: _isEditMode
-                                  ? () {
-                                      setState(() {
-                                        if (_selectedCodes.contains(item.code)) {
-                                          _selectedCodes.remove(item.code);
-                                        } else {
-                                          _selectedCodes.add(item.code);
-                                        }
-                                      });
-                                    }
-                                  : () => _onStockTap(codeWithPrefix, item.name),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(item.name, style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
-                                  Text(item.code.substring(2), style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
-                                ],
-                              ),
-                            ),
-                          ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(quote.price.toStringAsFixed(2), style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
-                              Text(
-                                '${isUp ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
-                                style: textTheme.bodyMedium?.copyWith(color: color, fontWeight: FontWeight.bold),
-                              ),
-                            ],
-                          ),
-                          if (!_isEditMode) ...[
-                            const SizedBox(width: 8),
-                            IconButton(
-                              icon: const Icon(Icons.add_alert, color: Colors.blue),
-                              onPressed: () => _addAlert(codeWithPrefix, item.name),
-                              tooltip: '添加预警',
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete, color: Color(0xFFef5350)),
-                              onPressed: () => _removeFromWatchlist(item.code),
-                            ),
-                          ],
-                        ],
                       ),
                     ),
                   );
-                }),
-            ],
-          ),
+                }).toList(),
               ),
-              if (_isEditMode)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF1a1a2e),
-                    border: Border(top: BorderSide(color: Colors.white12)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // 排序按钮
+          GestureDetector(
+            onTap: _toggleSort,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _sortBy == 'change_pct'
+                    ? _accentColor.withOpacity(0.15)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _sortBy == 'change_pct'
+                      ? _accentColor
+                      : _borderColor,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.sort,
+                    size: 16,
+                    color: _sortBy == 'change_pct'
+                        ? _accentColor
+                        : _textSecondary,
                   ),
-                  child: SafeArea(
-                    child: Row(
-                      children: [
-                        Text('已选${_selectedCodes.length}只', style: const TextStyle(color: Colors.white70, fontSize: 14)),
-                        const Spacer(),
-                        TextButton(
-                          onPressed: _selectedCodes.isEmpty ? null : () {
-                            final allCodes = _watchlist.map((w) => w.code).toSet();
-                            if (_selectedCodes.length == allCodes.length) {
-                              setState(() => _selectedCodes.clear());
-                            } else {
-                              setState(() => _selectedCodes = allCodes);
-                            }
-                          },
-                          child: Text(
-                            _selectedCodes.length == _watchlist.length ? '取消全选' : '全选',
-                            style: TextStyle(color: _selectedCodes.isEmpty ? Colors.white24 : Colors.white70),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: _selectedCodes.isEmpty ? null : () async {
-                            final confirmed = await showDialog<bool>(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                backgroundColor: const Color(0xFF1a1a2e),
-                                title: const Text('确认删除', style: TextStyle(color: Colors.white)),
-                                content: Text('确定要删除选中的${_selectedCodes.length}只股票吗？', style: const TextStyle(color: Colors.white70)),
-                                actions: [
-                                  TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
-                                  TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('删除', style: TextStyle(color: Colors.red))),
-                                ],
-                              ),
-                            );
-                            if (confirmed == true) {
-                              await DatabaseService().batchRemoveFromWatchlist(_selectedCodes.toList());
-                              setState(() {
-                                _isEditMode = false;
-                                _selectedCodes.clear();
-                              });
-                              _loadWatchlist();
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                            foregroundColor: Colors.white,
-                            disabledBackgroundColor: Colors.red.withValues(alpha: 0.3),
-                          ),
-                          child: Text('删除选中(${_selectedCodes.length})'),
-                        ),
-                      ],
+                  const SizedBox(width: 4),
+                  Text(
+                    _sortBy == 'change_pct' ? '涨跌幅' : '默认排序',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: _sortBy == 'change_pct'
+                          ? _accentColor
+                          : _textSecondary,
+                      fontWeight: _sortBy == 'change_pct'
+                          ? FontWeight.w600
+                          : FontWeight.normal,
                     ),
                   ),
-                ),
+                  if (_sortBy == 'change_pct') ...[
+                    const SizedBox(width: 4),
+                    Icon(
+                      _sortAscending
+                          ? Icons.arrow_upward
+                          : Icons.arrow_downward,
+                      size: 14,
+                      color: _accentColor,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildList() {
+    final items = _getFilteredAndSortedWatchlist();
+
+    if (_watchlist.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.watch_later_outlined,
+                  size: 64, color: _textSecondary.withOpacity(0.4)),
+              const SizedBox(height: 16),
+              const Text(
+                '暂无自选股',
+                style: TextStyle(
+                    color: _textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '在上方搜索框输入股票名称或代码添加',
+                style: TextStyle(color: _textSecondary, fontSize: 14),
+              ),
             ],
+          ),
+        ),
+      );
+    }
+
+    if (items.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Text(
+            '当前筛选无结果',
+            style: TextStyle(color: _textSecondary, fontSize: 14),
+          ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      color: _accentColor,
+      backgroundColor: _cardColor,
+      onRefresh: _loadWatchlist,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        itemCount: items.length,
+        itemBuilder: (context, index) {
+          final data = items[index];
+          final item = data['item'] as WatchlistItem;
+          final quote = data['quote'] as QuoteData;
+          final codeWithPrefix = data['codeWithPrefix'] as String;
+
+          if (_isEditMode) {
+            return _buildEditItem(item, quote, codeWithPrefix);
+          }
+
+          return Dismissible(
+            key: Key(item.code),
+            direction: DismissDirection.endToStart,
+            background: Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 20),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.delete, color: Colors.red, size: 28),
+            ),
+            confirmDismiss: (direction) async {
+              return await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  backgroundColor: _cardColor,
+                  title: const Text('确认删除',
+                      style: TextStyle(color: _textPrimary)),
+                  content: Text('确定要从自选股移除 ${item.name} 吗？',
+                      style: const TextStyle(color: _textSecondary)),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('取消',
+                          style: TextStyle(color: _textSecondary)),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('删除',
+                          style: TextStyle(color: Colors.red)),
+                    ),
+                  ],
+                ),
+              );
+            },
+            onDismissed: (_) => _removeFromWatchlist(item.code),
+            child: GestureDetector(
+              onLongPress: () {
+                setState(() {
+                  _isEditMode = true;
+                  _selectedCodes.add(item.code);
+                });
+              },
+              child: StockCard(
+                name: item.name,
+                code: codeWithPrefix,
+                price: quote.price,
+                changePct: quote.changePct,
+                pe: quote.pe > 0 ? quote.pe : null,
+                pb: quote.pb > 0 ? quote.pb : null,
+                onTap: () => _onStockTap(codeWithPrefix, item.name),
+                trailing: IconButton(
+                  icon: const Icon(Icons.add_alert,
+                      color: _accentColor, size: 22),
+                  onPressed: () => _addAlert(codeWithPrefix, item.name),
+                  tooltip: '添加预警',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ),
+            ),
           );
+        },
+      ),
+    );
+  }
+
+  Widget _buildEditItem(
+      WatchlistItem item, QuoteData quote, String codeWithPrefix) {
+    final isSelected = _selectedCodes.contains(item.code);
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          if (isSelected) {
+            _selectedCodes.remove(item.code);
+          } else {
+            _selectedCodes.add(item.code);
+          }
+        });
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: _cardColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? _accentColor : _borderColor,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isSelected ? _accentColor : Colors.transparent,
+                border: Border.all(
+                  color: isSelected ? _accentColor : _textSecondary,
+                  width: 2,
+                ),
+              ),
+              child: isSelected
+                  ? const Icon(Icons.check, size: 14, color: _textPrimary)
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(item.name,
+                      style: const TextStyle(
+                          color: _textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 2),
+                  Text(codeWithPrefix,
+                      style: const TextStyle(
+                          color: _textSecondary, fontSize: 12)),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  quote.price > 0
+                      ? '¥${quote.price.toStringAsFixed(2)}'
+                      : '--',
+                  style: TextStyle(
+                    color: quote.changePct > 0
+                        ? _upColor
+                        : quote.changePct < 0
+                            ? _downColor
+                            : _textSecondary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${quote.changePct >= 0 ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
+                  style: TextStyle(
+                    color: quote.changePct > 0
+                        ? _upColor
+                        : quote.changePct < 0
+                            ? _downColor
+                            : _textSecondary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEditBottomBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: const BoxDecoration(
+        color: _darkSurface,
+        border: Border(top: BorderSide(color: _borderColor)),
+      ),
+      child: SafeArea(
+        child: Row(
+          children: [
+            Text(
+              '已选${_selectedCodes.length}只',
+              style: const TextStyle(color: _textSecondary, fontSize: 14),
+            ),
+            const Spacer(),
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  final allCodes = _watchlist.map((w) => w.code).toSet();
+                  if (_selectedCodes.length == allCodes.length) {
+                    _selectedCodes.clear();
+                  } else {
+                    _selectedCodes = allCodes;
+                  }
+                });
+              },
+              child: Text(
+                _selectedCodes.length == _watchlist.length ? '取消全选' : '全选',
+                style: TextStyle(
+                  color: _selectedCodes.isEmpty
+                      ? _textSecondary.withOpacity(0.5)
+                      : _accentColor,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            GestureDetector(
+              onTap: _selectedCodes.isEmpty
+                  ? null
+                  : () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          backgroundColor: _cardColor,
+                          title: const Text('确认删除',
+                              style: TextStyle(color: _textPrimary)),
+                          content: Text(
+                              '确定要删除选中的${_selectedCodes.length}只股票吗？',
+                              style:
+                                  const TextStyle(color: _textSecondary)),
+                          actions: [
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.pop(context, false),
+                              child: const Text('取消',
+                                  style:
+                                      TextStyle(color: _textSecondary)),
+                            ),
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.pop(context, true),
+                              child: const Text('删除',
+                                  style: TextStyle(color: Colors.red)),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed == true) {
+                        await DatabaseService()
+                            .batchRemoveFromWatchlist(_selectedCodes.toList());
+                        setState(() {
+                          _isEditMode = false;
+                          _selectedCodes.clear();
+                        });
+                        _loadWatchlist();
+                      }
+                    },
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _selectedCodes.isEmpty
+                      ? Colors.red.withOpacity(0.2)
+                      : Colors.red,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '删除选中(${_selectedCodes.length})',
+                  style: TextStyle(
+                    color: _selectedCodes.isEmpty
+                        ? _textSecondary
+                        : _textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _addAlert(String code, String name) {
@@ -430,40 +683,68 @@ class WatchlistScreenState extends State<WatchlistScreen> {
         final TextEditingController priceController = TextEditingController();
         String conditionType = 'price_above';
         return AlertDialog(
-          title: Text('添加预警: $name'),
-          backgroundColor: const Color(0xFF16213e),
+          backgroundColor: _cardColor,
+          title: Text('添加预警: $name',
+              style: const TextStyle(color: _textPrimary)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<String>(
                 value: conditionType,
                 items: const [
-                  DropdownMenuItem(value: 'price_above', child: Text('价格高于')),
-                  DropdownMenuItem(value: 'price_below', child: Text('价格低于')),
-                  DropdownMenuItem(value: 'change_above', child: Text('涨幅超过')),
-                  DropdownMenuItem(value: 'change_below', child: Text('跌幅超过')),
+                  DropdownMenuItem(
+                      value: 'price_above', child: Text('价格高于')),
+                  DropdownMenuItem(
+                      value: 'price_below', child: Text('价格低于')),
+                  DropdownMenuItem(
+                      value: 'change_above', child: Text('涨幅超过')),
+                  DropdownMenuItem(
+                      value: 'change_below', child: Text('跌幅超过')),
                 ],
                 onChanged: (value) => conditionType = value!,
-                dropdownColor: const Color(0xFF16213e),
-                style: const TextStyle(color: Colors.white),
+                dropdownColor: _darkSurface,
+                style: const TextStyle(color: _textPrimary),
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: _darkSurface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: _borderColor),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: _borderColor),
+                  ),
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: priceController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
                   labelText: '预警值',
+                  labelStyle: const TextStyle(color: _textSecondary),
                   filled: true,
-                  fillColor: Color(0xFF0f3460),
+                  fillColor: _darkSurface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: _borderColor),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: _borderColor),
+                  ),
                 ),
-                style: const TextStyle(color: Colors.white),
+                style: const TextStyle(color: _textPrimary),
               ),
             ],
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
+              child: const Text('取消',
+                  style: TextStyle(color: _textSecondary)),
             ),
             TextButton(
               onPressed: () async {
@@ -482,7 +763,8 @@ class WatchlistScreenState extends State<WatchlistScreen> {
                   );
                 }
               },
-              child: const Text('确认'),
+              child:
+                  const Text('确认', style: TextStyle(color: _accentColor)),
             ),
           ],
         );
@@ -513,8 +795,9 @@ class WatchlistScreenState extends State<WatchlistScreen> {
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('选择股票'),
-          backgroundColor: const Color(0xFF16213e),
+          backgroundColor: _cardColor,
+          title: const Text('选择股票',
+              style: TextStyle(color: _textPrimary)),
           content: SizedBox(
             width: double.maxFinite,
             height: 300,
@@ -523,15 +806,18 @@ class WatchlistScreenState extends State<WatchlistScreen> {
               itemBuilder: (context, index) {
                 final stock = results[index];
                 return ListTile(
-                  title: Text(stock.name, style: const TextStyle(color: Colors.white)),
-                  subtitle: Text(stock.code, style: const TextStyle(color: Colors.grey)),
+                  title: Text(stock.name,
+                      style: const TextStyle(color: _textPrimary)),
+                  subtitle: Text(stock.code,
+                      style: const TextStyle(color: _textSecondary)),
                   onTap: () async {
                     await _dbService.addToWatchlist(stock.code, stock.name);
                     Navigator.pop(context);
                     _loadWatchlist();
                     _searchController.clear();
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('已添加 ${stock.name} 到自选股')),
+                      SnackBar(
+                          content: Text('已添加 ${stock.name} 到自选股')),
                     );
                   },
                 );
@@ -541,7 +827,8 @@ class WatchlistScreenState extends State<WatchlistScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
+              child: const Text('取消',
+                  style: TextStyle(color: _textSecondary)),
             ),
           ],
         ),

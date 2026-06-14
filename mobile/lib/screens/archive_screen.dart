@@ -125,7 +125,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     }
 
     showDialog(context: context, builder: (context) => Dialog(
-      backgroundColor: const Color(0xFF1a1a2e),
+      backgroundColor: const Color(0xFF0D1117),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -186,7 +186,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1a1a2e),
+        backgroundColor: const Color(0xFF0D1117),
         title: const Text('确认删除', style: TextStyle(color: Colors.white)),
         content: Text('确定要删除 ${record.name} 的留档记录吗？', style: const TextStyle(color: Colors.white70)),
         actions: [
@@ -205,7 +205,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1a1a2e),
+        backgroundColor: const Color(0xFF0D1117),
         title: const Text('一键删除', style: TextStyle(color: Colors.white)),
         content: Text('确定要删除全部 ${_archives.length} 条留档记录吗？此操作不可恢复。', style: const TextStyle(color: Colors.white70)),
         actions: [
@@ -281,7 +281,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
               margin: const EdgeInsets.fromLTRB(8, 8, 8, 4),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: const Color(0xFF0f3460),
+                color: const Color(0xFF161B22),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: Colors.orange.withOpacity(0.3)),
               ),
@@ -398,7 +398,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
               margin: const EdgeInsets.only(bottom: 6),
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFF0f3460),
+                color: const Color(0xFF161B22),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: recColor.withOpacity(0.3)),
               ),

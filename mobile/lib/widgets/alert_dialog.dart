@@ -72,7 +72,7 @@ class _AlertCreateDialogState extends State<AlertCreateDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: const Color(0xFF16213e),
+      backgroundColor: const Color(0xFF161B22),
       title: Text(
         isEditing ? '编辑提醒' : '新建提醒',
         style: const TextStyle(color: Colors.white),
@@ -118,7 +118,7 @@ class _AlertCreateDialogState extends State<AlertCreateDialog> {
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
               value: _alertType,
-              dropdownColor: const Color(0xFF0f3460),
+              dropdownColor: const Color(0xFF161B22),
               style: const TextStyle(color: Colors.white),
               decoration: const InputDecoration(
                 contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -164,7 +164,7 @@ class _AlertCreateDialogState extends State<AlertCreateDialog> {
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 value: _indicatorType,
-                dropdownColor: const Color(0xFF0f3460),
+                dropdownColor: const Color(0xFF161B22),
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
                   contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),

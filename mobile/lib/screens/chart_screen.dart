@@ -107,7 +107,7 @@ class _ChartScreenState extends State<ChartScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFef5350) : const Color(0xFF16213e),
+          color: isSelected ? const Color(0xFFef5350) : const Color(0xFF161B22),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Text(
@@ -139,7 +139,7 @@ class _ChartScreenState extends State<ChartScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isActive ? const Color(0xFF26a69a) : const Color(0xFF16213e),
+          color: isActive ? const Color(0xFF26a69a) : const Color(0xFF161B22),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: isActive ? const Color(0xFF26a69a) : Colors.white24),
         ),
@@ -542,7 +542,7 @@ Positioned.fill(
     if (_selectedKline == null) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        color: const Color(0xFF0f3460),
+        color: const Color(0xFF161B22),
         child: const Text('点击K线查看详情', style: TextStyle(color: Colors.grey, fontSize: 13)),
       );
     }
@@ -555,7 +555,7 @@ Positioned.fill(
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      color: const Color(0xFF0f3460),
+      color: const Color(0xFF161B22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

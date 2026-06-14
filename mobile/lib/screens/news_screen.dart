@@ -197,7 +197,7 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
           final item = news[index];
           return Card(
             margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-            color: const Color(0xFF16213e),
+            color: const Color(0xFF161B22),
             child: InkWell(
               onTap: () {
                 if (item.url.isNotEmpty) {
@@ -261,7 +261,7 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF16213e),
+          backgroundColor: const Color(0xFF161B22),
           title: const Text('资讯推送设置', style: TextStyle(color: Colors.white)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -296,7 +296,7 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
                       label: Text(min >= 60 ? '${min ~/ 60}小时' : '$min分钟'),
                       selected: selected,
                       selectedColor: Colors.amber.withOpacity(0.3),
-                      backgroundColor: const Color(0xFF0f3460),
+                      backgroundColor: const Color(0xFF161B22),
                       labelStyle: TextStyle(
                         color: selected ? Colors.amber : Colors.white70,
                         fontSize: 12,

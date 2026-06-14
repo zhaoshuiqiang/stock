@@ -18,7 +18,7 @@ class AnalysisResultCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF0f3460),
+        color: const Color(0xFF161B22),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -98,7 +98,7 @@ class AnalysisResultCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           child: LinearProgressIndicator(
             value: score / 10,
-            backgroundColor: const Color(0xFF16213e),
+            backgroundColor: const Color(0xFF161B22),
             valueColor: AlwaysStoppedAnimation<Color>(_getScoreColor(score)),
           ),
         ),
@@ -125,7 +125,7 @@ class AnalysisResultCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
                 child: LinearProgressIndicator(
                   value: confidence,
-                  backgroundColor: const Color(0xFF16213e),
+                  backgroundColor: const Color(0xFF161B22),
                   valueColor: AlwaysStoppedAnimation<Color>(color),
                 ),
               ),
@@ -169,7 +169,7 @@ class AnalysisResultCard extends StatelessWidget {
       margin: EdgeInsets.only(bottom: index < analysis.detailedReasons.length - 1 ? 8 : 0),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF16213e),
+        color: const Color(0xFF161B22),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
