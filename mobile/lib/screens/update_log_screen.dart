@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.19.2',
+        'date': '2026-06-14',
+        'changes': [
+          '优化评分体系：降低信号评分门槛(maxTotal 300→150)，强势股更容易达到买入/强烈买入',
+          '优化实时行情评分：上涨加分幅度提升2-3倍，更好反映强势行情',
+          '修复涨8%以上反而扣分的逻辑，改为加分(追高风险由风险等级体现)',
+        ],
+      },
+      {
         'version': 'v2.19.1',
         'date': '2026-06-14',
         'changes': [

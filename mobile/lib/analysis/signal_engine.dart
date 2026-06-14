@@ -294,7 +294,7 @@ AnalysisResult generateAnalysis(
     }
     sellStrength += strength;
   }
-  double maxTotal = 300.0;
+  double maxTotal = 150.0;
   // 对称基础分：0 为中性，范围[-3, 3]，映射到[0, 3]
   double signalRaw = (buyStrength - sellStrength) / maxTotal * 3;
   signalRaw = signalRaw.clamp(-3.0, 3.0);
@@ -407,37 +407,37 @@ AnalysisResult generateAnalysis(
     final changePct = quote.changePct;
     // 8档对称涨跌幅评分
     if (changePct > 8) {
-      realtimeScore -= 0.5;   // 追高风险大
+      realtimeScore += 1.5;   // 极强但追高风险大
     } else if (changePct > 5) {
-      realtimeScore += 0.5;   // 注意追高风险
+      realtimeScore += 2.0;   // 强势上涨
     } else if (changePct > 2) {
-      realtimeScore += 1.0;   // 强势上涨
+      realtimeScore += 2.5;   // 明显上涨
     } else if (changePct > 0) {
-      realtimeScore += 0.5;   // 温和上涨
+      realtimeScore += 1.5;   // 温和上涨
     } else if (changePct >= -2) {
       realtimeScore -= 0.5;   // 温和下跌
     } else if (changePct >= -5) {
-      // 正常回调，不加不减
+      realtimeScore += 0.5;   // 正常回调
     } else if (changePct >= -8) {
-      realtimeScore += 0.5;   // 超跌反弹机会
+      realtimeScore += 1.5;   // 超跌反弹机会
     } else {
-      realtimeScore += 0.8;   // 大幅超跌
+      realtimeScore += 2.0;   // 大幅超跌
     }
 
     if (quote.mainNetFlow != 0) {
       final rate = quote.mainNetFlowRate;
       if (rate > 10) {
-        realtimeScore += 1.0;
+        realtimeScore += 1.5;
       } else if (rate > 5) {
-        realtimeScore += 0.8;
+        realtimeScore += 1.0;
       } else if (rate > 0) {
-        realtimeScore += 0.4;
+        realtimeScore += 0.5;
       } else if (rate > -5) {
-        realtimeScore -= 0.4;
+        realtimeScore -= 0.5;
       } else if (rate > -10) {
-        realtimeScore -= 0.8;
-      } else {
         realtimeScore -= 1.0;
+      } else {
+        realtimeScore -= 1.5;
       }
     }
 
