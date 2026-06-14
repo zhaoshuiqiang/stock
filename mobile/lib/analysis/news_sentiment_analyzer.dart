@@ -102,14 +102,20 @@ class NewsSentimentAnalyzer {
     for (final entry in _positiveKeywords.entries) {
       if (title.contains(entry.key)) {
         positiveScore += entry.value;
-        if (matchedKeyword.isEmpty) matchedKeyword = entry.key;
+        // 高权重关键词覆盖低权重，确保代表性
+        if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _positiveKeywords)) {
+          matchedKeyword = entry.key;
+        }
       }
     }
 
     for (final entry in _negativeKeywords.entries) {
       if (title.contains(entry.key)) {
         negativeScore += entry.value;
-        if (matchedKeyword.isEmpty || entry.value > 2) matchedKeyword = entry.key;
+        // 高权重关键词覆盖低权重，确保代表性
+        if (entry.value > _currentKeywordWeight(matchedKeyword, _negativeKeywords)) {
+          matchedKeyword = entry.key;
+        }
       }
     }
 
@@ -127,4 +133,9 @@ class _TitleAnalysisResult {
   final String matchedKeyword;
 
   _TitleAnalysisResult({required this.score, required this.matchedKeyword});
+}
+
+/// 获取关键词在字典中的权重，未找到返回0
+int _currentKeywordWeight(String keyword, Map<String, int> dict) {
+  return dict[keyword] ?? 0;
 }

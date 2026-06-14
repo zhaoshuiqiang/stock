@@ -552,7 +552,7 @@ AnalysisResult generateAnalysis(
   final adjustedScore = (rawScore * marketAdjustment).clamp(0.0, 10.0);
 
   // 映射到10级整分（1-10）
-  final totalScore = (adjustedScore / 10.0 * 8 + 1).round().clamp(1, 10);
+  final totalScore = (adjustedScore / 10.0 * 9 + 1).round().clamp(1, 10);
 
   // ========== 10级推荐（7档） ==========
   String recommendation;
