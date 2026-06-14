@@ -9,7 +9,7 @@ import 'package:stock_analyzer/screens/alerts_screen.dart';
 import 'package:stock_analyzer/screens/update_log_screen.dart';
 import 'package:stock_analyzer/services/notification_service.dart';
 
-const String appVersion = 'v2.20.0';
+const String appVersion = 'v2.22.0';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +32,7 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   int _currentIndex = 0;
   final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
+  final GlobalKey<DiscoverScreenState> _discoverKey = GlobalKey<DiscoverScreenState>();
 
   void _onTabChanged(int index) {
     setState(() {
@@ -41,6 +42,10 @@ class _MyAppState extends State<MyApp> {
     if (index == 0) {
       _homeKey.currentState?.onTabVisible();
     }
+    // 切回发现时刷新自选状态
+    if (index == 2) {
+      _discoverKey.currentState?.onTabVisible();
+    }
   }
 
   @override
@@ -48,7 +53,7 @@ class _MyAppState extends State<MyApp> {
     final pages = [
       HomeScreen(key: _homeKey),
       const WatchlistScreen(),
-      const DiscoverScreen(),
+      DiscoverScreen(key: _discoverKey),
       const NewsScreen(),
       const ArchiveScreen(),
     ];
@@ -97,15 +102,6 @@ class _MyAppState extends State<MyApp> {
           actions: _currentIndex == 0
             ? [
                   IconButton(
-                    icon: const Icon(Icons.notifications_outlined),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const AlertsScreen()),
-                      );
-                    },
-                  ),
-                  IconButton(
                     icon: const Icon(Icons.info_outline),
                     onPressed: () {
                       Navigator.push(
@@ -115,7 +111,19 @@ class _MyAppState extends State<MyApp> {
                     },
                   ),
                 ]
-            : null,
+            : _currentIndex == 1
+                ? [
+                    IconButton(
+                      icon: const Icon(Icons.notifications_outlined),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const AlertsScreen()),
+                        );
+                      },
+                    ),
+                  ]
+                : null,
         ),
         body: pages[_currentIndex],
         bottomNavigationBar: BottomNavigationBar(

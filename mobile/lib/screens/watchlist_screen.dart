@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
+import '../analysis/opportunity_engine.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
+import '../widgets/capsule_tab_switcher.dart';
 import '../widgets/stock_card.dart';
 import 'quote_screen.dart';
+import 'alerts_screen.dart';
 
 class WatchlistScreen extends StatefulWidget {
   const WatchlistScreen({super.key});
@@ -15,28 +18,33 @@ class WatchlistScreen extends StatefulWidget {
 
 class WatchlistScreenState extends State<WatchlistScreen>
     with WidgetsBindingObserver {
+  int _currentTab = 0; // 0: 自选列表, 1: 自选分析
+
   final DatabaseService _dbService = DatabaseService();
   final ApiClient _apiClient = ApiClient();
   final TextEditingController _searchController = TextEditingController();
+
+  // ─── 自选列表状态 ──────────────────────────────────────────────
   List<WatchlistItem> _watchlist = [];
   List<QuoteData> _quotes = [];
   bool _isLoading = true;
-
-  // 排序相关状态
+  String _filterType = '全部'; // 全部/看多/看空/观望
   String _sortBy = 'default'; // 'default', 'change_pct'
   bool _sortAscending = false;
-
-  // 批量删除相关状态
   bool _isEditMode = false;
   Set<String> _selectedCodes = {};
-
-  // 筛选：全部/看多/看空/观望
-  String _filterType = '全部';
-
-  // 30秒自动刷新
   Timer? _refreshTimer;
 
-  // 颜色常量
+  // ─── 自选分析状态 ──────────────────────────────────────────────
+  final OpportunityEngine _oppEngine = OpportunityEngine.instance;
+  List<OpportunityResult> _oppResults = [];
+  bool _oppLoading = false;
+  String _oppFilter = '全部'; // 全部/看多/看空/观望
+  bool _oppEditMode = false;
+  final Set<String> _oppSelected = {};
+  StreamSubscription<OpportunityProgress>? _oppSub;
+
+  // ─── 颜色常量 ──────────────────────────────────────────────────
   static const Color _bgColor = Color(0xFF0D1117);
   static const Color _cardColor = Color(0xFF161B22);
   static const Color _accentColor = Color(0xFF58A6FF);
@@ -53,6 +61,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
     WidgetsBinding.instance.addObserver(this);
     _loadWatchlist();
     _startRefreshTimer();
+    _loadOppFromDb();
+
+    // 订阅自选分析进度
+    _oppSub = _oppEngine.progressStream.listen(_onOppProgress);
+    if (_oppEngine.latestProgress != null) {
+      _onOppProgress(_oppEngine.latestProgress!);
+    }
   }
 
   @override
@@ -60,6 +75,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     _searchController.dispose();
+    _oppSub?.cancel();
     super.dispose();
   }
 
@@ -73,6 +89,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
     }
   }
 
+  // ─── 自选列表：数据加载 ────────────────────────────────────────
+
   void _startRefreshTimer() {
     _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -85,9 +103,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     try {
       final codes =
           _watchlist.map((item) => _apiClient.addMarketPrefix(item.code)).toList();
-      final futures = codes.map((code) => _apiClient.getRealtimeQuote(code));
-      final results = await Future.wait(futures);
-      final quotes = results.where((q) => q != null).cast<QuoteData>().toList();
+      final quotes = await _apiClient.getBatchRealtimeQuotes(codes);
       if (mounted) {
         setState(() {
           _quotes = quotes;
@@ -97,35 +113,16 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   Future<void> _loadWatchlist() async {
-    setState(() {
-      _isLoading = true;
-    });
-
     try {
       final watchlist = await _dbService.getWatchlist();
-
-      if (watchlist.isEmpty) {
-        setState(() {
-          _watchlist = watchlist;
-          _quotes = [];
-        });
-      } else {
-        final codes = watchlist
-            .map((item) => _apiClient.addMarketPrefix(item.code))
-            .toList();
-        final futures = codes.map((code) => _apiClient.getRealtimeQuote(code));
-        final results = await Future.wait(futures);
-        final quotes =
-            results.where((q) => q != null).cast<QuoteData>().toList();
-
-        setState(() {
-          _watchlist = watchlist;
-          _quotes = quotes;
-        });
+      setState(() {
+        _watchlist = watchlist;
+        _isLoading = false;
+      });
+      if (watchlist.isNotEmpty) {
+        _refreshQuotes();
       }
     } catch (_) {
-      // ignore
-    } finally {
       setState(() {
         _isLoading = false;
       });
@@ -149,17 +146,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
     );
   }
 
-  void _toggleSort() {
-    setState(() {
-      if (_sortBy == 'change_pct') {
-        _sortAscending = !_sortAscending;
-      } else {
-        _sortBy = 'change_pct';
-        _sortAscending = false;
-      }
-    });
-  }
-
   List<Map<String, dynamic>> _getFilteredAndSortedWatchlist() {
     final items = <Map<String, dynamic>>[];
 
@@ -171,7 +157,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
         orElse: () => QuoteData.empty(),
       );
 
-      // 筛选
       if (_filterType == '看多' && quote.changePct <= 0) continue;
       if (_filterType == '看空' && quote.changePct >= 0) continue;
       if (_filterType == '观望' && quote.changePct != 0) continue;
@@ -183,7 +168,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
       });
     }
 
-    // 排序
     if (_sortBy == 'change_pct') {
       items.sort((a, b) {
         final changeA = a['quote'].changePct;
@@ -197,27 +181,245 @@ class WatchlistScreenState extends State<WatchlistScreen>
     return items;
   }
 
+  // ─── 自选分析：数据加载 ────────────────────────────────────────
+
+  Future<void> _loadOppFromDb() async {
+    final maps = await _dbService.getOpportunityResults();
+    if (mounted) {
+      setState(() {
+        _oppResults = maps.map((m) => OpportunityResult.fromMap(m)).toList();
+      });
+    }
+  }
+
+  void _onOppProgress(OpportunityProgress p) {
+    if (!mounted) return;
+    setState(() {
+      switch (p.status) {
+        case OpportunityStatus.fetching:
+        case OpportunityStatus.analyzing:
+        case OpportunityStatus.saving:
+          _oppLoading = true;
+          break;
+        case OpportunityStatus.complete:
+          _oppLoading = false;
+          if (p.results != null) {
+            _oppResults = p.results!;
+          }
+          break;
+        case OpportunityStatus.error:
+          _oppLoading = false;
+          break;
+        case OpportunityStatus.alreadyRunning:
+          _oppLoading = true;
+          break;
+        case OpportunityStatus.idle:
+          break;
+      }
+    });
+  }
+
+  List<OpportunityResult> get _filteredOppResults {
+    switch (_oppFilter) {
+      case '看多':
+        return _oppResults
+            .where((r) => r.recommendation.contains('买入') || r.recommendation.contains('强烈买入'))
+            .toList();
+      case '看空':
+        return _oppResults
+            .where((r) => r.recommendation.contains('卖出'))
+            .toList();
+      case '观望':
+        return _oppResults
+            .where((r) =>
+                !r.recommendation.contains('买入') &&
+                !r.recommendation.contains('卖出'))
+            .toList();
+      default:
+        return _oppResults;
+    }
+  }
+
+  // ─── 自选分析：归档 ────────────────────────────────────────────
+
+  Future<void> _archiveOppItem(OpportunityResult r) async {
+    final record = ArchiveRecord(
+      code: r.code,
+      name: r.name,
+      price: r.price,
+      changePct: r.changePct,
+      score: r.score,
+      recommendation: r.recommendation,
+      riskLevel: r.riskLevel,
+      buySignalCount: r.buySignalCount,
+      sellSignalCount: r.sellSignalCount,
+      activeStrategyCount: r.activeStrategyCount,
+      confluenceScore: r.confluenceScore,
+      tradeLevelsJson: r.tradeLevels != null ? r.tradeLevels.toString() : null,
+      topSignals: r.topSignals.join('  '),
+      archivedAt: DateTime.now(),
+    );
+    await _dbService.addArchive(record);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${r.name} 已归档'),
+          backgroundColor: _accentColor,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
+  Future<void> _batchArchiveOppItems() async {
+    final toArchive = _filteredOppResults;
+    if (toArchive.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('确认留档', style: TextStyle(color: _textPrimary)),
+        content: Text(
+          '确定要将 ${toArchive.length} 只股票的分析结果留档吗？',
+          style: const TextStyle(color: _textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消', style: TextStyle(color: _textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确认', style: TextStyle(color: _accentColor)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    for (final r in toArchive) {
+      final record = ArchiveRecord(
+        code: r.code,
+        name: r.name,
+        price: r.price,
+        changePct: r.changePct,
+        score: r.score,
+        recommendation: r.recommendation,
+        riskLevel: r.riskLevel,
+        buySignalCount: r.buySignalCount,
+        sellSignalCount: r.sellSignalCount,
+        activeStrategyCount: r.activeStrategyCount,
+        confluenceScore: r.confluenceScore,
+        tradeLevelsJson: r.tradeLevels != null ? r.tradeLevels.toString() : null,
+        topSignals: r.topSignals.join('  '),
+        archivedAt: DateTime.now(),
+      );
+      await _dbService.addArchive(record);
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已归档 ${toArchive.length} 只股票'),
+          backgroundColor: _accentColor,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
+  // ─── 自选分析：批量移出自选 ─────────────────────────────────────
+
+  Future<void> _batchRemoveFromWatchlist() async {
+    if (_oppSelected.isEmpty) return;
+    final removedCodes = Set<String>.from(_oppSelected);
+    await _dbService.batchRemoveFromWatchlist(removedCodes.toList());
+    setState(() {
+      _oppEditMode = false;
+      _oppSelected.clear();
+      _oppResults = _oppResults.where((r) => !removedCodes.contains(r.code)).toList();
+    });
+    _loadWatchlist();
+    _oppEngine.analyze();
+  }
+
+  // ─── 评分信息弹窗 ──────────────────────────────────────────────
+
+  void _showScoringInfo() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('评分说明', style: TextStyle(color: _textPrimary)),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _ScoringRow(label: '9-10', desc: '强烈买入，多指标共振'),
+            SizedBox(height: 6),
+            _ScoringRow(label: '7-8', desc: '买入，多数指标看多'),
+            SizedBox(height: 6),
+            _ScoringRow(label: '5-6', desc: '观望，多空分歧较大'),
+            SizedBox(height: 6),
+            _ScoringRow(label: '3-4', desc: '谨慎，偏空信号较多'),
+            SizedBox(height: 6),
+            _ScoringRow(label: '1-2', desc: '卖出，空方主导'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了', style: TextStyle(color: _accentColor)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Build ─────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Container(
       color: _bgColor,
-      child: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: _accentColor))
-          : Column(
-              children: [
-                _buildSearchBar(),
-                _buildFilterAndSortBar(),
-                Expanded(child: _buildList()),
-                if (_isEditMode) _buildEditBottomBar(),
-              ],
-            ),
+      child: Column(
+        children: [
+          // 子Tab切换器
+          CapsuleTabSwitcher(
+            tabs: const ['自选列表', '自选分析'],
+            currentIndex: _currentTab,
+            onTabChanged: (i) => setState(() => _currentTab = i),
+          ),
+          // 内容区
+          Expanded(
+            child: _currentTab == 0 ? _buildListTab() : _buildOppTab(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 自选列表 Tab
+  // ═══════════════════════════════════════════════════════════════
+
+  Widget _buildListTab() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(color: _accentColor));
+    }
+    return Column(
+      children: [
+        _buildSearchBar(),
+        _buildFilterAndSortBar(),
+        Expanded(child: _buildList()),
+        if (_isEditMode) _buildEditBottomBar(),
+      ],
     );
   }
 
   Widget _buildSearchBar() {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       decoration: BoxDecoration(
         color: _darkSurface,
         borderRadius: BorderRadius.circular(24),
@@ -239,106 +441,86 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   Widget _buildFilterAndSortBar() {
-    final filters = ['全部', '看多', '看空', '观望'];
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
       child: Row(
         children: [
-          // 筛选 Chips
+          // 筛选下拉框
+          const Text('筛选', style: TextStyle(color: _textSecondary, fontSize: 12)),
+          const SizedBox(width: 6),
           Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: filters.map((f) {
-                  final isSelected = _filterType == f;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: GestureDetector(
-                      onTap: () => setState(() => _filterType = f),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? _accentColor.withOpacity(0.15)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: isSelected
-                                ? _accentColor
-                                : _borderColor,
-                          ),
-                        ),
-                        child: Text(
-                          f,
-                          style: TextStyle(
-                            color: isSelected
-                                ? _accentColor
-                                : _textSecondary,
-                            fontSize: 13,
-                            fontWeight: isSelected
-                                ? FontWeight.w600
-                                : FontWeight.normal,
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: _darkSurface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _borderColor),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _filterType,
+                  isDense: true,
+                  iconEnabledColor: _textSecondary,
+                  dropdownColor: _darkSurface,
+                  style: const TextStyle(color: _textPrimary, fontSize: 13),
+                  items: ['全部', '看多', '看空', '观望'].map((f) {
+                    return DropdownMenuItem(value: f, child: Text(f));
+                  }).toList(),
+                  onChanged: (v) {
+                    if (v != null) setState(() => _filterType = v);
+                  },
+                ),
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          // 排序按钮
-          GestureDetector(
-            onTap: _toggleSort,
+          const SizedBox(width: 12),
+          // 排序下拉框
+          const Text('排序', style: TextStyle(color: _textSecondary, fontSize: 12)),
+          const SizedBox(width: 6),
+          Expanded(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(
-                color: _sortBy == 'change_pct'
-                    ? _accentColor.withOpacity(0.15)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
+                color: _sortBy != 'default'
+                    ? _accentColor.withOpacity(0.1)
+                    : _darkSurface,
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: _sortBy == 'change_pct'
-                      ? _accentColor
-                      : _borderColor,
+                  color: _sortBy != 'default' ? _accentColor : _borderColor,
                 ),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.sort,
-                    size: 16,
-                    color: _sortBy == 'change_pct'
-                        ? _accentColor
-                        : _textSecondary,
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _sortBy == 'change_pct'
+                      ? (_sortAscending ? '涨幅↑' : '涨幅↓')
+                      : '默认',
+                  isDense: true,
+                  iconEnabledColor: _sortBy != 'default' ? _accentColor : _textSecondary,
+                  dropdownColor: _darkSurface,
+                  style: TextStyle(
+                    color: _sortBy != 'default' ? _accentColor : _textPrimary,
+                    fontSize: 13,
                   ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _sortBy == 'change_pct' ? '涨跌幅' : '默认排序',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: _sortBy == 'change_pct'
-                          ? _accentColor
-                          : _textSecondary,
-                      fontWeight: _sortBy == 'change_pct'
-                          ? FontWeight.w600
-                          : FontWeight.normal,
-                    ),
-                  ),
-                  if (_sortBy == 'change_pct') ...[
-                    const SizedBox(width: 4),
-                    Icon(
-                      _sortAscending
-                          ? Icons.arrow_upward
-                          : Icons.arrow_downward,
-                      size: 14,
-                      color: _accentColor,
-                    ),
+                  items: const [
+                    DropdownMenuItem(value: '默认', child: Text('默认排序')),
+                    DropdownMenuItem(value: '涨幅↓', child: Text('涨幅降序')),
+                    DropdownMenuItem(value: '涨幅↑', child: Text('涨幅升序')),
                   ],
-                ],
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() {
+                      if (v == '默认') {
+                        _sortBy = 'default';
+                      } else if (v == '涨幅↓') {
+                        _sortBy = 'change_pct';
+                        _sortAscending = false;
+                      } else if (v == '涨幅↑') {
+                        _sortBy = 'change_pct';
+                        _sortAscending = true;
+                      }
+                    });
+                  },
+                ),
               ),
             ),
           ),
@@ -676,6 +858,325 @@ class WatchlistScreenState extends State<WatchlistScreen>
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // 自选分析 Tab
+  // ═══════════════════════════════════════════════════════════════
+
+  Widget _buildOppTab() {
+    final filtered = _filteredOppResults;
+    return Column(
+      children: [
+        _buildOppHeader(),
+        if (_oppLoading) _buildOppProgress(),
+        Expanded(
+          child: filtered.isEmpty
+              ? _buildEmptyState(
+                  icon: Icons.analytics_outlined,
+                  text: _oppResults.isEmpty ? '暂无自选分析数据' : '当前筛选无结果',
+                  actionText: _oppResults.isEmpty ? '开始分析' : null,
+                  onAction: _oppResults.isEmpty
+                      ? () => _oppEngine.analyze()
+                      : null,
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: filtered.length,
+                  itemBuilder: (_, i) => _buildOppCard(filtered[i], i + 1),
+                ),
+        ),
+        if (_oppEditMode) _buildOppEditBar(),
+      ],
+    );
+  }
+
+  Widget _buildOppHeader() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          // 筛选下拉框
+          const Text('筛选', style: TextStyle(color: _textSecondary, fontSize: 12)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: _darkSurface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _borderColor),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _oppFilter,
+                  isDense: true,
+                  iconEnabledColor: _textSecondary,
+                  dropdownColor: _darkSurface,
+                  style: const TextStyle(color: _textPrimary, fontSize: 13),
+                  items: ['全部', '看多', '看空', '观望'].map((f) {
+                    return DropdownMenuItem(value: f, child: Text(f));
+                  }).toList(),
+                  onChanged: (v) {
+                    if (v != null) setState(() => _oppFilter = v);
+                  },
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // 留档按钮
+          IconButton(
+            icon: const Icon(Icons.archive_outlined, color: _textSecondary, size: 20),
+            onPressed: _batchArchiveOppItems,
+            tooltip: '留档当前筛选',
+          ),
+          // 评分说明按钮
+          IconButton(
+            icon: const Icon(Icons.info_outline, color: _textSecondary, size: 20),
+            onPressed: _showScoringInfo,
+            tooltip: '评分说明',
+          ),
+          // 编辑模式切换
+          IconButton(
+            icon: Icon(
+              _oppEditMode ? Icons.check : Icons.edit_outlined,
+              color: _oppEditMode ? _accentColor : _textSecondary,
+              size: 20,
+            ),
+            onPressed: () {
+              setState(() {
+                _oppEditMode = !_oppEditMode;
+                if (!_oppEditMode) _oppSelected.clear();
+              });
+            },
+            tooltip: _oppEditMode ? '完成' : '编辑',
+          ),
+          // 刷新按钮
+          IconButton(
+            icon: const Icon(Icons.refresh, color: _textSecondary, size: 20),
+            onPressed: _oppLoading ? null : () => _oppEngine.analyze(),
+            tooltip: '刷新分析',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOppProgress() {
+    final p = _oppEngine.latestProgress;
+    final completed = p?.completedCount ?? 0;
+    final total = p?.totalCount ?? 1;
+    final progress = total > 0 ? completed / total : 0.0;
+    String statusText;
+    switch (p?.status) {
+      case OpportunityStatus.fetching:
+        statusText = '获取自选列表...';
+        break;
+      case OpportunityStatus.analyzing:
+        statusText = '分析中 $completed/$total';
+        break;
+      case OpportunityStatus.saving:
+        statusText = '保存结果...';
+        break;
+      default:
+        statusText = '处理中...';
+    }
+    return Column(
+      children: [
+        LinearProgressIndicator(
+          value: progress > 0 ? progress : null,
+          backgroundColor: _darkSurface,
+          valueColor: const AlwaysStoppedAnimation<Color>(_accentColor),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Text(
+            statusText,
+            style: const TextStyle(color: _textSecondary, fontSize: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOppCard(OpportunityResult r, int rank) {
+    final isSelected = _oppSelected.contains(r.code);
+
+    // 信号标签
+    final tags = <Widget>[];
+    for (final s in r.topSignals.take(3)) {
+      final isBuy = s.startsWith('▲');
+      tags.add(SignalTag(
+        text: s,
+        color: isBuy ? _upColor : _downColor,
+      ));
+    }
+    if (r.confluenceScore > 0) {
+      tags.add(SignalTag(
+        text: '共振${r.confluenceScore}',
+        color: _accentColor,
+      ));
+    }
+
+    // 操作按钮
+    final actions = <Widget>[];
+    if (!_oppEditMode) {
+      actions.addAll([
+        TextButton.icon(
+          icon: const Icon(Icons.archive_outlined, size: 16),
+          label: const Text('归档', style: TextStyle(fontSize: 12)),
+          onPressed: () => _archiveOppItem(r),
+          style: TextButton.styleFrom(
+            foregroundColor: _textSecondary,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+      ]);
+    }
+
+    return GestureDetector(
+      onTap: () {
+        if (_oppEditMode) {
+          setState(() {
+            if (isSelected) {
+              _oppSelected.remove(r.code);
+            } else {
+              _oppSelected.add(r.code);
+            }
+          });
+        } else {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => QuoteScreen(code: r.code, name: r.name),
+            ),
+          );
+        }
+      },
+      onLongPress: () {
+        if (!_oppEditMode) {
+          setState(() {
+            _oppEditMode = true;
+            _oppSelected.add(r.code);
+          });
+        }
+      },
+      child: Row(
+        children: [
+          if (_oppEditMode)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Checkbox(
+                value: isSelected,
+                onChanged: (v) {
+                  setState(() {
+                    if (v == true) {
+                      _oppSelected.add(r.code);
+                    } else {
+                      _oppSelected.remove(r.code);
+                    }
+                  });
+                },
+                activeColor: _accentColor,
+                checkColor: Colors.white,
+              ),
+            ),
+          Expanded(
+            child: StockCard(
+              name: r.name,
+              code: r.code,
+              price: r.price,
+              changePct: r.changePct,
+              score: r.score,
+              recommendation: r.recommendation,
+              riskLevel: r.riskLevel,
+              rank: rank,
+              tags: tags.isNotEmpty ? tags : null,
+              actions: actions.isNotEmpty ? actions : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOppEditBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: const BoxDecoration(
+        color: _cardColor,
+        border: Border(top: BorderSide(color: _borderColor)),
+      ),
+      child: Row(
+        children: [
+          Text(
+            '已选择 ${_oppSelected.length} 只',
+            style: const TextStyle(color: _textSecondary, fontSize: 14),
+          ),
+          const Spacer(),
+          TextButton(
+            onPressed: _oppSelected.isEmpty ? null : _batchRemoveFromWatchlist,
+            style: TextButton.styleFrom(
+              foregroundColor: _downColor,
+            ),
+            child: const Text('移出自选'),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _oppEditMode = false;
+                _oppSelected.clear();
+              });
+            },
+            child: const Text('取消', style: TextStyle(color: _textSecondary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 通用空状态
+  // ═══════════════════════════════════════════════════════════════
+
+  Widget _buildEmptyState({
+    required IconData icon,
+    required String text,
+    String? actionText,
+    VoidCallback? onAction,
+  }) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 48, color: _textSecondary.withOpacity(0.5)),
+          const SizedBox(height: 12),
+          Text(text, style: const TextStyle(color: _textSecondary, fontSize: 14)),
+          if (actionText != null && onAction != null) ...[
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: onAction,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _accentColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text(actionText),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 预警 & 搜索
+  // ═══════════════════════════════════════════════════════════════
+
   void _addAlert(String code, String name) {
     showDialog(
       context: context,
@@ -834,5 +1335,46 @@ class WatchlistScreenState extends State<WatchlistScreen>
         ),
       );
     }
+  }
+}
+
+// ─── 评分说明行组件 ──────────────────────────────────────────────────
+
+class _ScoringRow extends StatelessWidget {
+  final String label;
+  final String desc;
+
+  const _ScoringRow({required this.label, required this.desc});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 64,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: const Color(0xFF58A6FF).withOpacity(0.15),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF58A6FF),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            desc,
+            style: const TextStyle(color: Color(0xFF8B949E), fontSize: 13),
+          ),
+        ),
+      ],
+    );
   }
 }
