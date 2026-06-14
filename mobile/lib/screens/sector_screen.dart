@@ -39,7 +39,7 @@ class _SectorScreenState extends State<SectorScreen> {
         _stocks = stocks;
       });
     } catch (e) {
-      print('Load sector stocks failed: $e');
+      debugPrint('Load sector stocks failed: $e');
     } finally {
       setState(() {
         _isLoading = false;

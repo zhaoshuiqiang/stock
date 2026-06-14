@@ -562,6 +562,11 @@ class ApiClient {
 
     try {
       final result = await future;
+      // Validate kline data before returning
+      final klineValidation = DataValidator.validateKlines(result);
+      if (klineValidation.anomalies.isNotEmpty) {
+        result.removeWhere((k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
+      }
       return result;
     } finally {
       _inFlightRequests.remove(cacheKey);

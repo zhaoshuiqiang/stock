@@ -1,11 +1,41 @@
 class TradingSession {
+  /// A股调休日（周末补班日）- 这些日期虽然是周末但为交易日
+  /// 注意：节假日和调休日需要每年更新，请参考国务院发布的年度放假安排
+  static final Set<String> _makeupDays = {
+    // 2024年调休日
+    '2024-02-04', // 春节调休，周日上班
+    '2024-02-17', // 春节调休，周六上班
+    '2024-04-07', // 清明调休，周日上班
+    '2024-04-28', // 劳动节调休，周日上班
+    '2024-05-11', // 劳动节调休，周六上班
+    '2024-09-14', // 中秋/国庆调休，周六上班
+    '2024-09-29', // 国庆调休，周日上班
+    '2024-10-12', // 国庆调休，周六上班
+    // 2025年调休日
+    '2025-01-26', // 春节调休，周日上班
+    '2025-02-08', // 春节调休，周六上班
+    '2025-04-27', // 劳动节调休，周日上班
+    '2025-09-28', // 国庆调休，周日上班
+    '2025-10-11', // 国庆调休，周六上班
+    // 2026年调休日（待国务院发布后更新）
+    // '2026-02-14', // 春节调休示例
+    // '2026-02-15', // 春节调休示例
+  };
+
+  /// 检查日期是否为调休日（周末补班，视为交易日）
+  static bool _isMakeupDay(DateTime date) {
+    final key = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    return _makeupDays.contains(key);
+  }
+
   /// Check if current time is within A-share trading hours
   /// Trading hours: 9:30-11:30, 13:00-15:00 on weekdays
   static bool isInTradingSession() {
     final now = DateTime.now();
 
-    // Not trading on weekends
-    if (now.weekday == DateTime.saturday || now.weekday == DateTime.sunday) {
+    // Not trading on weekends (unless it's a makeup day)
+    if ((now.weekday == DateTime.saturday || now.weekday == DateTime.sunday) &&
+        !_isMakeupDay(now)) {
       return false;
     }
 
@@ -29,7 +59,11 @@ class TradingSession {
   }
 
   /// Check if a date is a Chinese A-share holiday
+  /// 注意：节假日和调休日需要每年更新，请参考国务院发布的年度放假安排
   static bool isHoliday(DateTime date) {
+    // 调休日（周末补班）不是假日，属于交易日
+    if (_isMakeupDay(date)) return false;
+
     final month = date.month;
     final day = date.day;
     final year = date.year;
@@ -64,7 +98,8 @@ class TradingSession {
   static String getSessionStatus() {
     final now = DateTime.now();
 
-    if (now.weekday == DateTime.saturday || now.weekday == DateTime.sunday) {
+    if ((now.weekday == DateTime.saturday || now.weekday == DateTime.sunday) &&
+        !_isMakeupDay(now)) {
       return '休市';
     }
 
@@ -96,7 +131,8 @@ class TradingSession {
   static bool isMarketClosed() {
     final now = DateTime.now();
 
-    if (now.weekday == DateTime.saturday || now.weekday == DateTime.sunday) {
+    if ((now.weekday == DateTime.saturday || now.weekday == DateTime.sunday) &&
+        !_isMakeupDay(now)) {
       return true;
     }
 

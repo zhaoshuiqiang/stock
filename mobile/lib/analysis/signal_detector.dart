@@ -53,12 +53,12 @@ class SignalDetector {
         confidence: _calculateKDJConfidence(last, prev),
         signalCount: 1,
       ));
-    } else if (last.k < last.d && prev.k >= prev.d && prev.k > 70) {
+    } else if (last.k < last.d && prev.k >= prev.d && prev.k > 50) {
       signals.add(SignalItem(
         type: 'sell',
         indicator: 'KDJ',
         signal: 'KDJ死叉',
-        description: 'K线下穿D线且K>70，短线见顶信号',
+        description: 'K线下穿D线，短线转弱信号',
         strength: 75,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -188,10 +188,10 @@ class SignalDetector {
         ));
       } else if (volRatio < 0.5 && last.close > prev.close) {
         signals.add(SignalItem(
-          type: 'buy',
+          type: 'sell',
           indicator: '量价',
           signal: '缩量上涨',
-          description: '量能萎缩，市场观望情绪浓厚',
+          description: '成交量萎缩至均量50%以下，上涨缺乏量能支撑，追高风险较大',
           strength: 45,
           timestamp: last.date,
           duration: SignalDuration.shortTerm,

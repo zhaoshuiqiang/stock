@@ -33,6 +33,13 @@ class NewsSentimentAnalyzer {
     '停牌': 1, '被查': 3, '立案': 3,
   };
 
+  // 否定词列表：出现这些词且紧邻关键词时，该关键词应反转
+  // 仅使用多字否定词，避免单字词误匹配（如"不断"中的"不"）
+  static const List<String> _negationWords = [
+    '未及', '不及', '低于', '差于', '没有', '未能', '不再', '不会',
+    '并非', '并非是', '不是', '无望', '难以',
+  ];
+
   /// 分析新闻列表的情绪
   /// newsList: 新闻列表，每条需包含 'title' 字段
   static NewsSentiment analyze(List<dynamic> newsList) {
@@ -100,21 +107,39 @@ class NewsSentimentAnalyzer {
     String matchedKeyword = '';
 
     for (final entry in _positiveKeywords.entries) {
-      if (title.contains(entry.key)) {
-        positiveScore += entry.value;
-        // 高权重关键词覆盖低权重，确保代表性
-        if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _positiveKeywords)) {
-          matchedKeyword = entry.key;
+      final idx = title.indexOf(entry.key);
+      if (idx >= 0) {
+        // 检查关键词前面2个字符内是否有否定词紧邻
+        final isNegated = _isNegatedBefore(title, idx);
+        if (isNegated) {
+          negativeScore += entry.value;
+          if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _negativeKeywords)) {
+            matchedKeyword = '未${entry.key}';
+          }
+        } else {
+          positiveScore += entry.value;
+          if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _positiveKeywords)) {
+            matchedKeyword = entry.key;
+          }
         }
       }
     }
 
     for (final entry in _negativeKeywords.entries) {
-      if (title.contains(entry.key)) {
-        negativeScore += entry.value;
-        // 高权重关键词覆盖低权重，确保代表性
-        if (entry.value > _currentKeywordWeight(matchedKeyword, _negativeKeywords)) {
-          matchedKeyword = entry.key;
+      final idx = title.indexOf(entry.key);
+      if (idx >= 0) {
+        // 检查关键词前面2个字符内是否有否定词紧邻
+        final isNegated = _isNegatedBefore(title, idx);
+        if (isNegated) {
+          positiveScore += entry.value;
+          if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _positiveKeywords)) {
+            matchedKeyword = '未${entry.key}';
+          }
+        } else {
+          negativeScore += entry.value;
+          if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _negativeKeywords)) {
+            matchedKeyword = entry.key;
+          }
         }
       }
     }
@@ -125,6 +150,20 @@ class NewsSentimentAnalyzer {
       score: netScore.clamp(-5.0, 5.0),
       matchedKeyword: matchedKeyword,
     );
+  }
+
+  /// 检查关键词位置前面是否有否定词紧邻（前4个字符范围内）
+  /// 避免全局匹配导致误反转，如"不断突破新高"中的"不"不应反转"突破"
+  static bool _isNegatedBefore(String title, int keywordIndex) {
+    // 取关键词前面的文本（最多取4个字符用于匹配多字否定词）
+    final prefixStart = keywordIndex > 4 ? keywordIndex - 4 : 0;
+    final prefix = title.substring(prefixStart, keywordIndex);
+    for (final negWord in _negationWords) {
+      if (prefix.endsWith(negWord)) {
+        return true;
+      }
+    }
+    return false;
   }
 }
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
@@ -17,6 +19,7 @@ class SearchScreenState extends State<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
   List<StockInfo> _results = [];
   bool _isLoading = false;
+  Timer? _debounceTimer;
 
   Future<void> _search(String keyword) async {
     if (keyword.isEmpty) {
@@ -36,7 +39,7 @@ class SearchScreenState extends State<SearchScreen> {
         _results = results;
       });
     } catch (e) {
-      print('Search failed: $e');
+      debugPrint('Search failed: $e');
     } finally {
       setState(() {
         _isLoading = false;
@@ -46,6 +49,19 @@ class SearchScreenState extends State<SearchScreen> {
 
   void _onSearch() {
     _search(_controller.text);
+  }
+
+  void _onSearchChanged(String query) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      _search(query);
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    super.dispose();
   }
 
   void _onStockTap(StockInfo stock) {
@@ -94,6 +110,7 @@ class SearchScreenState extends State<SearchScreen> {
                       fillColor: theme.cardColor,
                     ),
                     onSubmitted: (_) => _onSearch(),
+                    onChanged: _onSearchChanged,
                   ),
                 ),
                 const SizedBox(width: 8),

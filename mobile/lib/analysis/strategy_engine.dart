@@ -110,13 +110,11 @@ List<TradingStrategy> evaluateStrategies(List<HistoryKline> data, List<SignalIte
   // 冲突检测：短线与长线策略方向矛盾时生成警告
   final activeShortStrategies = strategies.where((s) => s.isActive && s.strategyType == 'short').toList();
   final activeLongStrategies = strategies.where((s) => s.isActive && s.strategyType == 'long').toList();
-  // 基于信号判断多空方向
+  // 基于信号判断多空方向：买卖信号同时存在时视为冲突
   final buySignals = signals.where((s) => s.type == 'buy').length;
   final sellSignals = signals.where((s) => s.type == 'sell').length;
-  final hasBullBias = buySignals > sellSignals;
-  final hasBearBias = sellSignals > buySignals;
 
-  if (activeShortStrategies.isNotEmpty && activeLongStrategies.isNotEmpty && hasBullBias && hasBearBias) {
+  if (activeShortStrategies.isNotEmpty && activeLongStrategies.isNotEmpty && buySignals > 0 && sellSignals > 0) {
     strategies.add(TradingStrategy(
       id: 'conflict_warning',
       name: '策略冲突警告',

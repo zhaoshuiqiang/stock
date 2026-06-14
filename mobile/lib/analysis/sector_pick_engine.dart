@@ -36,7 +36,7 @@ class SectorPickEngine {
   final DatabaseService _dbService;
   bool _isRunning = false;
 
-  final StreamController<SectorPickProgress> _progressController =
+  StreamController<SectorPickProgress> _progressController =
       StreamController<SectorPickProgress>.broadcast();
 
   SectorPickEngine._()
@@ -44,7 +44,20 @@ class SectorPickEngine {
         _dbService = DatabaseService();
 
   bool get isRunning => _isRunning;
-  Stream<SectorPickProgress> get progressStream => _progressController.stream;
+  Stream<SectorPickProgress> get progressStream => _ensureController().stream;
+
+  /// 释放资源并重置内部状态，允许单例后续继续使用
+  void dispose() {
+    _progressController.close();
+  }
+
+  /// 获取或重建 StreamController（dispose后自动重建）
+  StreamController<SectorPickProgress> _ensureController() {
+    if (_progressController.isClosed) {
+      _progressController = StreamController<SectorPickProgress>.broadcast();
+    }
+    return _progressController;
+  }
 
   SectorPickProgress? _latestProgress;
   SectorPickProgress? get latestProgress => _latestProgress;
@@ -155,6 +168,6 @@ class SectorPickEngine {
 
   void _emit(SectorPickProgress progress) {
     _latestProgress = progress;
-    _progressController.add(progress);
+    _ensureController().add(progress);
   }
 }

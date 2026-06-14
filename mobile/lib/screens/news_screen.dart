@@ -80,7 +80,7 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
         _isLoading = false;
       });
     } catch (e) {
-      print('Load news error: $e');
+      debugPrint('Load news error: $e');
       setState(() { _isLoading = false; });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -106,7 +106,7 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
           'source': n['source'] ?? '',
         }).toList();
       } catch (e) {
-        print('Load stock news failed for ${item.name}: $e');
+        debugPrint('Load stock news failed for ${item.name}: $e');
         return <Map<String, String>>[];
       }
     });

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:charset_converter/charset_converter.dart';
@@ -7,12 +6,19 @@ import '../models/stock_models.dart';
 
 /// 市场环境提供者
 class MarketContextProvider {
-  static const String _hotSinaUrl = 'https://hq.sinajs.cn/list=s_sh000001,s_sz399001';
+  static const String _fullSinaUrl = 'https://hq.sinajs.cn/list=sh000001,sz399001';
   static const String _hotEastMoneyUrl = 'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141';
+
+  static http.Client? _httpClient;
+
+  static http.Client _getClient() {
+    _httpClient ??= http.Client();
+    return _httpClient!;
+  }
 
   /// 获取市场环境（优先使用新浪，备用东方财富）
   static Future<MarketContext> getMarketContext() async {
-    // 先尝试新浪API
+    // 先尝试新浪完整行情API
     final sinaContext = await _fetchFromSina();
     if (sinaContext != null) {
       return sinaContext;
@@ -40,7 +46,8 @@ class MarketContextProvider {
   /// 从新浪获取市场环境
   static Future<MarketContext?> _fetchFromSina() async {
     try {
-      final url = Uri.parse(_hotSinaUrl);
+      // 使用完整行情格式获取指数数据（非简化格式）
+      final url = Uri.parse(_fullSinaUrl);
       final response = await _httpGet(url, headers: {
         'Referer': 'https://finance.sina.com.cn',
       }, retries: 2);
@@ -51,30 +58,33 @@ class MarketContextProvider {
 
         double shIndexPct = 0;
         double szIndexPct = 0;
-        int upCount = 0;
-        int downCount = 0;
-        double avgChangePct = 0;
 
         for (final line in lines) {
           if (line.isEmpty) continue;
 
-          if (line.startsWith('var hq_str_s_sh000001')) {
+          // 完整行情格式：var hq_str_sh000001="..."
+          if (line.startsWith('var hq_str_sh000001') || line.startsWith('var hq_str_s_sh000001')) {
             final start = line.indexOf('"') + 1;
             final end = line.lastIndexOf('"');
             if (start >= 0 && end > start) {
               final dataStr = line.substring(start, end);
               final parts = dataStr.split(',');
 
+              // 完整行情格式(32+字段): 昨收=parts[2], 现价=parts[3]
+              // 简化行情格式(~8字段): 名称,价格,涨跌额,涨跌幅,成交量,成交额,...
               if (parts.length >= 32) {
-                final preClose = QuoteData.parseDouble(parts[1]);
-                final currentPrice = QuoteData.parseDouble(parts[2]);
-
+                // 完整行情格式
+                final preClose = QuoteData.parseDouble(parts[2]);
+                final currentPrice = QuoteData.parseDouble(parts[3]);
                 if (preClose > 0) {
                   shIndexPct = ((currentPrice - preClose) / preClose) * 100;
                 }
+              } else if (parts.length >= 4) {
+                // 简化行情格式: 名称,价格,涨跌额,涨跌幅,...
+                shIndexPct = QuoteData.parseDouble(parts[3]);
               }
             }
-          } else if (line.startsWith('var hq_str_s_sz399001')) {
+          } else if (line.startsWith('var hq_str_sz399001') || line.startsWith('var hq_str_s_sz399001')) {
             final start = line.indexOf('"') + 1;
             final end = line.lastIndexOf('"');
             if (start >= 0 && end > start) {
@@ -82,18 +92,22 @@ class MarketContextProvider {
               final parts = dataStr.split(',');
 
               if (parts.length >= 32) {
-                final preClose = QuoteData.parseDouble(parts[1]);
-                final currentPrice = QuoteData.parseDouble(parts[2]);
-
+                final preClose = QuoteData.parseDouble(parts[2]);
+                final currentPrice = QuoteData.parseDouble(parts[3]);
                 if (preClose > 0) {
                   szIndexPct = ((currentPrice - preClose) / preClose) * 100;
                 }
+              } else if (parts.length >= 4) {
+                szIndexPct = QuoteData.parseDouble(parts[3]);
               }
             }
           }
         }
 
-        // 从东方财富获取涨跌家数
+        // 从东方财富获取涨跌家数（新浪不提供此数据）
+        int upCount = 0;
+        int downCount = 0;
+        double avgChangePct = 0;
         final eastMoney = await _fetchFromEastMoney();
         if (eastMoney != null) {
           upCount = eastMoney.upCount;
@@ -188,7 +202,7 @@ class MarketContextProvider {
   static Future<http.Response?> _httpGet(Uri url, {Map<String, String>? headers, int retries = 2}) async {
     for (var attempt = 0; attempt < retries; attempt++) {
       try {
-        final response = await http.Client().get(url, headers: headers ?? {}).timeout(const Duration(seconds: 15));
+        final response = await _getClient().get(url, headers: headers ?? {}).timeout(const Duration(seconds: 15));
         if (response.statusCode == 200) return response;
       } catch (e) {
         debugPrint('HTTP attempt ${attempt + 1}/$retries failed: ${url.host}${url.path} - $e');

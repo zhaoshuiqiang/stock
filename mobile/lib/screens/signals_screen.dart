@@ -66,7 +66,7 @@ class SignalsScreenState extends State<SignalsScreen> {
         _analysis = analysis;
       });
     } catch (e) {
-      print('Load analysis failed: $e');
+      debugPrint('Load analysis failed: $e');
     } finally {
       setState(() {
         _isLoading = false;

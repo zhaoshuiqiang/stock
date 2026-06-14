@@ -119,7 +119,7 @@ class OpportunityEngine {
   final DatabaseService _dbService;
   bool _isRunning = false;
 
-  final StreamController<OpportunityProgress> _progressController =
+  StreamController<OpportunityProgress> _progressController =
       StreamController<OpportunityProgress>.broadcast();
 
   OpportunityEngine._()
@@ -127,7 +127,20 @@ class OpportunityEngine {
         _dbService = DatabaseService();
 
   bool get isRunning => _isRunning;
-  Stream<OpportunityProgress> get progressStream => _progressController.stream;
+  Stream<OpportunityProgress> get progressStream => _ensureController().stream;
+
+  /// 释放资源并重置内部状态，允许单例后续继续使用
+  void dispose() {
+    _progressController.close();
+  }
+
+  /// 获取或重建 StreamController（dispose后自动重建）
+  StreamController<OpportunityProgress> _ensureController() {
+    if (_progressController.isClosed) {
+      _progressController = StreamController<OpportunityProgress>.broadcast();
+    }
+    return _progressController;
+  }
 
   OpportunityProgress? _latestProgress;
   OpportunityProgress? get latestProgress => _latestProgress;
@@ -264,6 +277,6 @@ class OpportunityEngine {
 
   void _emit(OpportunityProgress progress) {
     _latestProgress = progress;
-    _progressController.add(progress);
+    _ensureController().add(progress);
   }
 }

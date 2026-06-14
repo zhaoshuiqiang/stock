@@ -418,7 +418,10 @@ class BacktestEngine {
     final losses = tradeReturns.where((r) => r < 0).toList();
     final double avgWinPct = wins.isNotEmpty ? wins.reduce((a, b) => a + b) / wins.length.toDouble() * 100 : 0;
     final double avgLossPct = losses.isNotEmpty ? losses.reduce((a, b) => a + b) / losses.length.toDouble() * 100 : 0;
-    final double profitFactor = losses.isNotEmpty ? (wins.isNotEmpty ? wins.reduce((a, b) => a + b) : 0) / losses.map((l) => l.abs()).reduce((a, b) => a + b) : 0;
+    // 全胜时盈亏比无意义（分母为0），用999.99表示极大值，避免UI层toStringAsFixed崩溃
+    final double profitFactor = losses.isNotEmpty
+        ? (wins.isNotEmpty ? wins.reduce((a, b) => a + b) : 0) / losses.map((l) => l.abs()).reduce((a, b) => a + b)
+        : (wins.isNotEmpty ? 999.99 : 0);
 
     return BacktestResult(
       totalSignals: totalSignals,

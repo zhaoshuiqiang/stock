@@ -18,7 +18,7 @@ class ExploreEngine {
   final DatabaseService _dbService;
   bool _isRunning = false;
 
-  final StreamController<ExploreProgress> _progressController =
+  StreamController<ExploreProgress> _progressController =
       StreamController<ExploreProgress>.broadcast();
 
   ExploreEngine._()
@@ -28,7 +28,20 @@ class ExploreEngine {
   bool get isRunning => _isRunning;
 
   /// 进度广播流，切换Tab后重新订阅可获取最新进度
-  Stream<ExploreProgress> get progressStream => _progressController.stream;
+  Stream<ExploreProgress> get progressStream => _ensureController().stream;
+
+  /// 释放资源并重置内部状态，允许单例后续继续使用
+  void dispose() {
+    _progressController.close();
+  }
+
+  /// 获取或重建 StreamController（dispose后自动重建）
+  StreamController<ExploreProgress> _ensureController() {
+    if (_progressController.isClosed) {
+      _progressController = StreamController<ExploreProgress>.broadcast();
+    }
+    return _progressController;
+  }
 
   /// 最新进度快照，切换Tab回来后恢复状态
   ExploreProgress? _latestProgress;
@@ -156,7 +169,7 @@ class ExploreEngine {
 
   void _emit(ExploreProgress progress) {
     _latestProgress = progress;
-    _progressController.add(progress);
+    _ensureController().add(progress);
   }
 
   /// 分析单只股票，返回 ExploreResult 或 null（不满足条件）

@@ -4,7 +4,6 @@ import '../api/api_client.dart';
 import '../analysis/opportunity_engine.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
-import '../widgets/capsule_tab_switcher.dart';
 import '../widgets/stock_card.dart';
 import 'quote_screen.dart';
 import 'alerts_screen.dart';
@@ -18,8 +17,6 @@ class WatchlistScreen extends StatefulWidget {
 
 class WatchlistScreenState extends State<WatchlistScreen>
     with WidgetsBindingObserver {
-  int _currentTab = 0; // 0: 自选列表, 1: 自选分析
-
   final DatabaseService _dbService = DatabaseService();
   final ApiClient _apiClient = ApiClient();
   final TextEditingController _searchController = TextEditingController();
@@ -28,8 +25,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
   List<WatchlistItem> _watchlist = [];
   List<QuoteData> _quotes = [];
   bool _isLoading = true;
-  String _filterType = '全部'; // 全部/看多/看空/观望
-  String _sortBy = 'default'; // 'default', 'change_pct'
+  String _filterType = '全部'; // 全部/强烈买入/买入/谨慎买入/偏多观望/偏空观望/谨慎卖出/卖出/强烈卖出
+  String _sortBy = 'default'; // 'default', 'change_pct', 'score'
   bool _sortAscending = false;
   bool _isEditMode = false;
   Set<String> _selectedCodes = {};
@@ -39,10 +36,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
   final OpportunityEngine _oppEngine = OpportunityEngine.instance;
   List<OpportunityResult> _oppResults = [];
   bool _oppLoading = false;
-  String _oppFilter = '全部'; // 全部/看多/看空/观望
-  bool _oppEditMode = false;
-  final Set<String> _oppSelected = {};
   StreamSubscription<OpportunityProgress>? _oppSub;
+  // 分析结果索引，O(1) 查找
+  Map<String, OpportunityResult> _oppMap = {};
 
   // ─── 颜色常量 ──────────────────────────────────────────────────
   static const Color _bgColor = Color(0xFF0D1117);
@@ -146,7 +142,25 @@ class WatchlistScreenState extends State<WatchlistScreen>
     );
   }
 
-  List<Map<String, dynamic>> _getFilteredAndSortedWatchlist() {
+  // ─── 合并数据：自选列表 + 自选分析 ─────────────────────────────
+
+  /// 重建分析结果索引
+  void _rebuildOppMap() {
+    _oppMap = {for (final r in _oppResults) r.code: r};
+  }
+
+  /// 判断股票的筛选分类（优先使用分析推荐，否则用涨跌幅）
+  String _classifyStock(QuoteData quote, OpportunityResult? opp) {
+    if (opp != null && opp.recommendation.isNotEmpty) {
+      return opp.recommendation;
+    }
+    // 无分析数据或推荐为空时用涨跌幅
+    if (quote.changePct > 0) return '偏多观望';
+    if (quote.changePct < 0) return '偏空观望';
+    return '偏空观望';
+  }
+
+  List<Map<String, dynamic>> _getFilteredAndSortedItems() {
     final items = <Map<String, dynamic>>[];
 
     for (var i = 0; i < _watchlist.length; i++) {
@@ -156,25 +170,37 @@ class WatchlistScreenState extends State<WatchlistScreen>
         (q) => q.code == codeWithPrefix,
         orElse: () => QuoteData.empty(),
       );
+      final opp = _oppMap[item.code];
+      final category = _classifyStock(quote, opp);
 
-      if (_filterType == '看多' && quote.changePct <= 0) continue;
-      if (_filterType == '看空' && quote.changePct >= 0) continue;
-      if (_filterType == '观望' && quote.changePct != 0) continue;
+      // 筛选
+      if (_filterType != '全部' && category != _filterType) continue;
 
       items.add({
         'item': item,
         'quote': quote,
         'codeWithPrefix': codeWithPrefix,
+        'opp': opp,
+        'category': category,
       });
     }
 
+    // 排序
     if (_sortBy == 'change_pct') {
       items.sort((a, b) {
-        final changeA = a['quote'].changePct;
-        final changeB = b['quote'].changePct;
+        final changeA = (a['quote'] as QuoteData).changePct;
+        final changeB = (b['quote'] as QuoteData).changePct;
         return _sortAscending
             ? changeA.compareTo(changeB)
             : changeB.compareTo(changeA);
+      });
+    } else if (_sortBy == 'score') {
+      items.sort((a, b) {
+        final scoreA = (a['opp'] as OpportunityResult?)?.score ?? 0;
+        final scoreB = (b['opp'] as OpportunityResult?)?.score ?? 0;
+        return _sortAscending
+            ? scoreA.compareTo(scoreB)
+            : scoreB.compareTo(scoreA);
       });
     }
 
@@ -188,6 +214,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     if (mounted) {
       setState(() {
         _oppResults = maps.map((m) => OpportunityResult.fromMap(m)).toList();
+        _rebuildOppMap();
       });
     }
   }
@@ -205,6 +232,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
           _oppLoading = false;
           if (p.results != null) {
             _oppResults = p.results!;
+            _rebuildOppMap();
           }
           break;
         case OpportunityStatus.error:
@@ -217,27 +245,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
           break;
       }
     });
-  }
-
-  List<OpportunityResult> get _filteredOppResults {
-    switch (_oppFilter) {
-      case '看多':
-        return _oppResults
-            .where((r) => r.recommendation.contains('买入') || r.recommendation.contains('强烈买入'))
-            .toList();
-      case '看空':
-        return _oppResults
-            .where((r) => r.recommendation.contains('卖出'))
-            .toList();
-      case '观望':
-        return _oppResults
-            .where((r) =>
-                !r.recommendation.contains('买入') &&
-                !r.recommendation.contains('卖出'))
-            .toList();
-      default:
-        return _oppResults;
-    }
   }
 
   // ─── 自选分析：归档 ────────────────────────────────────────────
@@ -271,8 +278,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
     }
   }
 
-  Future<void> _batchArchiveOppItems() async {
-    final toArchive = _filteredOppResults;
+  Future<void> _batchArchiveSelected() async {
+    if (_selectedCodes.isEmpty) return;
+    final toArchive = _oppResults.where((r) => _selectedCodes.contains(r.code)).toList();
     if (toArchive.isEmpty) return;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -327,19 +335,77 @@ class WatchlistScreenState extends State<WatchlistScreen>
     }
   }
 
-  // ─── 自选分析：批量移出自选 ─────────────────────────────────────
+  // ─── 批量移出自选 ──────────────────────────────────────────────
 
   Future<void> _batchRemoveFromWatchlist() async {
-    if (_oppSelected.isEmpty) return;
-    final removedCodes = Set<String>.from(_oppSelected);
+    if (_selectedCodes.isEmpty) return;
+    final removedCodes = Set<String>.from(_selectedCodes);
     await _dbService.batchRemoveFromWatchlist(removedCodes.toList());
     setState(() {
-      _oppEditMode = false;
-      _oppSelected.clear();
+      _isEditMode = false;
+      _selectedCodes.clear();
       _oppResults = _oppResults.where((r) => !removedCodes.contains(r.code)).toList();
+      _rebuildOppMap();
     });
     _loadWatchlist();
     _oppEngine.analyze();
+  }
+
+  // ─── 一键归档 ──────────────────────────────────────────────────
+
+  Future<void> _oneClickArchive() async {
+    if (_oppResults.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('一键归档', style: TextStyle(color: _textPrimary)),
+        content: Text(
+          '确定要将全部 ${_oppResults.length} 只股票的分析结果归档吗？',
+          style: const TextStyle(color: _textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消', style: TextStyle(color: _textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确认', style: TextStyle(color: _accentColor)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    for (final r in _oppResults) {
+      final record = ArchiveRecord(
+        code: r.code,
+        name: r.name,
+        price: r.price,
+        changePct: r.changePct,
+        score: r.score,
+        recommendation: r.recommendation,
+        riskLevel: r.riskLevel,
+        buySignalCount: r.buySignalCount,
+        sellSignalCount: r.sellSignalCount,
+        activeStrategyCount: r.activeStrategyCount,
+        confluenceScore: r.confluenceScore,
+        tradeLevelsJson: r.tradeLevels != null ? r.tradeLevels.toString() : null,
+        topSignals: r.topSignals.join('  '),
+        archivedAt: DateTime.now(),
+      );
+      await _dbService.addArchive(record);
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已归档 ${_oppResults.length} 只股票'),
+          backgroundColor: _accentColor,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
   }
 
   // ─── 评分信息弹窗 ──────────────────────────────────────────────
@@ -380,46 +446,31 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Container(
+        color: _bgColor,
+        child: const Center(child: CircularProgressIndicator(color: _accentColor)),
+      );
+    }
     return Container(
       color: _bgColor,
       child: Column(
         children: [
-          // 子Tab切换器
-          CapsuleTabSwitcher(
-            tabs: const ['自选列表', '自选分析'],
-            currentIndex: _currentTab,
-            onTabChanged: (i) => setState(() => _currentTab = i),
-          ),
-          // 内容区
-          Expanded(
-            child: _currentTab == 0 ? _buildListTab() : _buildOppTab(),
-          ),
+          _buildSearchBar(),
+          _buildControlBar(),
+          if (_oppLoading) _buildOppProgress(),
+          Expanded(child: _buildList()),
+          if (_isEditMode) _buildEditBottomBar(),
         ],
       ),
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // 自选列表 Tab
-  // ═══════════════════════════════════════════════════════════════
-
-  Widget _buildListTab() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: _accentColor));
-    }
-    return Column(
-      children: [
-        _buildSearchBar(),
-        _buildFilterAndSortBar(),
-        Expanded(child: _buildList()),
-        if (_isEditMode) _buildEditBottomBar(),
-      ],
-    );
-  }
+  // ─── 搜索栏 ────────────────────────────────────────────────────
 
   Widget _buildSearchBar() {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       decoration: BoxDecoration(
         color: _darkSurface,
         borderRadius: BorderRadius.circular(24),
@@ -440,32 +491,49 @@ class WatchlistScreenState extends State<WatchlistScreen>
     );
   }
 
-  Widget _buildFilterAndSortBar() {
+  // ─── 控制栏：筛选 + 排序 + 分析操作 ────────────────────────────
+
+  Widget _buildControlBar() {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
       child: Row(
         children: [
           // 筛选下拉框
           const Text('筛选', style: TextStyle(color: _textSecondary, fontSize: 12)),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           Expanded(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
-                color: _darkSurface,
+                color: _filterType != '全部'
+                    ? _accentColor.withOpacity(0.1)
+                    : _darkSurface,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: _borderColor),
+                border: Border.all(
+                  color: _filterType != '全部' ? _accentColor : _borderColor,
+                ),
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   value: _filterType,
                   isDense: true,
-                  iconEnabledColor: _textSecondary,
+                  iconEnabledColor: _filterType != '全部' ? _accentColor : _textSecondary,
                   dropdownColor: _darkSurface,
-                  style: const TextStyle(color: _textPrimary, fontSize: 13),
-                  items: ['全部', '看多', '看空', '观望'].map((f) {
-                    return DropdownMenuItem(value: f, child: Text(f));
-                  }).toList(),
+                  style: TextStyle(
+                    color: _filterType != '全部' ? _accentColor : _textPrimary,
+                    fontSize: 13,
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: '全部', child: Text('全部')),
+                    DropdownMenuItem(value: '强烈买入', child: Text('强烈买入')),
+                    DropdownMenuItem(value: '买入', child: Text('买入')),
+                    DropdownMenuItem(value: '谨慎买入', child: Text('谨慎买入')),
+                    DropdownMenuItem(value: '偏多观望', child: Text('偏多观望')),
+                    DropdownMenuItem(value: '偏空观望', child: Text('偏空观望')),
+                    DropdownMenuItem(value: '谨慎卖出', child: Text('谨慎卖出')),
+                    DropdownMenuItem(value: '卖出', child: Text('卖出')),
+                    DropdownMenuItem(value: '强烈卖出', child: Text('强烈卖出')),
+                  ],
                   onChanged: (v) {
                     if (v != null) setState(() => _filterType = v);
                   },
@@ -473,13 +541,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
               ),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
           // 排序下拉框
           const Text('排序', style: TextStyle(color: _textSecondary, fontSize: 12)),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           Expanded(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
                 color: _sortBy != 'default'
                     ? _accentColor.withOpacity(0.1)
@@ -493,7 +561,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 child: DropdownButton<String>(
                   value: _sortBy == 'change_pct'
                       ? (_sortAscending ? '涨幅↑' : '涨幅↓')
-                      : '默认',
+                      : _sortBy == 'score'
+                          ? (_sortAscending ? '评分↑' : '评分↓')
+                          : '默认',
                   isDense: true,
                   iconEnabledColor: _sortBy != 'default' ? _accentColor : _textSecondary,
                   dropdownColor: _darkSurface,
@@ -505,6 +575,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                     DropdownMenuItem(value: '默认', child: Text('默认排序')),
                     DropdownMenuItem(value: '涨幅↓', child: Text('涨幅降序')),
                     DropdownMenuItem(value: '涨幅↑', child: Text('涨幅升序')),
+                    DropdownMenuItem(value: '评分↓', child: Text('评分降序')),
+                    DropdownMenuItem(value: '评分↑', child: Text('评分升序')),
                   ],
                   onChanged: (v) {
                     if (v == null) return;
@@ -517,6 +589,12 @@ class WatchlistScreenState extends State<WatchlistScreen>
                       } else if (v == '涨幅↑') {
                         _sortBy = 'change_pct';
                         _sortAscending = true;
+                      } else if (v == '评分↓') {
+                        _sortBy = 'score';
+                        _sortAscending = false;
+                      } else if (v == '评分↑') {
+                        _sortBy = 'score';
+                        _sortAscending = true;
                       }
                     });
                   },
@@ -524,13 +602,85 @@ class WatchlistScreenState extends State<WatchlistScreen>
               ),
             ),
           ),
+          const SizedBox(width: 4),
+          // 一键归档按钮
+          IconButton(
+            icon: Icon(
+              Icons.archive_outlined,
+              color: _oppResults.isEmpty ? _textSecondary.withOpacity(0.4) : _accentColor,
+              size: 18,
+            ),
+            onPressed: _oppResults.isEmpty ? null : _oneClickArchive,
+            tooltip: '一键归档',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          ),
+          IconButton(
+            icon: const Icon(Icons.info_outline, color: _textSecondary, size: 18),
+            onPressed: _showScoringInfo,
+            tooltip: '评分说明',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.refresh,
+              color: _oppLoading ? _textSecondary.withOpacity(0.4) : _accentColor,
+              size: 18,
+            ),
+            onPressed: _oppLoading ? null : () => _oppEngine.analyze(),
+            tooltip: '刷新分析',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          ),
         ],
       ),
     );
   }
 
+  // ─── 分析进度条 ────────────────────────────────────────────────
+
+  Widget _buildOppProgress() {
+    final p = _oppEngine.latestProgress;
+    final completed = p?.completedCount ?? 0;
+    final total = p?.totalCount ?? 1;
+    final progress = total > 0 ? completed / total : 0.0;
+    String statusText;
+    switch (p?.status) {
+      case OpportunityStatus.fetching:
+        statusText = '获取自选列表...';
+        break;
+      case OpportunityStatus.analyzing:
+        statusText = '分析中 $completed/$total';
+        break;
+      case OpportunityStatus.saving:
+        statusText = '保存结果...';
+        break;
+      default:
+        statusText = '处理中...';
+    }
+    return Column(
+      children: [
+        LinearProgressIndicator(
+          value: progress > 0 ? progress : null,
+          backgroundColor: _darkSurface,
+          valueColor: const AlwaysStoppedAnimation<Color>(_accentColor),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Text(
+            statusText,
+            style: const TextStyle(color: _textSecondary, fontSize: 11),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─── 股票列表 ──────────────────────────────────────────────────
+
   Widget _buildList() {
-    final items = _getFilteredAndSortedWatchlist();
+    final items = _getFilteredAndSortedItems();
 
     if (_watchlist.isEmpty) {
       return Center(
@@ -584,82 +734,129 @@ class WatchlistScreenState extends State<WatchlistScreen>
           final item = data['item'] as WatchlistItem;
           final quote = data['quote'] as QuoteData;
           final codeWithPrefix = data['codeWithPrefix'] as String;
+          final opp = data['opp'] as OpportunityResult?;
 
           if (_isEditMode) {
-            return _buildEditItem(item, quote, codeWithPrefix);
+            return _buildEditItem(item, quote, codeWithPrefix, opp);
           }
 
-          return Dismissible(
-            key: Key(item.code),
-            direction: DismissDirection.endToStart,
-            background: Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.only(right: 20),
-              decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.delete, color: Colors.red, size: 28),
-            ),
-            confirmDismiss: (direction) async {
-              return await showDialog<bool>(
-                context: context,
-                builder: (context) => AlertDialog(
-                  backgroundColor: _cardColor,
-                  title: const Text('确认删除',
-                      style: TextStyle(color: _textPrimary)),
-                  content: Text('确定要从自选股移除 ${item.name} 吗？',
-                      style: const TextStyle(color: _textSecondary)),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('取消',
-                          style: TextStyle(color: _textSecondary)),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('删除',
-                          style: TextStyle(color: Colors.red)),
-                    ),
-                  ],
-                ),
-              );
-            },
-            onDismissed: (_) => _removeFromWatchlist(item.code),
-            child: GestureDetector(
-              onLongPress: () {
-                setState(() {
-                  _isEditMode = true;
-                  _selectedCodes.add(item.code);
-                });
-              },
-              child: StockCard(
-                name: item.name,
-                code: codeWithPrefix,
-                price: quote.price,
-                changePct: quote.changePct,
-                pe: quote.pe > 0 ? quote.pe : null,
-                pb: quote.pb > 0 ? quote.pb : null,
-                onTap: () => _onStockTap(codeWithPrefix, item.name),
-                trailing: IconButton(
-                  icon: const Icon(Icons.add_alert,
-                      color: _accentColor, size: 22),
-                  onPressed: () => _addAlert(codeWithPrefix, item.name),
-                  tooltip: '添加预警',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-              ),
-            ),
-          );
+          return _buildMergedCard(item, quote, codeWithPrefix, opp);
         },
       ),
     );
   }
 
+  /// 合并卡片：同时显示行情 + 分析数据
+  Widget _buildMergedCard(
+      WatchlistItem item, QuoteData quote, String codeWithPrefix, OpportunityResult? opp) {
+    // 信号标签
+    final tags = <Widget>[];
+    if (opp != null) {
+      for (final s in opp.topSignals.take(3)) {
+        final isBuy = s.startsWith('▲');
+        tags.add(SignalTag(
+          text: s,
+          color: isBuy ? _upColor : _downColor,
+        ));
+      }
+      if (opp.confluenceScore > 0) {
+        tags.add(SignalTag(
+          text: '共振${opp.confluenceScore}',
+          color: _accentColor,
+        ));
+      }
+    }
+
+    // 操作按钮
+    final actions = <Widget>[];
+    if (opp != null) {
+      actions.add(TextButton.icon(
+        icon: const Icon(Icons.archive_outlined, size: 16),
+        label: const Text('归档', style: TextStyle(fontSize: 12)),
+        onPressed: () => _archiveOppItem(opp),
+        style: TextButton.styleFrom(
+          foregroundColor: _textSecondary,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      ));
+    }
+
+    return Dismissible(
+      key: Key(item.code),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: Colors.red.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.delete, color: Colors.red, size: 28),
+      ),
+      confirmDismiss: (direction) async {
+        return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: _cardColor,
+            title: const Text('确认删除',
+                style: TextStyle(color: _textPrimary)),
+            content: Text('确定要从自选股移除 ${item.name} 吗？',
+                style: const TextStyle(color: _textSecondary)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消',
+                    style: TextStyle(color: _textSecondary)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('删除',
+                    style: TextStyle(color: Colors.red)),
+              ),
+            ],
+          ),
+        );
+      },
+      onDismissed: (_) => _removeFromWatchlist(item.code),
+      child: GestureDetector(
+        onLongPress: () {
+          setState(() {
+            _isEditMode = true;
+            _selectedCodes.add(item.code);
+          });
+        },
+        child: StockCard(
+          name: item.name,
+          code: codeWithPrefix,
+          price: quote.price,
+          changePct: quote.changePct,
+          pe: quote.pe > 0 ? quote.pe : null,
+          pb: quote.pb > 0 ? quote.pb : null,
+          score: opp?.score,
+          recommendation: opp?.recommendation,
+          riskLevel: opp?.riskLevel,
+          tags: tags.isNotEmpty ? tags : null,
+          actions: actions.isNotEmpty ? actions : null,
+          onTap: () => _onStockTap(codeWithPrefix, item.name),
+          trailing: IconButton(
+            icon: const Icon(Icons.add_alert,
+                color: _accentColor, size: 22),
+            onPressed: () => _addAlert(codeWithPrefix, item.name),
+            tooltip: '添加预警',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 编辑模式下的卡片
   Widget _buildEditItem(
-      WatchlistItem item, QuoteData quote, String codeWithPrefix) {
+      WatchlistItem item, QuoteData quote, String codeWithPrefix, OpportunityResult? opp) {
     final isSelected = _selectedCodes.contains(item.code);
     return GestureDetector(
       onTap: () {
@@ -703,11 +900,42 @@ class WatchlistScreenState extends State<WatchlistScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(item.name,
-                      style: const TextStyle(
-                          color: _textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold)),
+                  Row(
+                    children: [
+                      Text(item.name,
+                          style: const TextStyle(
+                              color: _textPrimary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold)),
+                      if (opp != null && opp.recommendation.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: (opp.recommendation.contains('买入')
+                                    ? _upColor
+                                    : opp.recommendation.contains('卖出')
+                                        ? _downColor
+                                        : Colors.orange)
+                                .withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            opp.recommendation,
+                            style: TextStyle(
+                              color: opp.recommendation.contains('买入')
+                                  ? _upColor
+                                  : opp.recommendation.contains('卖出')
+                                      ? _downColor
+                                      : Colors.orange,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                   const SizedBox(height: 2),
                   Text(codeWithPrefix,
                       style: const TextStyle(
@@ -733,17 +961,40 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  '${quote.changePct >= 0 ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
-                  style: TextStyle(
-                    color: quote.changePct > 0
-                        ? _upColor
-                        : quote.changePct < 0
-                            ? _downColor
-                            : _textSecondary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${quote.changePct >= 0 ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
+                      style: TextStyle(
+                        color: quote.changePct > 0
+                            ? _upColor
+                            : quote.changePct < 0
+                                ? _downColor
+                                : _textSecondary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (opp != null) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _accentColor.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '${opp.score}分',
+                          style: const TextStyle(
+                            color: _accentColor,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ],
             ),
@@ -753,7 +1004,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
     );
   }
 
+  // ─── 编辑底部栏 ────────────────────────────────────────────────
+
   Widget _buildEditBottomBar() {
+    final hasOpp = _selectedCodes.any((code) => _oppMap.containsKey(code));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: const BoxDecoration(
@@ -789,7 +1043,32 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 ),
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
+            if (hasOpp)
+              GestureDetector(
+                onTap: _selectedCodes.isEmpty ? null : _batchArchiveSelected,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _selectedCodes.isEmpty
+                        ? _accentColor.withOpacity(0.2)
+                        : _accentColor,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '归档',
+                    style: TextStyle(
+                      color: _selectedCodes.isEmpty
+                          ? _textSecondary
+                          : Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(width: 8),
             GestureDetector(
               onTap: _selectedCodes.isEmpty
                   ? null
@@ -822,18 +1101,12 @@ class WatchlistScreenState extends State<WatchlistScreen>
                         ),
                       );
                       if (confirmed == true) {
-                        await DatabaseService()
-                            .batchRemoveFromWatchlist(_selectedCodes.toList());
-                        setState(() {
-                          _isEditMode = false;
-                          _selectedCodes.clear();
-                        });
-                        _loadWatchlist();
+                        await _batchRemoveFromWatchlist();
                       }
                     },
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: _selectedCodes.isEmpty
                       ? Colors.red.withOpacity(0.2)
@@ -841,7 +1114,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  '删除选中(${_selectedCodes.length})',
+                  '删除(${_selectedCodes.length})',
                   style: TextStyle(
                     color: _selectedCodes.isEmpty
                         ? _textSecondary
@@ -854,321 +1127,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  // 自选分析 Tab
-  // ═══════════════════════════════════════════════════════════════
-
-  Widget _buildOppTab() {
-    final filtered = _filteredOppResults;
-    return Column(
-      children: [
-        _buildOppHeader(),
-        if (_oppLoading) _buildOppProgress(),
-        Expanded(
-          child: filtered.isEmpty
-              ? _buildEmptyState(
-                  icon: Icons.analytics_outlined,
-                  text: _oppResults.isEmpty ? '暂无自选分析数据' : '当前筛选无结果',
-                  actionText: _oppResults.isEmpty ? '开始分析' : null,
-                  onAction: _oppResults.isEmpty
-                      ? () => _oppEngine.analyze()
-                      : null,
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: filtered.length,
-                  itemBuilder: (_, i) => _buildOppCard(filtered[i], i + 1),
-                ),
-        ),
-        if (_oppEditMode) _buildOppEditBar(),
-      ],
-    );
-  }
-
-  Widget _buildOppHeader() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          // 筛选下拉框
-          const Text('筛选', style: TextStyle(color: _textSecondary, fontSize: 12)),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              decoration: BoxDecoration(
-                color: _darkSurface,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: _borderColor),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _oppFilter,
-                  isDense: true,
-                  iconEnabledColor: _textSecondary,
-                  dropdownColor: _darkSurface,
-                  style: const TextStyle(color: _textPrimary, fontSize: 13),
-                  items: ['全部', '看多', '看空', '观望'].map((f) {
-                    return DropdownMenuItem(value: f, child: Text(f));
-                  }).toList(),
-                  onChanged: (v) {
-                    if (v != null) setState(() => _oppFilter = v);
-                  },
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          // 留档按钮
-          IconButton(
-            icon: const Icon(Icons.archive_outlined, color: _textSecondary, size: 20),
-            onPressed: _batchArchiveOppItems,
-            tooltip: '留档当前筛选',
-          ),
-          // 评分说明按钮
-          IconButton(
-            icon: const Icon(Icons.info_outline, color: _textSecondary, size: 20),
-            onPressed: _showScoringInfo,
-            tooltip: '评分说明',
-          ),
-          // 编辑模式切换
-          IconButton(
-            icon: Icon(
-              _oppEditMode ? Icons.check : Icons.edit_outlined,
-              color: _oppEditMode ? _accentColor : _textSecondary,
-              size: 20,
-            ),
-            onPressed: () {
-              setState(() {
-                _oppEditMode = !_oppEditMode;
-                if (!_oppEditMode) _oppSelected.clear();
-              });
-            },
-            tooltip: _oppEditMode ? '完成' : '编辑',
-          ),
-          // 刷新按钮
-          IconButton(
-            icon: const Icon(Icons.refresh, color: _textSecondary, size: 20),
-            onPressed: _oppLoading ? null : () => _oppEngine.analyze(),
-            tooltip: '刷新分析',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOppProgress() {
-    final p = _oppEngine.latestProgress;
-    final completed = p?.completedCount ?? 0;
-    final total = p?.totalCount ?? 1;
-    final progress = total > 0 ? completed / total : 0.0;
-    String statusText;
-    switch (p?.status) {
-      case OpportunityStatus.fetching:
-        statusText = '获取自选列表...';
-        break;
-      case OpportunityStatus.analyzing:
-        statusText = '分析中 $completed/$total';
-        break;
-      case OpportunityStatus.saving:
-        statusText = '保存结果...';
-        break;
-      default:
-        statusText = '处理中...';
-    }
-    return Column(
-      children: [
-        LinearProgressIndicator(
-          value: progress > 0 ? progress : null,
-          backgroundColor: _darkSurface,
-          valueColor: const AlwaysStoppedAnimation<Color>(_accentColor),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Text(
-            statusText,
-            style: const TextStyle(color: _textSecondary, fontSize: 12),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildOppCard(OpportunityResult r, int rank) {
-    final isSelected = _oppSelected.contains(r.code);
-
-    // 信号标签
-    final tags = <Widget>[];
-    for (final s in r.topSignals.take(3)) {
-      final isBuy = s.startsWith('▲');
-      tags.add(SignalTag(
-        text: s,
-        color: isBuy ? _upColor : _downColor,
-      ));
-    }
-    if (r.confluenceScore > 0) {
-      tags.add(SignalTag(
-        text: '共振${r.confluenceScore}',
-        color: _accentColor,
-      ));
-    }
-
-    // 操作按钮
-    final actions = <Widget>[];
-    if (!_oppEditMode) {
-      actions.addAll([
-        TextButton.icon(
-          icon: const Icon(Icons.archive_outlined, size: 16),
-          label: const Text('归档', style: TextStyle(fontSize: 12)),
-          onPressed: () => _archiveOppItem(r),
-          style: TextButton.styleFrom(
-            foregroundColor: _textSecondary,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            minimumSize: Size.zero,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-        ),
-      ]);
-    }
-
-    return GestureDetector(
-      onTap: () {
-        if (_oppEditMode) {
-          setState(() {
-            if (isSelected) {
-              _oppSelected.remove(r.code);
-            } else {
-              _oppSelected.add(r.code);
-            }
-          });
-        } else {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => QuoteScreen(code: r.code, name: r.name),
-            ),
-          );
-        }
-      },
-      onLongPress: () {
-        if (!_oppEditMode) {
-          setState(() {
-            _oppEditMode = true;
-            _oppSelected.add(r.code);
-          });
-        }
-      },
-      child: Row(
-        children: [
-          if (_oppEditMode)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Checkbox(
-                value: isSelected,
-                onChanged: (v) {
-                  setState(() {
-                    if (v == true) {
-                      _oppSelected.add(r.code);
-                    } else {
-                      _oppSelected.remove(r.code);
-                    }
-                  });
-                },
-                activeColor: _accentColor,
-                checkColor: Colors.white,
-              ),
-            ),
-          Expanded(
-            child: StockCard(
-              name: r.name,
-              code: r.code,
-              price: r.price,
-              changePct: r.changePct,
-              score: r.score,
-              recommendation: r.recommendation,
-              riskLevel: r.riskLevel,
-              rank: rank,
-              tags: tags.isNotEmpty ? tags : null,
-              actions: actions.isNotEmpty ? actions : null,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOppEditBar() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: _cardColor,
-        border: Border(top: BorderSide(color: _borderColor)),
-      ),
-      child: Row(
-        children: [
-          Text(
-            '已选择 ${_oppSelected.length} 只',
-            style: const TextStyle(color: _textSecondary, fontSize: 14),
-          ),
-          const Spacer(),
-          TextButton(
-            onPressed: _oppSelected.isEmpty ? null : _batchRemoveFromWatchlist,
-            style: TextButton.styleFrom(
-              foregroundColor: _downColor,
-            ),
-            child: const Text('移出自选'),
-          ),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                _oppEditMode = false;
-                _oppSelected.clear();
-              });
-            },
-            child: const Text('取消', style: TextStyle(color: _textSecondary)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  // 通用空状态
-  // ═══════════════════════════════════════════════════════════════
-
-  Widget _buildEmptyState({
-    required IconData icon,
-    required String text,
-    String? actionText,
-    VoidCallback? onAction,
-  }) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 48, color: _textSecondary.withOpacity(0.5)),
-          const SizedBox(height: 12),
-          Text(text, style: const TextStyle(color: _textSecondary, fontSize: 14)),
-          if (actionText != null && onAction != null) ...[
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: onAction,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _accentColor,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: Text(actionText),
-            ),
-          ],
-        ],
       ),
     );
   }

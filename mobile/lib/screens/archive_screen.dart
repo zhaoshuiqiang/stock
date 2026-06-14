@@ -23,6 +23,9 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   bool _isLoading = true;
   Map<String, QuoteData> _currentQuotes = {};
   Timer? _refreshTimer;
+  String _sortBy = 'time'; // 'time', 'score', 'change'
+  bool _sortAscending = false;
+  String _filterType = '全部'; // '全部', '买入', '卖出', '观望'
 
   @override
   void initState() {
@@ -46,6 +49,39 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       _isLoading = false;
     });
     _refreshCurrentPrices();
+  }
+
+  List<ArchiveRecord> _getFilteredAndSortedArchives() {
+    var items = _archives.toList();
+
+    // 筛选
+    if (_filterType == '买入') {
+      items = items.where((r) => r.recommendation.contains('买入')).toList();
+    } else if (_filterType == '卖出') {
+      items = items.where((r) => r.recommendation.contains('卖出')).toList();
+    } else if (_filterType == '观望') {
+      items = items.where((r) => r.recommendation.contains('观望')).toList();
+    }
+
+    // 排序
+    items.sort((a, b) {
+      int cmp;
+      switch (_sortBy) {
+        case 'score':
+          cmp = b.score.compareTo(a.score);
+          break;
+        case 'change':
+          final changeA = _currentQuotes[a.code]?.changePct ?? 0;
+          final changeB = _currentQuotes[b.code]?.changePct ?? 0;
+          cmp = changeB.compareTo(changeA);
+          break;
+        default:
+          cmp = b.archivedAt.compareTo(a.archivedAt);
+      }
+      return _sortAscending ? -cmp : cmp;
+    });
+
+    return items;
   }
 
   Future<void> _refreshCurrentPrices() async {
@@ -270,6 +306,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     }
     final total = reasonableCount + deviationCount;
     final winRate = total > 0 ? (reasonableCount / total * 100) : 0.0;
+    final filteredArchives = _getFilteredAndSortedArchives();
 
     return RefreshIndicator(
       onRefresh: _loadArchives,
@@ -354,11 +391,82 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
               ),
             ),
           ),
+          // 筛选排序栏
+          SliverToBoxAdapter(
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+              child: Row(
+                children: [
+                  // 筛选 Chips
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: ['全部', '买入', '卖出', '观望'].map((f) {
+                          final isSelected = _filterType == f;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: GestureDetector(
+                              onTap: () => setState(() => _filterType = f),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: isSelected ? const Color(0xFF58A6FF).withOpacity(0.15) : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: isSelected ? const Color(0xFF58A6FF) : const Color(0xFF30363D),
+                                  ),
+                                ),
+                                child: Text(
+                                  f,
+                                  style: TextStyle(
+                                    color: isSelected ? const Color(0xFF58A6FF) : const Color(0xFF8B949E),
+                                    fontSize: 12,
+                                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // 排序下拉框
+                  DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _sortBy,
+                      isDense: true,
+                      iconEnabledColor: const Color(0xFF8B949E),
+                      dropdownColor: const Color(0xFF21262D),
+                      style: const TextStyle(color: Color(0xFFF0F6FC), fontSize: 12),
+                      items: [
+                        DropdownMenuItem(value: 'time', child: Text('时间')),
+                        DropdownMenuItem(value: 'score', child: Text('评分')),
+                        DropdownMenuItem(value: 'change', child: Text('涨幅')),
+                      ],
+                      onChanged: (v) { if (v != null) setState(() => _sortBy = v); },
+                    ),
+                  ),
+                  // 升降序切换
+                  GestureDetector(
+                    onTap: () => setState(() => _sortAscending = !_sortAscending),
+                    child: Icon(
+                      _sortAscending ? Icons.arrow_upward : Icons.arrow_downward,
+                      size: 18,
+                      color: const Color(0xFF8B949E),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
           // 留档列表
           SliverList(
             delegate: SliverChildBuilderDelegate(
               (context, index) {
-          final record = _archives[index];
+          final record = filteredArchives[index];
           final currentQuote = _currentQuotes[record.code];
           final currentPrice = currentQuote?.price ?? 0;
           final currentChangePct = currentQuote?.changePct ?? 0;
@@ -508,7 +616,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
             ),
           );
         },
-            childCount: _archives.length,
+            childCount: filteredArchives.length,
           ),
         ),
       ],
