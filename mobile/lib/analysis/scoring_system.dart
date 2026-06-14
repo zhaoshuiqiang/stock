@@ -8,8 +8,9 @@ class ScoringSystem {
   static AnalysisResult generateAnalysisWith10LevelScore(
     List<HistoryKline> data,
     QuoteData? quote,
-    MarketContext? marketContext,
-  ) {
-    return generateAnalysis(data, quote, marketContext: marketContext);
+    MarketContext? marketContext, {
+    List<dynamic>? newsList,
+  }) {
+    return generateAnalysis(data, quote, marketContext: marketContext, newsList: newsList);
   }
 }

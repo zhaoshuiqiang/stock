@@ -6,6 +6,9 @@ import 'strategy_builder.dart';
 import 'strategy_engine.dart';
 import 'backtest_engine.dart';
 import 'sr_quality.dart';
+import 'fundamental_analyzer.dart';
+import 'signal_validator.dart';
+import 'news_sentiment_analyzer.dart';
 
 List<SignalItem> detectSignals(List<HistoryKline> data) {
   if (data.isEmpty || data.length < 2) return [];
@@ -211,7 +214,12 @@ Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
   return tradeLevels;
 }
 
-AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote, {MarketContext? marketContext}) {
+AnalysisResult generateAnalysis(
+  List<HistoryKline> data,
+  QuoteData? quote, {
+  MarketContext? marketContext,
+  List<dynamic>? newsList,
+}) {
   if (data.isEmpty) {
     return AnalysisResult(
       signals: [],
@@ -492,9 +500,49 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote, {Mark
   // 双向共振：多空对称，范围[-10, 10]，映射到[0, 10]
   final confluenceBonus = (5.0 + (bullCount - bearCount) / 10 * 5).clamp(0.0, 10.0);
 
-  // ========== 三维度加权总分（10级制 1-10） ==========
-  // K线信号(50%) + 实时行情(30%) + 共振评分(20%)
-  final rawScore = (klineBaseScore * 0.50 + realtimeScore * 0.30 + confluenceBonus * 0.20).clamp(0.0, 10.0);
+  // ========== 多维融合评分（参考 TradingAgents 多智能体融合） ==========
+
+  // 1. 技术面评分 (klineBaseScore, 0-10) - 已计算
+
+  // 2. 基本面评分 (0-10) - 参考 TradingAgents Fundamental Analyst
+  FundamentalScore? fundamentalScore;
+  double fundamentalScoreValue = 5.0; // 默认中性
+  if (quote != null && quote.price > 0) {
+    fundamentalScore = FundamentalAnalyzer.analyze(quote);
+    fundamentalScoreValue = fundamentalScore.totalScore;
+  }
+
+  // 3. 新闻情绪评分 (-10 ~ +10, 映射到 0-10) - 参考 TradingAgents Sentiment/News Analyst
+  NewsSentiment? newsSentiment;
+  double sentimentScoreValue = 5.0; // 默认中性
+  if (newsList != null && newsList.isNotEmpty) {
+    newsSentiment = NewsSentimentAnalyzer.analyze(newsList);
+    // 映射 [-10, +10] → [0, 10]
+    sentimentScoreValue = (newsSentiment.score + 10) / 2;
+  }
+
+  // 4. 实时行情评分 (0-10) - 已计算
+
+  // 5. 共振评分 (0-10) - 已计算
+
+  // 动态权重分配：基本面/情绪数据缺失时权重重分配给技术面和实时行情
+  // 权重之和必须为1.0，否则评分系统性偏低
+  double techW = 0.35, fundW = 0.20, sentW = 0.15, realW = 0.15, confW = 0.15;
+  final hasFund = fundamentalScore != null;
+  final hasSent = newsSentiment != null;
+  if (!hasFund && !hasSent) {
+    techW = 0.50; realW = 0.30; confW = 0.20; fundW = 0; sentW = 0;
+  } else if (!hasFund) {
+    techW = 0.42; realW = 0.22; confW = 0.20; sentW = 0.16; fundW = 0;
+  } else if (!hasSent) {
+    techW = 0.42; realW = 0.22; confW = 0.20; fundW = 0.16; sentW = 0;
+  }
+
+  final rawScore = (klineBaseScore * techW +
+      fundamentalScoreValue * fundW +
+      sentimentScoreValue * sentW +
+      realtimeScore * realW +
+      confluenceBonus * confW).clamp(0.0, 10.0);
 
   // 市场环境调节
   double marketAdjustment = 1.0;
@@ -768,18 +816,89 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote, {Mark
     // 策略构建失败时回退
   }
 
-  // 推荐可信度计算
-  double confidenceScore = 0.5;
+  // ========== 增强置信度计算（参考 TradingAgents 多因子置信度） ==========
+  // 1. 信号一致性(30%): 买卖信号比例偏离度
+  double signalConsistency = 0.5;
   final signalCount = buyCount + sellCount;
   if (signalCount > 0) {
-    final signalRatio = (buyCount - sellCount).abs() / signalCount;
-    confidenceScore = 0.5 + signalRatio * 0.3;
+    signalConsistency = 0.3 + (buyCount - sellCount).abs() / signalCount * 0.7;
   }
-  if (quote != null && quote.pe > 0 && quote.pe < 50) confidenceScore += 0.05;
-  if (quote != null && quote.pb > 0 && quote.pb < 5) confidenceScore += 0.05;
-  if (marketContext != null && marketContext.avgChangePct > 0.5) confidenceScore += 0.03;
-  if (marketContext != null && marketContext.avgChangePct < -0.5) confidenceScore -= 0.03;
-  confidenceScore = confidenceScore.clamp(0.3, 0.95);
+
+  // 2. 基本面支撑(25%): 基本面评分与推荐方向一致时加分
+  double fundamentalSupport = 0.5;
+  if (fundamentalScore != null) {
+    if (totalScore >= 7 && fundamentalScore.totalScore >= 6) {
+      fundamentalSupport = (0.7 + (fundamentalScore.totalScore - 6) * 0.1).clamp(0.0, 1.0);
+    } else if (totalScore <= 4 && fundamentalScore.totalScore <= 4) {
+      fundamentalSupport = (0.7 + (4 - fundamentalScore.totalScore) * 0.1).clamp(0.0, 1.0);
+    } else if (totalScore >= 7 && fundamentalScore.totalScore < 4) {
+      fundamentalSupport = 0.3; // 技术面看多但基本面差，降低置信度
+    } else if (totalScore <= 4 && fundamentalScore.totalScore > 6) {
+      fundamentalSupport = 0.3; // 技术面看空但基本面好，降低置信度
+    }
+  }
+
+  // 3. 情绪面确认(20%): 新闻情绪与推荐方向一致时加分
+  double sentimentConfirm = 0.5;
+  if (newsSentiment != null) {
+    if (totalScore >= 7 && newsSentiment.score > 2) {
+      sentimentConfirm = 0.7 + (newsSentiment.score - 2) * 0.03;
+    } else if (totalScore <= 4 && newsSentiment.score < -2) {
+      sentimentConfirm = 0.7 + (-2 - newsSentiment.score) * 0.03;
+    } else if (totalScore >= 7 && newsSentiment.score < -2) {
+      sentimentConfirm = 0.3; // 技术面看多但新闻利空
+    } else if (totalScore <= 4 && newsSentiment.score > 2) {
+      sentimentConfirm = 0.3; // 技术面看空但新闻利好
+    }
+  }
+
+  // 4. 市场环境(15%): 大盘趋势与推荐方向一致时加分
+  double marketConfirm = 0.5;
+  if (marketContext != null) {
+    if (totalScore >= 7 && marketContext.avgChangePct > 0.5) {
+      marketConfirm = 0.7;
+    } else if (totalScore <= 4 && marketContext.avgChangePct < -0.5) {
+      marketConfirm = 0.7;
+    } else if (totalScore >= 7 && marketContext.avgChangePct < -1) {
+      marketConfirm = 0.3;
+    } else if (totalScore <= 4 && marketContext.avgChangePct > 1) {
+      marketConfirm = 0.3;
+    }
+  }
+
+  // 5. 信号新鲜度(10%): 近期信号权重高于远期
+  double signalFreshness = 0.5;
+  final recentBuySignals = buySignals.where((s) =>
+    s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm
+  ).length;
+  final recentSellSignals = sellSignals.where((s) =>
+    s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm
+  ).length;
+  if (recentBuySignals + recentSellSignals > 0) {
+    signalFreshness = 0.3 + (recentBuySignals + recentSellSignals) / (signalCount > 0 ? signalCount : 1) * 0.7;
+  }
+
+  final confidenceScore = (signalConsistency * 0.30 +
+      fundamentalSupport * 0.25 +
+      sentimentConfirm * 0.20 +
+      marketConfirm * 0.15 +
+      signalFreshness * 0.10).clamp(0.3, 0.95);
+
+  final confidenceBreakdown = <String, double>{
+    'signal_consistency': signalConsistency,
+    'fundamental_support': fundamentalSupport,
+    'sentiment_confirm': sentimentConfirm,
+    'market_confirm': marketConfirm,
+    'signal_freshness': signalFreshness,
+  };
+
+  // ========== 信号对抗验证（参考 TradingAgents Bull/Bear Researcher） ==========
+  List<ValidatedSignal> validatedSignals = [];
+  try {
+    validatedSignals = SignalValidator.validate(signals, quote, last);
+  } catch (_) {
+    // 对抗验证失败不影响主流程
+  }
 
   // 详细推荐理由
   final detailedReasons = <RecommendationReason>[];
@@ -821,5 +940,9 @@ AnalysisResult generateAnalysis(List<HistoryKline> data, QuoteData? quote, {Mark
     confidenceScore: confidenceScore,
     detailedReasons: detailedReasons,
     backtestResults: backtestResults,
+    fundamentalScore: fundamentalScore,
+    newsSentiment: newsSentiment,
+    validatedSignals: validatedSignals,
+    confidenceBreakdown: confidenceBreakdown,
   );
 }

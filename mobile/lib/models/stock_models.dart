@@ -522,6 +522,110 @@ class SignalItem {
   }
 }
 
+/// 基本面评分 - 参考 TradingAgents Fundamental Analyst
+class FundamentalScore {
+  final double valuationScore;    // 估值评分(0-10): PE + PB
+  final double capitalFlowScore;  // 资金评分(0-10): 主力净流入率
+  final double liquidityScore;    // 流动性评分(0-10): 换手率 + 成交额
+  final double totalScore;        // 总分(0-10): 估值40% + 资金35% + 流动性25%
+  final List<String> factors;     // 评分因素说明
+
+  FundamentalScore({
+    required this.valuationScore,
+    required this.capitalFlowScore,
+    required this.liquidityScore,
+    required this.totalScore,
+    required this.factors,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'valuation_score': valuationScore,
+    'capital_flow_score': capitalFlowScore,
+    'liquidity_score': liquidityScore,
+    'total_score': totalScore,
+    'factors': factors,
+  };
+
+  factory FundamentalScore.fromJson(Map<String, dynamic> json) {
+    return FundamentalScore(
+      valuationScore: (json['valuation_score'] as num?)?.toDouble() ?? 5.0,
+      capitalFlowScore: (json['capital_flow_score'] as num?)?.toDouble() ?? 5.0,
+      liquidityScore: (json['liquidity_score'] as num?)?.toDouble() ?? 5.0,
+      totalScore: (json['total_score'] as num?)?.toDouble() ?? 5.0,
+      factors: (json['factors'] as List?)?.map((e) => e.toString()).toList() ?? [],
+    );
+  }
+}
+
+/// 对抗验证信号 - 参考 TradingAgents Bull/Bear Researcher
+class ValidatedSignal {
+  final SignalItem signal;
+  final List<String> counterPoints;   // 反向视角论点（买入→Bear反对，卖出→Bull支撑）
+  final double adjustedConfidence;    // 调整后置信度
+
+  ValidatedSignal({
+    required this.signal,
+    required this.counterPoints,
+    required this.adjustedConfidence,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'signal': signal.toJson(),
+    'counter_points': counterPoints,
+    'adjusted_confidence': adjustedConfidence,
+  };
+
+  factory ValidatedSignal.fromJson(Map<String, dynamic> json) {
+    return ValidatedSignal(
+      signal: SignalItem.fromJson(json['signal'] as Map<String, dynamic>),
+      counterPoints: (json['counter_points'] as List?)?.map((e) => e.toString()).toList() ?? [],
+      adjustedConfidence: (json['adjusted_confidence'] as num?)?.toDouble() ?? 0.5,
+    );
+  }
+}
+
+/// 新闻情绪评分 - 参考 TradingAgents Sentiment/News Analyst
+class NewsSentiment {
+  final double score;              // 情绪评分(-10 ~ +10)
+  final int positiveCount;         // 利好新闻数
+  final int negativeCount;         // 利空新闻数
+  final int neutralCount;          // 中性新闻数
+  final List<String> keyFactors;   // 关键影响因素
+
+  NewsSentiment({
+    required this.score,
+    required this.positiveCount,
+    required this.negativeCount,
+    required this.neutralCount,
+    required this.keyFactors,
+  });
+
+  /// 情绪方向: positive / negative / neutral
+  String get direction {
+    if (score > 2) return 'positive';
+    if (score < -2) return 'negative';
+    return 'neutral';
+  }
+
+  Map<String, dynamic> toJson() => {
+    'score': score,
+    'positive_count': positiveCount,
+    'negative_count': negativeCount,
+    'neutral_count': neutralCount,
+    'key_factors': keyFactors,
+  };
+
+  factory NewsSentiment.fromJson(Map<String, dynamic> json) {
+    return NewsSentiment(
+      score: (json['score'] as num?)?.toDouble() ?? 0,
+      positiveCount: (json['positive_count'] as num?)?.toInt() ?? 0,
+      negativeCount: (json['negative_count'] as num?)?.toInt() ?? 0,
+      neutralCount: (json['neutral_count'] as num?)?.toInt() ?? 0,
+      keyFactors: (json['key_factors'] as List?)?.map((e) => e.toString()).toList() ?? [],
+    );
+  }
+}
+
 class MarketContext {
   final double shIndexPct;          // 上证指数涨跌幅
   final double szIndexPct;          // 深证成指涨跌幅
@@ -674,6 +778,12 @@ class AnalysisResult {
   final List<RecommendationReason> detailedReasons;  // 详细推荐理由
   final Map<String, BacktestResult>? backtestResults; // 回测结果
 
+  // 多维分析新增字段 - 参考 TradingAgents
+  final FundamentalScore? fundamentalScore;          // 基本面评分
+  final NewsSentiment? newsSentiment;                // 新闻情绪
+  final List<ValidatedSignal>? validatedSignals;     // 对抗验证信号
+  final Map<String, double>? confidenceBreakdown;    // 置信度分项明细
+
   AnalysisResult({
     this.quote,
     this.indicators = const {},
@@ -694,6 +804,10 @@ class AnalysisResult {
     this.confidenceScore = 0.5,
     this.detailedReasons = const [],
     this.backtestResults,
+    this.fundamentalScore,
+    this.newsSentiment,
+    this.validatedSignals,
+    this.confidenceBreakdown,
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {
@@ -716,6 +830,19 @@ class AnalysisResult {
       longTermStrategies = (json['long_term_strategies'] as List)
           .map((s) => TradingStrategy.fromJson(s as Map<String, dynamic>))
           .toList();
+    }
+
+    List<ValidatedSignal>? validatedSignals;
+    if (json['validated_signals'] != null && json['validated_signals'] is List) {
+      validatedSignals = (json['validated_signals'] as List)
+          .map((s) => ValidatedSignal.fromJson(s as Map<String, dynamic>))
+          .toList();
+    }
+
+    Map<String, double>? confidenceBreakdown;
+    if (json['confidence_breakdown'] != null && json['confidence_breakdown'] is Map) {
+      confidenceBreakdown = (json['confidence_breakdown'] as Map<String, dynamic>)
+          .map((k, v) => MapEntry(k, (v as num).toDouble()));
     }
 
     return AnalysisResult(
@@ -745,6 +872,14 @@ class AnalysisResult {
       backtestResults: json['backtest_results'] != null
           ? (json['backtest_results'] as Map<String, dynamic>).map((k, v) => MapEntry(k, BacktestResult.fromJson(v as Map<String, dynamic>)))
           : null,
+      fundamentalScore: json['fundamental_score'] != null
+          ? FundamentalScore.fromJson(json['fundamental_score'] as Map<String, dynamic>)
+          : null,
+      newsSentiment: json['news_sentiment'] != null
+          ? NewsSentiment.fromJson(json['news_sentiment'] as Map<String, dynamic>)
+          : null,
+      validatedSignals: validatedSignals,
+      confidenceBreakdown: confidenceBreakdown,
     );
   }
 
@@ -774,6 +909,10 @@ class AnalysisResult {
         'duration': r.duration,
       }).toList(),
       'backtest_results': backtestResults?.map((k, v) => MapEntry(k, v.toJson())),
+      'fundamental_score': fundamentalScore?.toJson(),
+      'news_sentiment': newsSentiment?.toJson(),
+      'validated_signals': validatedSignals?.map((s) => s.toJson()).toList(),
+      'confidence_breakdown': confidenceBreakdown,
     };
   }
 }
