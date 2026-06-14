@@ -68,13 +68,28 @@ class StrategyPanel extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 16),
-        ExpansionTile(
-          title: const Text('其他可用战法', style: TextStyle(color: Colors.white54, fontSize: 13)),
-          backgroundColor: const Color(0xFF161B22),
-          collapsedBackgroundColor: const Color(0xFF161B22),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          children: inactive.map((s) => _buildStrategyCard(s, compact: true)).toList(),
-        ),
+        if (inactive.isNotEmpty)
+          ExpansionTile(
+            title: const Text('其他可用战法', style: TextStyle(color: Color(0xFFF0F6FC), fontSize: 13, fontWeight: FontWeight.w600)),
+            iconColor: const Color(0xFF8B949E),
+            collapsedIconColor: const Color(0xFF8B949E),
+            backgroundColor: const Color(0xFF161B22),
+            collapsedBackgroundColor: const Color(0xFF21262D),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            collapsedShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            children: inactive.map((s) => _buildStrategyCard(s, compact: true)).toList(),
+          ),
+        if (inactive.isEmpty && active.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF161B22),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Center(
+              child: Text('当前所有战法均处于活跃状态', style: TextStyle(color: Colors.white54, fontSize: 13)),
+            ),
+          ),
       ],
     );
   }

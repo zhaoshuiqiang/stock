@@ -265,6 +265,66 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     }
   }
 
+  // ─── 自选分析：批量留档 ──────────────────────────────────────────
+
+  Future<void> _batchArchiveOppItems() async {
+    final toArchive = _filteredOppResults;
+    if (toArchive.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _kCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('确认留档', style: TextStyle(color: _kTextPrimary)),
+        content: Text(
+          '确定要将 ${toArchive.length} 只股票的分析结果留档吗？',
+          style: const TextStyle(color: _kTextSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消', style: TextStyle(color: _kTextSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确认', style: TextStyle(color: _kAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    for (final r in toArchive) {
+      final record = ArchiveRecord(
+        code: r.code,
+        name: r.name,
+        price: r.price,
+        changePct: r.changePct,
+        score: r.score,
+        recommendation: r.recommendation,
+        riskLevel: r.riskLevel,
+        buySignalCount: r.buySignalCount,
+        sellSignalCount: r.sellSignalCount,
+        activeStrategyCount: r.activeStrategyCount,
+        confluenceScore: r.confluenceScore,
+        tradeLevelsJson: r.tradeLevels != null
+            ? r.tradeLevels.toString()
+            : null,
+        topSignals: r.topSignals.join('  '),
+        archivedAt: DateTime.now(),
+      );
+      await _dbService.addArchive(record);
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已归档 ${toArchive.length} 只股票'),
+          backgroundColor: _kAccent,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
   // ─── 自选分析：批量移出自选 ─────────────────────────────────────
 
   Future<void> _batchRemoveFromWatchlist() async {
@@ -336,15 +396,15 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _ScoringRow(label: '90-100', desc: '强烈买入，多指标共振'),
+            _ScoringRow(label: '9-10', desc: '强烈买入，多指标共振'),
             SizedBox(height: 6),
-            _ScoringRow(label: '70-89', desc: '买入，多数指标看多'),
+            _ScoringRow(label: '7-8', desc: '买入，多数指标看多'),
             SizedBox(height: 6),
-            _ScoringRow(label: '50-69', desc: '观望，多空分歧较大'),
+            _ScoringRow(label: '5-6', desc: '观望，多空分歧较大'),
             SizedBox(height: 6),
-            _ScoringRow(label: '30-49', desc: '谨慎，偏空信号较多'),
+            _ScoringRow(label: '3-4', desc: '谨慎，偏空信号较多'),
             SizedBox(height: 6),
-            _ScoringRow(label: '0-29', desc: '卖出，空方主导'),
+            _ScoringRow(label: '1-2', desc: '卖出，空方主导'),
           ],
         ),
         actions: [
@@ -450,6 +510,12 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                 }).toList(),
               ),
             ),
+          ),
+          // 留档按钮
+          IconButton(
+            icon: const Icon(Icons.archive_outlined, color: _kTextSecondary, size: 20),
+            onPressed: _batchArchiveOppItems,
+            tooltip: '留档当前筛选',
           ),
           // 评分说明按钮
           IconButton(
@@ -698,71 +764,64 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
-          // 排序 chips
+          // 排序下拉框
           const Text('排序', style: TextStyle(color: _kTextSecondary, fontSize: 12)),
           const SizedBox(width: 6),
           Expanded(
-            flex: 3,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: ['评分', '涨幅', '名称'].map((s) {
-                  final selected = _exploreSort == s;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ChoiceChip(
-                      label: Text(s),
-                      selected: selected,
-                      onSelected: (_) => setState(() => _exploreSort = s),
-                      selectedColor: _kAccent.withOpacity(0.2),
-                      backgroundColor: const Color(0xFF21262D),
-                      labelStyle: TextStyle(
-                        color: selected ? _kAccent : _kTextSecondary,
-                        fontSize: 13,
-                      ),
-                      side: BorderSide(
-                        color: selected ? _kAccent : Colors.transparent,
-                      ),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  );
-                }).toList(),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF21262D),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _kBorder),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _exploreSort,
+                  isDense: true,
+                  iconEnabledColor: _kTextSecondary,
+                  dropdownColor: const Color(0xFF21262D),
+                  style: const TextStyle(color: _kTextPrimary, fontSize: 13),
+                  items: ['评分', '涨幅', '名称'].map((s) {
+                    return DropdownMenuItem(value: s, child: Text(s));
+                  }).toList(),
+                  onChanged: (v) {
+                    if (v != null) setState(() => _exploreSort = v);
+                  },
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // 筛选下拉框
+          const Text('筛选', style: TextStyle(color: _kTextSecondary, fontSize: 12)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF21262D),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _kBorder),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _exploreFilter,
+                  isDense: true,
+                  iconEnabledColor: _kTextSecondary,
+                  dropdownColor: const Color(0xFF21262D),
+                  style: const TextStyle(color: _kTextPrimary, fontSize: 13),
+                  items: ['全部', '买入', '观望'].map((f) {
+                    return DropdownMenuItem(value: f, child: Text(f));
+                  }).toList(),
+                  onChanged: (v) {
+                    if (v != null) setState(() => _exploreFilter = v);
+                  },
+                ),
               ),
             ),
           ),
           const SizedBox(width: 8),
-          // 筛选 chips
-          const Text('筛选', style: TextStyle(color: _kTextSecondary, fontSize: 12)),
-          const SizedBox(width: 6),
-          Expanded(
-            flex: 2,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: ['全部', '买入', '观望'].map((f) {
-                  final selected = _exploreFilter == f;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ChoiceChip(
-                      label: Text(f),
-                      selected: selected,
-                      onSelected: (_) => setState(() => _exploreFilter = f),
-                      selectedColor: _kAccent.withOpacity(0.2),
-                      backgroundColor: const Color(0xFF21262D),
-                      labelStyle: TextStyle(
-                        color: selected ? _kAccent : _kTextSecondary,
-                        fontSize: 13,
-                      ),
-                      side: BorderSide(
-                        color: selected ? _kAccent : Colors.transparent,
-                      ),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-          ),
           // 刷新
           IconButton(
             icon: const Icon(Icons.refresh, color: _kTextSecondary, size: 20),

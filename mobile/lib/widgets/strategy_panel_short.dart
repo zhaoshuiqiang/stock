@@ -61,10 +61,13 @@ class StrategyPanelShort extends StatelessWidget {
         // 其他可用策略
         if (inactive.isNotEmpty) ...[
           ExpansionTile(
-            title: const Text('其他短线策略', style: TextStyle(color: Colors.white54, fontSize: 13)),
+            title: const Text('其他短线策略', style: TextStyle(color: Color(0xFFF0F6FC), fontSize: 13, fontWeight: FontWeight.w600)),
+            iconColor: const Color(0xFF8B949E),
+            collapsedIconColor: const Color(0xFF8B949E),
             backgroundColor: const Color(0xFF161B22),
-            collapsedBackgroundColor: const Color(0xFF161B22),
+            collapsedBackgroundColor: const Color(0xFF21262D),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            collapsedShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             children: inactive.map((s) => _buildStrategyCard(context, s, compact: true)).toList(),
           ),
         ],
