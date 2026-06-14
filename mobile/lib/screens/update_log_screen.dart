@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.19.1',
+        'date': '2026-06-14',
+        'changes': [
+          '修复10级评分映射公式，10分（强烈买入）现在可达',
+          '修复新闻情绪matchedKeyword覆盖逻辑不对称问题',
+          '新增27个多维度分析功能测试（基本面/信号对抗/新闻情绪/集成/序列化）',
+        ],
+      },
+      {
         'version': 'v2.19.0',
         'date': '2026-06-14',
         'changes': [
