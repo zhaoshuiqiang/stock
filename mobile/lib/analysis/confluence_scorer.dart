@@ -71,12 +71,10 @@ class ConfluenceScorer {
     if (hasGapUp) bullIndicators.add('GAP');
     if (hasGapDown) bearIndicators.add('GAP');
     if (hasBottomDivergence) {
-      bullIndicators.add('DIVER_1');
-      bullIndicators.add('DIVER_2');
+      bullIndicators.add('DIVER');
     }
     if (hasTopDivergence) {
-      bearIndicators.add('DIVER_1');
-      bearIndicators.add('DIVER_2');
+      bearIndicators.add('DIVER');
     }
 
     // 跨指标共振：不同指标数量越多，共振越强

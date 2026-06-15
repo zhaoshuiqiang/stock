@@ -130,8 +130,8 @@ void main() {
       ];
       final result = ConfluenceScorer.score(kline, signals);
 
-      // 底背离添加 DIVER_1 和 DIVER_2，去重后为2个（DIVER_1 和 DIVER_2 是不同字符串）
-      expect(result.bullCount, equals(2));
+      // 底背离添加 DIVER，去重后为1个
+      expect(result.bullCount, equals(1));
       final divergenceDetail =
           result.details.firstWhere((d) => d['name'] == '背离');
       expect(divergenceDetail['bull'], isTrue);

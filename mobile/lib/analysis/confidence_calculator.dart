@@ -26,11 +26,20 @@ class ConfidenceCalculator {
     final buyCount = buySignals.length;
     final sellCount = sellSignals.length;
 
-    // 1. 信号一致性(30%): 买卖信号比例偏离度
+    // 1. 信号一致性(30%): 买卖信号比例偏离度，且方向与推荐对齐时加分
     double signalConsistency = 0.5;
     final signalCount = buyCount + sellCount;
     if (signalCount > 0) {
-      signalConsistency = 0.3 + (buyCount - sellCount).abs() / signalCount * 0.7;
+      final dominantDirection = buyCount >= sellCount ? 'buy' : 'sell';
+      final dominantCount = buyCount > sellCount ? buyCount : sellCount;
+      final concentration = dominantCount / signalCount;
+      final alignment = (totalScore >= 7 && dominantDirection == 'buy') ||
+                        (totalScore <= 4 && dominantDirection == 'sell') ||
+                        (totalScore == 6 && dominantDirection == 'buy') ||
+                        (totalScore == 5 && dominantDirection == 'sell');
+      signalConsistency = alignment
+          ? 0.3 + concentration * 0.7
+          : 0.3 + (1 - concentration) * 0.4;
     }
 
     // 2. 基本面支撑(25%): 基本面评分与推荐方向一致时加分
@@ -132,10 +141,19 @@ class ConfidenceCalculator {
     final sellCount = sellSignals.length;
     final signalCount = buyCount + sellCount;
 
-    // 1. 信号一致性(30%)
+    // 1. 信号一致性(30%): 与calculate方法保持一致
     double signalConsistency = 0.5;
     if (signalCount > 0) {
-      signalConsistency = 0.3 + (buyCount - sellCount).abs() / signalCount * 0.7;
+      final dominantDirection = buyCount >= sellCount ? 'buy' : 'sell';
+      final dominantCount = buyCount > sellCount ? buyCount : sellCount;
+      final concentration = dominantCount / signalCount;
+      final alignment = (totalScore >= 7 && dominantDirection == 'buy') ||
+                        (totalScore <= 4 && dominantDirection == 'sell') ||
+                        (totalScore == 6 && dominantDirection == 'buy') ||
+                        (totalScore == 5 && dominantDirection == 'sell');
+      signalConsistency = alignment
+          ? 0.3 + concentration * 0.7
+          : 0.3 + (1 - concentration) * 0.4;
     }
 
     // 2. 基本面支撑(25%)

@@ -80,7 +80,6 @@ class BacktestEngine {
 
     final tradeReturns = <double>[];
     double? buyPrice;
-    int totalSignals = 0;
     double peakEquity = 1.0;
     double currentEquity = 1.0;
     double maxDrawdown = 0;
@@ -92,7 +91,6 @@ class BacktestEngine {
       // MACD金叉买入信号
       if (curr.macdDif > curr.macdDea && prev.macdDif <= prev.macdDea && buyPrice == null) {
         buyPrice = curr.close;
-        totalSignals++;
       }
       // MACD死叉卖出信号
       else if (curr.macdDif < curr.macdDea && prev.macdDif >= prev.macdDea && buyPrice != null) {
@@ -110,7 +108,6 @@ class BacktestEngine {
         }
 
         buyPrice = null;
-        totalSignals++;
       }
     }
 
@@ -120,9 +117,12 @@ class BacktestEngine {
       final returnPct = (sellPrice - buyPrice) / buyPrice;
       tradeReturns.add(returnPct);
       currentEquity *= (1 + returnPct);
+      if (currentEquity > peakEquity) peakEquity = currentEquity;
+      final drawdown = (peakEquity - currentEquity) / peakEquity;
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
     }
 
-    return _buildResult(tradeReturns, totalSignals, currentEquity, maxDrawdown);
+    return _buildResult(tradeReturns, currentEquity, maxDrawdown);
   }
 
   /// MA5上穿MA10 金叉策略回测
@@ -139,7 +139,6 @@ class BacktestEngine {
 
     final tradeReturns = <double>[];
     double? buyPrice;
-    int totalSignals = 0;
     double peakEquity = 1.0;
     double currentEquity = 1.0;
     double maxDrawdown = 0;
@@ -150,7 +149,6 @@ class BacktestEngine {
 
       if (curr.ma5 > curr.ma10 && prev.ma5 <= prev.ma10 && buyPrice == null) {
         buyPrice = curr.close;
-        totalSignals++;
       } else if (curr.ma5 < curr.ma10 && prev.ma5 >= prev.ma10 && buyPrice != null) {
         final sellPrice = curr.close;
         final returnPct = (sellPrice - buyPrice) / buyPrice;
@@ -160,7 +158,6 @@ class BacktestEngine {
         final drawdown = (peakEquity - currentEquity) / peakEquity;
         if (drawdown > maxDrawdown) maxDrawdown = drawdown;
         buyPrice = null;
-        totalSignals++;
       }
     }
 
@@ -169,9 +166,12 @@ class BacktestEngine {
       final returnPct = (sellPrice - buyPrice) / buyPrice;
       tradeReturns.add(returnPct);
       currentEquity *= (1 + returnPct);
+      if (currentEquity > peakEquity) peakEquity = currentEquity;
+      final drawdown = (peakEquity - currentEquity) / peakEquity;
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
     }
 
-    return _buildResult(tradeReturns, totalSignals, currentEquity, maxDrawdown);
+    return _buildResult(tradeReturns, currentEquity, maxDrawdown);
   }
 
   /// 格式化回测结果为可读文本
@@ -192,10 +192,10 @@ class BacktestEngine {
   static BacktestResult backtestKDJOversoldCross(List<HistoryKline> data) {
     if (data.length < 30) return _emptyResult();
 
-    final calcData = calcKDJ(List<HistoryKline>.from(data));
+    var calcData = calcKDJ(List<HistoryKline>.from(data));
+    calcData = calcATR(calcData);
     final tradeReturns = <double>[];
     double? buyPrice;
-    int totalSignals = 0;
     double peakEquity = 1.0;
     double currentEquity = 1.0;
     double maxDrawdown = 0;
@@ -205,7 +205,6 @@ class BacktestEngine {
       final curr = calcData[i];
       if (curr.k > curr.d && prev.k <= prev.d && prev.k < 30 && buyPrice == null) {
         buyPrice = curr.close;
-        totalSignals++;
       } else if (curr.k < curr.d && prev.k >= prev.d && buyPrice != null) {
         final sellPrice = curr.close;
         final returnPct = (sellPrice - buyPrice) / buyPrice;
@@ -215,7 +214,6 @@ class BacktestEngine {
         final drawdown = (peakEquity - currentEquity) / peakEquity;
         if (drawdown > maxDrawdown) maxDrawdown = drawdown;
         buyPrice = null;
-        totalSignals++;
       }
       // ATR止损检查
       if (buyPrice != null && curr.atr14 > 0) {
@@ -237,18 +235,21 @@ class BacktestEngine {
       final returnPct = (calcData.last.close - buyPrice) / buyPrice;
       tradeReturns.add(returnPct);
       currentEquity *= (1 + returnPct);
+      if (currentEquity > peakEquity) peakEquity = currentEquity;
+      final drawdown = (peakEquity - currentEquity) / peakEquity;
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
     }
-    return _buildResult(tradeReturns, totalSignals, currentEquity, maxDrawdown);
+    return _buildResult(tradeReturns, currentEquity, maxDrawdown);
   }
 
   /// RSI超卖反弹回测
   static BacktestResult backtestRSIOversoldRecovery(List<HistoryKline> data) {
     if (data.length < 30) return _emptyResult();
 
-    final calcData = calcRSI(List<HistoryKline>.from(data), [6]);
+    var calcData = calcRSI(List<HistoryKline>.from(data), [6]);
+    calcData = calcATR(calcData);
     final tradeReturns = <double>[];
     double? buyPrice;
-    int totalSignals = 0;
     double peakEquity = 1.0;
     double currentEquity = 1.0;
     double maxDrawdown = 0;
@@ -258,7 +259,6 @@ class BacktestEngine {
       final curr = calcData[i];
       if (prev.rsi6 <= 30 && curr.rsi6 > 30 && buyPrice == null) {
         buyPrice = curr.close;
-        totalSignals++;
       } else if (curr.rsi6 < 50 && prev.rsi6 >= 50 && buyPrice != null) {
         final sellPrice = curr.close;
         final returnPct = (sellPrice - buyPrice) / buyPrice;
@@ -268,7 +268,6 @@ class BacktestEngine {
         final drawdown = (peakEquity - currentEquity) / peakEquity;
         if (drawdown > maxDrawdown) maxDrawdown = drawdown;
         buyPrice = null;
-        totalSignals++;
       }
       // ATR止损检查
       if (buyPrice != null && curr.atr14 > 0) {
@@ -290,18 +289,21 @@ class BacktestEngine {
       final returnPct = (calcData.last.close - buyPrice) / buyPrice;
       tradeReturns.add(returnPct);
       currentEquity *= (1 + returnPct);
+      if (currentEquity > peakEquity) peakEquity = currentEquity;
+      final drawdown = (peakEquity - currentEquity) / peakEquity;
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
     }
-    return _buildResult(tradeReturns, totalSignals, currentEquity, maxDrawdown);
+    return _buildResult(tradeReturns, currentEquity, maxDrawdown);
   }
 
   /// 布林带下轨支撑回测
   static BacktestResult backtestBollSupport(List<HistoryKline> data) {
     if (data.length < 30) return _emptyResult();
 
-    final calcData = calcBOLL(List<HistoryKline>.from(data));
+    var calcData = calcBOLL(List<HistoryKline>.from(data));
+    calcData = calcATR(calcData);
     final tradeReturns = <double>[];
     double? buyPrice;
-    int totalSignals = 0;
     double peakEquity = 1.0;
     double currentEquity = 1.0;
     double maxDrawdown = 0;
@@ -310,7 +312,6 @@ class BacktestEngine {
       final curr = calcData[i];
       if (curr.bollLower > 0 && curr.low <= curr.bollLower * 1.005 && curr.close > curr.bollLower && buyPrice == null) {
         buyPrice = curr.close;
-        totalSignals++;
       } else if (curr.bollMid > 0 && curr.close > curr.bollMid && buyPrice != null) {
         final sellPrice = curr.close;
         final returnPct = (sellPrice - buyPrice) / buyPrice;
@@ -320,7 +321,6 @@ class BacktestEngine {
         final drawdown = (peakEquity - currentEquity) / peakEquity;
         if (drawdown > maxDrawdown) maxDrawdown = drawdown;
         buyPrice = null;
-        totalSignals++;
       }
       // ATR止损检查
       if (buyPrice != null && curr.atr14 > 0) {
@@ -342,18 +342,21 @@ class BacktestEngine {
       final returnPct = (calcData.last.close - buyPrice) / buyPrice;
       tradeReturns.add(returnPct);
       currentEquity *= (1 + returnPct);
+      if (currentEquity > peakEquity) peakEquity = currentEquity;
+      final drawdown = (peakEquity - currentEquity) / peakEquity;
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
     }
-    return _buildResult(tradeReturns, totalSignals, currentEquity, maxDrawdown);
+    return _buildResult(tradeReturns, currentEquity, maxDrawdown);
   }
 
   /// 均线多头排列回测
   static BacktestResult backtestMAMultiHead(List<HistoryKline> data) {
     if (data.length < 30) return _emptyResult();
 
-    final calcData = calcMA(List<HistoryKline>.from(data), [5, 10, 20]);
+    var calcData = calcMA(List<HistoryKline>.from(data), [5, 10, 20]);
+    calcData = calcATR(calcData);
     final tradeReturns = <double>[];
     double? buyPrice;
-    int totalSignals = 0;
     double peakEquity = 1.0;
     double currentEquity = 1.0;
     double maxDrawdown = 0;
@@ -366,7 +369,6 @@ class BacktestEngine {
 
       if (maMultiHead && !prevMaMultiHead && buyPrice == null) {
         buyPrice = curr.close;
-        totalSignals++;
       } else if (curr.ma5 < curr.ma10 && prev.ma5 >= prev.ma10 && buyPrice != null) {
         final sellPrice = curr.close;
         final returnPct = (sellPrice - buyPrice) / buyPrice;
@@ -376,7 +378,6 @@ class BacktestEngine {
         final drawdown = (peakEquity - currentEquity) / peakEquity;
         if (drawdown > maxDrawdown) maxDrawdown = drawdown;
         buyPrice = null;
-        totalSignals++;
       }
       // ATR止损检查
       if (buyPrice != null && curr.atr14 > 0) {
@@ -398,8 +399,11 @@ class BacktestEngine {
       final returnPct = (calcData.last.close - buyPrice) / buyPrice;
       tradeReturns.add(returnPct);
       currentEquity *= (1 + returnPct);
+      if (currentEquity > peakEquity) peakEquity = currentEquity;
+      final drawdown = (peakEquity - currentEquity) / peakEquity;
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
     }
-    return _buildResult(tradeReturns, totalSignals, currentEquity, maxDrawdown);
+    return _buildResult(tradeReturns, currentEquity, maxDrawdown);
   }
 
   static BacktestResult _emptyResult() {
@@ -410,7 +414,7 @@ class BacktestEngine {
     );
   }
 
-  static BacktestResult _buildResult(List<double> tradeReturns, int totalSignals, double currentEquity, double maxDrawdown) {
+  static BacktestResult _buildResult(List<double> tradeReturns, double currentEquity, double maxDrawdown) {
     final winningTrades = tradeReturns.where((r) => r > 0).length;
     final losingTrades = tradeReturns.where((r) => r < 0).length;
     final winRate = tradeReturns.isNotEmpty ? winningTrades / tradeReturns.length : 0.0;

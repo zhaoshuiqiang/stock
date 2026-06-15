@@ -110,8 +110,8 @@ void main() {
         mainNetFlow: 500000,
         mainNetFlowRate: 3.0,
       );
-      // 5.0 + 2.0 (changePct>2) + 0.5 (rate>0) + 0.5 (turnover 1-5) = 8.0
-      expect(RealtimeScorer.score(quote), equals(8.0));
+      // 5.0 + 1.5 (changePct>2) + 0.5 (rate>0) + 0.5 (turnover 1-5) = 7.5
+      expect(RealtimeScorer.score(quote), equals(7.5));
     });
 
     test('zero turnover does not affect score', () {

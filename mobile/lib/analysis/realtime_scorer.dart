@@ -13,7 +13,7 @@ class RealtimeScorer {
       } else if (changePct > 5) {
         realtimeScore += 2.0; // 强势上涨
       } else if (changePct > 2) {
-        realtimeScore += 2.0; // 明显上涨
+        realtimeScore += 1.5; // 明显上涨
       } else if (changePct > 0) {
         realtimeScore += 1.0; // 温和上涨
       } else if (changePct >= -2) {

@@ -593,7 +593,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                       const SizedBox(width: 4),
                       _buildTag('战法${record.activeStrategyCount}', const Color(0xFFFFC107)),
                       const SizedBox(width: 4),
-                      _buildTag('共振${record.confluenceScore}/8', Colors.cyan),
+                      _buildTag('共振${record.confluenceScore}/10', Colors.cyan),
                       const SizedBox(width: 4),
                       _buildTag('风险${record.riskLevel}', record.riskLevel == '高' ? Colors.red : record.riskLevel == '中高' ? Colors.orange : Colors.white38),
                       const Spacer(),

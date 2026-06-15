@@ -50,7 +50,7 @@ class SignalDetector {
         strength: 75,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
-        confidence: _calculateKDJConfidence(last, prev),
+        confidence: _calculateKDJConfidence(last, prev, signalType: 'buy'),
         signalCount: 1,
       ));
     } else if (last.k < last.d && prev.k >= prev.d && prev.k > 50) {
@@ -62,7 +62,7 @@ class SignalDetector {
         strength: 75,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
-        confidence: _calculateKDJConfidence(last, prev),
+        confidence: _calculateKDJConfidence(last, prev, signalType: 'sell'),
         signalCount: 1,
       ));
     }
@@ -276,15 +276,19 @@ class SignalDetector {
     // 3. 布林带突破/支撑
     if (last.bollUpper > 0) {
       if (last.close > last.bollUpper && prev.close <= prev.bollUpper) {
+        // 趋势行情中突破上轨为强势信号，震荡行情中为超买
+        final isTrending = last.adx14 > 25;
         signals.add(SignalItem(
-          type: 'sell',
+          type: isTrending ? 'buy' : 'sell',
           indicator: 'BOLL',
-          signal: '突破上轨',
-          description: '股价突破布林带上轨，超买状态',
-          strength: 70,
+          signal: isTrending ? '趋势突破上轨' : '突破上轨',
+          description: isTrending
+              ? '股价突破布林带上轨且趋势明确(ADX=${last.adx14.toStringAsFixed(1)})，强势突破'
+              : '股价突破布林带上轨，超买状态',
+          strength: isTrending ? 75 : 70,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,
-          confidence: 0.65,
+          confidence: isTrending ? 0.7 : 0.65,
           signalCount: 1,
         ));
       } else if (last.close < last.bollLower && prev.close >= prev.bollLower) {
@@ -468,10 +472,15 @@ class SignalDetector {
   }
 
   // 辅助方法：计算KDJ置信度
-  static double _calculateKDJConfidence(HistoryKline last, HistoryKline prev) {
+  static double _calculateKDJConfidence(HistoryKline last, HistoryKline prev, {String signalType = 'buy'}) {
     double base = 0.7;
-    if (last.j > 80) base += 0.05;  // J>80，可靠性更高
-    if (last.j < 0) base += 0.05;  // J<0，超卖确认
+    if (signalType == 'buy') {
+      if (last.j < 20) base += 0.05; // 超卖区金叉更可靠
+      if (last.j > 80) base -= 0.05; // 超买区金叉不可靠
+    } else {
+      if (last.j > 80) base += 0.05; // 超买区死叉更可靠
+      if (last.j < 0) base -= 0.05;  // 超卖区死叉不可靠
+    }
     return base.clamp(0.6, 0.9);
   }
 
@@ -713,10 +722,11 @@ class SignalDetector {
 
     final priceChange10d = (last.close / data[data.length - 11].close - 1) * 100;
 
-    // 吸筹形态：10日下跌>5% + 量能递减 + 近3日企稳放量
+    // 吸筹形态：10日下跌>5% + 前期量能递减(排除近3日) + 近3日企稳放量
     if (priceChange10d < -5) {
-      bool volDeclining = true;
-      for (int i = 1; i < 5; i++) {
+      // 检查第-4到-7天量能递减（排除近3天的企稳放量阶段）
+      bool volDeclining = recent10.length >= 7;
+      for (int i = 4; i < 8 && i < recent10.length - 1; i++) {
         if (recent10[recent10.length - i].volume >= recent10[recent10.length - i - 1].volume) {
           volDeclining = false;
           break;
@@ -725,7 +735,7 @@ class SignalDetector {
       final avgVol3 = recent3.map((d) => d.volume).reduce((a, b) => a + b) / 3;
       final avgVol5 = recent5.map((d) => d.volume).reduce((a, b) => a + b) / 5;
       final priceStable = (last.close / data[data.length - 4].close - 1).abs() < 2;
-      
+
       if (volDeclining && avgVol3 > avgVol5 * 1.2 && priceStable) {
         signals.add(SignalItem(
           type: 'buy',

@@ -457,31 +457,30 @@ List<HistoryKline> calcDMI(List<HistoryKline> data, {int period = 14}) {
     }
   }
 
-  // ADX = EMA of DX
+  // ADX = EMA of DX (Wilder标准方法)
   double adx = 0;
+  final initialCount = (2 * period > data.length ? data.length : 2 * period) - period;
   for (int i = period; i < 2 * period && i < data.length; i++) {
     adx += dxList[i];
   }
-  if (data.length >= 2 * period) {
-    adx /= period;
+  if (initialCount > 0) {
+    adx /= initialCount;
   }
 
   for (int i = 0; i < data.length; i++) {
     if (i < period) {
       result[i] = result[i].copyWith(plusDi14: 0, minusDi14: 0, dx: 0, adx14: 0);
-    } else if (i < 2 * period || data.length < 2 * period) {
+    } else if (i < 2 * period - 1) {
+      // 预热期：使用初始平均值，不做递推（避免双重计数）
       result[i] = result[i].copyWith(
         plusDi14: plusDi[i],
         minusDi14: minusDi[i],
         dx: dxList[i],
-        adx14: i == period ? dxList[period] : 0,
+        adx14: adx,
       );
     } else {
-      if (i == 2 * period - 1) {
-        // First ADX already computed above
-      } else {
-        adx = (adx * (period - 1) + dxList[i]) / period;
-      }
+      // 从2*period-1开始Wilder平滑
+      adx = (adx * (period - 1) + dxList[i]) / period;
       result[i] = result[i].copyWith(
         plusDi14: plusDi[i],
         minusDi14: minusDi[i],
@@ -695,7 +694,7 @@ Map<String, dynamic> getIndicatorSummary(List<HistoryKline> data) {
     }
   }
 
-  if (last.wr14 != null && last.wr14! > 0) {
+  if (last.wr14 != null) {
     summary['WR14'] = double.parse(last.wr14!.toStringAsFixed(2));
     if (last.wr14! > 80) {
       summary['WR信号'] = '超卖(WR=${last.wr14!.toStringAsFixed(1)})';
@@ -948,8 +947,9 @@ Map<String, dynamic> detectTrendSignals(List<HistoryKline> data) {
   }
 
   if (last.volMa5 > 0 && prev.volMa5 > 0) {
-    if (last.volume > prev.volume && prev.volume > prevPrev.volume) {
-      result['stabilization'].add('缩量反弹');
+    if (last.volume > prev.volume && prev.volume > prevPrev.volume
+          && last.close > prev.close) {
+      result['stabilization'].add('放量反弹');
     }
   }
 

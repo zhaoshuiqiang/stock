@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import '../analysis/indicators.dart';
-import '../analysis/signal_detector.dart';
+import '../analysis/signal_layer.dart';
 import '../analysis/signal_engine.dart';
 import '../analysis/strategy_engine.dart';
 import '../storage/database_service.dart';
@@ -212,7 +212,7 @@ class OpportunityEngine {
               if (klines.isEmpty) return null;
 
               final calculated = calcAllIndicators(klines);
-              final signals = SignalDetector.detectLayeredSignals(calculated);
+              final signals = SignalLayer.detectAllSignals(calculated);
               final analysis = generateAnalysis(calculated, quote);
               final strategies = evaluateStrategies(calculated, signals);
               final activeStrategies = strategies.where((s) => s.isActive).length;

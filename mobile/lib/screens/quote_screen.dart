@@ -1946,9 +1946,9 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                     children: [
                       Text('多指标共振', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
                       Text(
-                        '看多 ${analysis.confluenceScore}/8',
+                        '共振 ${analysis.confluenceScore}/10',
                         style: TextStyle(
-                          color: analysis.confluenceScore >= 5 ? const Color(0xFFef5350) : analysis.confluenceScore >= 3 ? Colors.orange : const Color(0xFF26a69a),
+                          color: analysis.confluenceScore >= 6 ? const Color(0xFFef5350) : analysis.confluenceScore >= 4 ? Colors.orange : const Color(0xFF26a69a),
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                         ),
@@ -1959,10 +1959,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                   ClipRRect(
                     borderRadius: BorderRadius.circular(4),
                     child: LinearProgressIndicator(
-                      value: analysis.confluenceScore / 8,
+                      value: (analysis.confluenceScore / 10).clamp(0.0, 1.0),
                       backgroundColor: const Color(0xFF26a69a).withOpacity(0.3),
                       valueColor: AlwaysStoppedAnimation(
-                        analysis.confluenceScore >= 5 ? const Color(0xFFef5350) : Colors.orange,
+                        analysis.confluenceScore >= 6 ? const Color(0xFFef5350) : analysis.confluenceScore >= 4 ? Colors.orange : const Color(0xFF26a69a),
                       ),
                       minHeight: 8,
                     ),

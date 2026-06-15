@@ -37,7 +37,7 @@ Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
   final entryHigh = price * 1.01;
   final target = nearestResistance ?? price * 1.1;
   final stopLoss = last.ma60 > 0
-      ? ([entryLow * 0.98, last.ma60 * 0.97].reduce((a, b) => a > b ? a : b))
+      ? [entryLow * 0.98, last.ma60 * 0.97].reduce((a, b) => a < b ? a : b)
       : entryLow * 0.98;
 
   final entryMid = (entryLow + entryHigh) / 2;
@@ -233,7 +233,7 @@ AnalysisResult generateAnalysis(
     riskFactors: riskResult.riskFactors,
     suggestions: suggestions,
     tradeLevels: tradeLevels.isNotEmpty ? tradeLevels : null,
-    confluenceScore: confluenceResult.bullCount,
+    confluenceScore: confluenceResult.score.round(),
     confluenceDetails: confluenceResult.details,
     reasons: reasons,
     opportunities: opportunities,
