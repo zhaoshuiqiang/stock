@@ -722,15 +722,30 @@ class WatchlistScreenState extends State<WatchlistScreen>
       );
     }
 
+    final pinnedCount = items.where((d) => (d['item'] as WatchlistItem).isPinned).length;
+    final hasDivider = pinnedCount > 0 && pinnedCount < items.length;
+    final totalCount = items.length + (hasDivider ? 1 : 0);
+
     return RefreshIndicator(
       color: _accentColor,
       backgroundColor: _cardColor,
       onRefresh: _loadWatchlist,
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        itemCount: items.length,
+        itemCount: totalCount,
         itemBuilder: (context, index) {
-          final data = items[index];
+          // 置顶/普通分隔线
+          if (hasDivider && index == pinnedCount) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Divider(height: 1, color: _borderColor.withOpacity(0.5)),
+            );
+          }
+
+          final dataIndex = (hasDivider && index > pinnedCount) ? index - 1 : index;
+          if (dataIndex >= items.length) return const SizedBox.shrink();
+
+          final data = items[dataIndex];
           final item = data['item'] as WatchlistItem;
           final quote = data['quote'] as QuoteData;
           final codeWithPrefix = data['codeWithPrefix'] as String;
@@ -822,14 +837,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
       },
       onDismissed: (_) => _removeFromWatchlist(item.code),
       child: GestureDetector(
-        onLongPress: () {
-          setState(() {
-            _isEditMode = true;
-            _selectedCodes.add(item.code);
-          });
-        },
+        onLongPress: () => _showItemMenu(item, codeWithPrefix),
         child: StockCard(
-          name: item.name,
+          name: item.isPinned ? '📌 ${item.name}' : item.name,
           code: codeWithPrefix,
           price: quote.price,
           changePct: quote.changePct,
@@ -849,6 +859,93 @@ class WatchlistScreenState extends State<WatchlistScreen>
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// 长按弹出菜单
+  void _showItemMenu(WatchlistItem item, String codeWithPrefix) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                item.name,
+                style: const TextStyle(color: _textPrimary, fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const Divider(height: 1, color: _borderColor),
+            ListTile(
+              leading: Icon(item.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                  color: _accentColor, size: 22),
+              title: Text(item.isPinned ? '取消置顶' : '置顶',
+                  style: const TextStyle(color: _textPrimary, fontSize: 15)),
+              onTap: () async {
+                Navigator.pop(context);
+                await _dbService.togglePin(item.code, !item.isPinned);
+                _loadWatchlist();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_alert_outlined, color: _accentColor, size: 22),
+              title: const Text('添加预警',
+                  style: TextStyle(color: _textPrimary, fontSize: 15)),
+              onTap: () {
+                Navigator.pop(context);
+                _addAlert(codeWithPrefix, item.name);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.checklist, color: _accentColor, size: 22),
+              title: const Text('多选编辑',
+                  style: TextStyle(color: _textPrimary, fontSize: 15)),
+              onTap: () {
+                Navigator.pop(context);
+                setState(() {
+                  _isEditMode = true;
+                  _selectedCodes.add(item.code);
+                });
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red, size: 22),
+              title: const Text('移除自选',
+                  style: TextStyle(color: Colors.red, fontSize: 15)),
+              onTap: () async {
+                Navigator.pop(context);
+                final confirmed = await showDialog<bool>(
+                  context: this.context,
+                  builder: (context) => AlertDialog(
+                    backgroundColor: _cardColor,
+                    title: const Text('确认删除', style: TextStyle(color: _textPrimary)),
+                    content: Text('确定要从自选股移除 ${item.name} 吗？',
+                        style: const TextStyle(color: _textSecondary)),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('取消', style: TextStyle(color: _textSecondary)),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('删除', style: TextStyle(color: Colors.red)),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirmed == true) _removeFromWatchlist(item.code);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );
@@ -1025,16 +1122,28 @@ class WatchlistScreenState extends State<WatchlistScreen>
             GestureDetector(
               onTap: () {
                 setState(() {
-                  final allCodes = _watchlist.map((w) => w.code).toSet();
-                  if (_selectedCodes.length == allCodes.length) {
-                    _selectedCodes.clear();
+                  // 全选范围限定为当前筛选后的列表
+                  final filteredCodes = _getFilteredAndSortedItems()
+                      .map((d) => (d['item'] as WatchlistItem).code)
+                      .toSet();
+                  final allFilteredSelected = filteredCodes.isNotEmpty &&
+                      filteredCodes.every((c) => _selectedCodes.contains(c));
+                  if (allFilteredSelected) {
+                    _selectedCodes.removeAll(filteredCodes);
                   } else {
-                    _selectedCodes = allCodes;
+                    _selectedCodes.addAll(filteredCodes);
                   }
                 });
               },
               child: Text(
-                _selectedCodes.length == _watchlist.length ? '取消全选' : '全选',
+                () {
+                  final filteredCodes = _getFilteredAndSortedItems()
+                      .map((d) => (d['item'] as WatchlistItem).code)
+                      .toSet();
+                  final allFilteredSelected = filteredCodes.isNotEmpty &&
+                      filteredCodes.every((c) => _selectedCodes.contains(c));
+                  return allFilteredSelected ? '取消全选' : '全选';
+                }(),
                 style: TextStyle(
                   color: _selectedCodes.isEmpty
                       ? _textSecondary.withOpacity(0.5)

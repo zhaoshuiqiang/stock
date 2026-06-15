@@ -1,0 +1,129 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:stock_analyzer/analysis/realtime_scorer.dart';
+import 'package:stock_analyzer/models/stock_models.dart';
+
+void main() {
+  group('RealtimeScorer', () {
+    test('null quote returns neutral score (5.0)', () {
+      expect(RealtimeScorer.score(null), equals(5.0));
+    });
+
+    test('quote with price <= 0 returns neutral score (5.0)', () {
+      final quote = QuoteData(code: '000001', name: '测试', price: 0);
+      expect(RealtimeScorer.score(quote), equals(5.0));
+    });
+
+    test('strong rise gets high score', () {
+      final quote = QuoteData(
+        code: '000001',
+        name: '测试',
+        price: 10.0,
+        changePct: 9.0,
+        turnover: 3.0,
+        mainNetFlow: 1000000,
+        mainNetFlowRate: 12.0,
+      );
+      // base 5.0 + 2.5 (changePct>8) + 1.5 (rate>10) + 0.5 (turnover 1-5) = 9.5
+      expect(RealtimeScorer.score(quote), equals(9.5));
+    });
+
+    test('strong fall gets low score', () {
+      final quote = QuoteData(
+        code: '000001',
+        name: '测试',
+        price: 10.0,
+        changePct: -9.0,
+        turnover: 15.0,
+        mainNetFlow: -1000000,
+        mainNetFlowRate: -12.0,
+      );
+      // base 5.0 - 2.5 (changePct<-8) - 1.5 (rate<=-10) - 0.5 (turnover>10) = 0.5
+      expect(RealtimeScorer.score(quote), equals(0.5));
+    });
+
+    test('positive fund flow increases score', () {
+      final quoteNoFlow = QuoteData(
+        code: '000001',
+        name: '测试',
+        price: 10.0,
+        changePct: 1.0,
+        mainNetFlow: 0,
+        mainNetFlowRate: 0,
+      );
+      final quoteWithFlow = QuoteData(
+        code: '000001',
+        name: '测试',
+        price: 10.0,
+        changePct: 1.0,
+        mainNetFlow: 1000000,
+        mainNetFlowRate: 6.0,
+      );
+      // No flow: 5.0 + 1.0 = 6.0
+      expect(RealtimeScorer.score(quoteNoFlow), equals(6.0));
+      // With flow: 5.0 + 1.0 + 1.0 = 7.0
+      expect(RealtimeScorer.score(quoteWithFlow), equals(7.0));
+      expect(
+        RealtimeScorer.score(quoteWithFlow) > RealtimeScorer.score(quoteNoFlow),
+        isTrue,
+      );
+    });
+
+    test('score is always within 0-10 range even with extreme values', () {
+      // Extreme positive
+      final extremePositive = QuoteData(
+        code: '000001',
+        name: '测试',
+        price: 10.0,
+        changePct: 20.0,
+        turnover: 3.0,
+        mainNetFlow: 1000000,
+        mainNetFlowRate: 50.0,
+      );
+      // 5.0 + 2.5 + 1.5 + 0.5 = 9.5, still within range
+      final scorePositive = RealtimeScorer.score(extremePositive);
+      expect(scorePositive, greaterThanOrEqualTo(0.0));
+      expect(scorePositive, lessThanOrEqualTo(10.0));
+
+      // Extreme negative
+      final extremeNegative = QuoteData(
+        code: '000001',
+        name: '测试',
+        price: 10.0,
+        changePct: -20.0,
+        turnover: 15.0,
+        mainNetFlow: -1000000,
+        mainNetFlowRate: -50.0,
+      );
+      // 5.0 - 2.5 - 1.5 - 0.5 = 0.5, clamped to >= 0
+      final scoreNegative = RealtimeScorer.score(extremeNegative);
+      expect(scoreNegative, greaterThanOrEqualTo(0.0));
+      expect(scoreNegative, lessThanOrEqualTo(10.0));
+    });
+
+    test('moderate rise with moderate values', () {
+      final quote = QuoteData(
+        code: '000001',
+        name: '测试',
+        price: 10.0,
+        changePct: 3.0,
+        turnover: 2.0,
+        mainNetFlow: 500000,
+        mainNetFlowRate: 3.0,
+      );
+      // 5.0 + 2.0 (changePct>2) + 0.5 (rate>0) + 0.5 (turnover 1-5) = 8.0
+      expect(RealtimeScorer.score(quote), equals(8.0));
+    });
+
+    test('zero turnover does not affect score', () {
+      final quote = QuoteData(
+        code: '000001',
+        name: '测试',
+        price: 10.0,
+        changePct: 1.0,
+        turnover: 0,
+      );
+      // 5.0 + 1.0 = 6.0 (turnover <= 0, no adjustment)
+      expect(RealtimeScorer.score(quote), equals(6.0));
+    });
+  });
+}

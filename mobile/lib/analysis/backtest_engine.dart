@@ -183,7 +183,7 @@ class BacktestEngine {
         '胜率: ${(result.winRate * 100).toStringAsFixed(1)}%\n'
         '盈利次数: ${result.winningTrades} | 亏损次数: ${result.losingTrades}\n'
         '平均盈利: ${result.avgWinPct.toStringAsFixed(2)}% | 平均亏损: ${result.avgLossPct.toStringAsFixed(2)}%\n'
-        '盈亏比: ${result.profitFactor > 0 ? result.profitFactor.toStringAsFixed(2) : "N/A"}\n'
+        '盈亏比: ${result.profitFactor == double.infinity ? "全胜" : (result.profitFactor > 0 ? result.profitFactor.toStringAsFixed(2) : "N/A")}\n'
         '总收益: ${result.totalReturn.toStringAsFixed(2)}%\n'
         '最大回撤: ${(result.maxDrawdown * 100).toStringAsFixed(2)}%';
   }
@@ -418,13 +418,21 @@ class BacktestEngine {
     final losses = tradeReturns.where((r) => r < 0).toList();
     final double avgWinPct = wins.isNotEmpty ? wins.reduce((a, b) => a + b) / wins.length.toDouble() * 100 : 0;
     final double avgLossPct = losses.isNotEmpty ? losses.reduce((a, b) => a + b) / losses.length.toDouble() * 100 : 0;
-    // 全胜时盈亏比无意义（分母为0），用999.99表示极大值，避免UI层toStringAsFixed崩溃
-    final double profitFactor = losses.isNotEmpty
-        ? (wins.isNotEmpty ? wins.reduce((a, b) => a + b) : 0) / losses.map((l) => l.abs()).reduce((a, b) => a + b)
-        : (wins.isNotEmpty ? 999.99 : 0);
+    // 全胜时盈亏比用 double.infinity 表示，UI层统一处理显示
+    final double profitFactor;
+    if (tradeReturns.isEmpty) {
+      profitFactor = 0;
+    } else if (losses.isEmpty) {
+      profitFactor = wins.isNotEmpty ? double.infinity : 0;
+    } else {
+      profitFactor = (wins.isNotEmpty ? wins.reduce((a, b) => a + b) : 0) / losses.map((l) => l.abs()).reduce((a, b) => a + b);
+    }
+
+    // 完成的交易数（tradeReturns）才是有效信号数
+    final effectiveSignals = tradeReturns.length;
 
     return BacktestResult(
-      totalSignals: totalSignals,
+      totalSignals: effectiveSignals,
       winningTrades: winningTrades,
       losingTrades: losingTrades,
       winRate: winRate,

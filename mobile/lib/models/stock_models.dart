@@ -1003,11 +1003,13 @@ class WatchlistItem {
   final String code;
   final String name;
   final DateTime addedAt;
+  final bool isPinned;
 
   WatchlistItem({
     required this.code,
     required this.name,
     DateTime? addedAt,
+    this.isPinned = false,
   }) : addedAt = addedAt ?? DateTime.now();
 
   factory WatchlistItem.fromJson(Map<String, dynamic> json) {
@@ -1015,6 +1017,7 @@ class WatchlistItem {
       code: json['code'] ?? '',
       name: json['name'] ?? '',
       addedAt: DateTime.now(),
+      isPinned: (json['is_pinned'] as int?) == 1,
     );
   }
 }

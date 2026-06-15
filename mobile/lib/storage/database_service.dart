@@ -23,7 +23,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 6,
+      version: 7,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -113,6 +113,11 @@ class DatabaseService {
             )
           ''');
         }
+        if (oldVersion < 7) {
+          await db.execute('''
+            ALTER TABLE watchlist ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0
+          ''');
+        }
       },
     );
   }
@@ -122,7 +127,8 @@ class DatabaseService {
       CREATE TABLE watchlist (
         code TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        added_at INTEGER NOT NULL
+        added_at INTEGER NOT NULL,
+        is_pinned INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
@@ -284,14 +290,25 @@ class DatabaseService {
     final db = await database;
     final result = await db.query(
       'watchlist',
-      orderBy: 'added_at DESC',
+      orderBy: 'is_pinned DESC, added_at DESC',
     );
 
     return result.map((row) => WatchlistItem(
       code: row['code'] as String,
       name: row['name'] as String,
       addedAt: DateTime.fromMillisecondsSinceEpoch(row['added_at'] as int),
+      isPinned: (row['is_pinned'] as int) == 1,
     )).toList();
+  }
+
+  Future<void> togglePin(String code, bool pinned) async {
+    final db = await database;
+    await db.update(
+      'watchlist',
+      {'is_pinned': pinned ? 1 : 0},
+      where: 'code = ?',
+      whereArgs: [code],
+    );
   }
 
   Future<int> addAlert(AlertRule rule) async {

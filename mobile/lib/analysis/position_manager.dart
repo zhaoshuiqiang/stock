@@ -7,7 +7,7 @@ class PositionManager {
   /// 公式: suggestedPosition = clamp(baseRiskPct / atrPct, minPosition, maxPosition)
   /// - atrPct = ATR14 / close × 100（波动率百分比）
   /// - 波动率越高，建议仓位越低
-  static double calculatePosition(HistoryKline kline, {double baseRiskPct = 10.0, double minPosition = 0.1, double maxPosition = 1.0}) {
+  static double calculatePosition(HistoryKline kline, {double baseRiskPct = 2.5, double minPosition = 0.1, double maxPosition = 1.0}) {
     if (kline.atr14 <= 0 || kline.close <= 0) return 0.5; // 默认半仓
 
     final atrPct = kline.atr14 / kline.close * 100;
@@ -24,9 +24,11 @@ class PositionManager {
   static String getPositionAdvice(double position) {
     if (position >= 0.8) {
       return '波动率较低，可重仓操作，建议仓位 ${(position * 100).round()}%';
-    } else if (position >= 0.5) {
-      return '波动率适中，建议仓位 ${(position * 100).round()}%';
-    } else if (position >= 0.3) {
+    } else if (position >= 0.6) {
+      return '波动率适中偏小，建议仓位 ${(position * 100).round()}%';
+    } else if (position >= 0.4) {
+      return '波动率适中，建议半仓 ${(position * 100).round()}%';
+    } else if (position >= 0.25) {
       return '波动率较高，建议轻仓 ${(position * 100).round()}%';
     } else {
       return '波动率极高，建议迷你仓 ${(position * 100).round()}%，严格止损';

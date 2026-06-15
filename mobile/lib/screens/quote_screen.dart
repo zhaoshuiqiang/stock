@@ -2049,7 +2049,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                   SizedBox(width: 80, child: Text(entry.key, style: const TextStyle(fontSize: 12, color: Colors.white70))),
                   Expanded(
                     child: Text(
-                      '胜率${(r.winRate * 100).toStringAsFixed(0)}% | 盈亏比${r.profitFactor.toStringAsFixed(2)} | 最大回撤${r.maxDrawdown.toStringAsFixed(1)}%',
+                      '胜率${(r.winRate * 100).toStringAsFixed(0)}% | 盈亏比${r.profitFactor == double.infinity ? "全胜" : r.profitFactor.toStringAsFixed(2)} | 最大回撤${(r.maxDrawdown * 100).toStringAsFixed(1)}%',
                       style: TextStyle(fontSize: 11, color: r.winRate > 0.4 ? Colors.green.shade300 : Colors.orange.shade300),
                     ),
                   ),

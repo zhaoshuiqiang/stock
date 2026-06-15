@@ -6,6 +6,7 @@ import 'package:stock_analyzer/api/api_client.dart';
 import 'package:stock_analyzer/storage/database_service.dart';
 import 'package:stock_analyzer/core/navigator_key.dart';
 import 'package:stock_analyzer/screens/webview_screen.dart';
+import 'package:stock_analyzer/models/stock_models.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -26,6 +27,12 @@ class NotificationService {
   static const String _channelId = 'stock_news';
   static const String _channelName = '股票资讯推送';
   static const String _channelDesc = '自选股和财经快讯推送通知';
+  static const String _alertChannelId = 'stock_alerts';
+  static const String _alertChannelName = '预警通知';
+  static const String _alertChannelDesc = '自选股价格和指标预警通知';
+
+  // 预警冷却时间：同一预警5分钟内不重复触发
+  static const int _alertCooldownMinutes = 5;
 
   Future<void> init() async {
     if (_initialized) return;
@@ -114,10 +121,12 @@ class NotificationService {
     final interval = await getIntervalMinutes();
     _pollTimer = Timer.periodic(Duration(minutes: interval), (_) {
       _checkForNewNews();
+      _checkAlerts();
     });
 
     // 启动时立即检查一次
     _checkForNewNews();
+    _checkAlerts();
   }
 
   void stopPolling() {
@@ -183,6 +192,120 @@ class NotificationService {
     }
   }
 
+  /// 检查所有启用的预警规则
+  Future<void> _checkAlerts() async {
+    try {
+      final alerts = await _dbService.getEnabledAlerts();
+      if (alerts.isEmpty) return;
+
+      // 按股票代码分组，减少API调用
+      final codeGroups = <String, List<AlertRule>>{};
+      for (final alert in alerts) {
+        codeGroups.putIfAbsent(alert.code, () => []).add(alert);
+      }
+
+      int notificationId = 100; // 预警通知ID从100开始，避免与新闻通知冲突
+
+      for (final entry in codeGroups.entries) {
+        final code = entry.key;
+        final rules = entry.value;
+
+        // 获取实时行情
+        final codeWithPrefix = _apiClient.addMarketPrefix(code);
+        QuoteData? quote;
+        try {
+          quote = await _apiClient.getRealtimeQuote(codeWithPrefix);
+        } catch (_) {
+          continue;
+        }
+        if (quote == null || quote.price <= 0) continue;
+
+        for (final rule in rules) {
+          // 冷却检查：5分钟内不重复触发
+          if (rule.lastTriggeredAt != null) {
+            final elapsed = DateTime.now().difference(rule.lastTriggeredAt!);
+            if (elapsed.inMinutes < _alertCooldownMinutes) continue;
+          }
+
+          final triggered = _evaluateAlert(rule, quote);
+          if (triggered) {
+            final desc = _formatAlertDesc(rule, quote);
+            await _showAlertNotification(
+              id: notificationId++,
+              title: '${rule.name} 预警触发',
+              body: desc,
+              payload: codeWithPrefix,
+            );
+            // 更新触发时间
+            await _dbService.updateAlertTriggerTime(rule.id, DateTime.now());
+          }
+        }
+      }
+    } catch (e) {
+      // 预警检查失败不影响新闻轮询
+    }
+  }
+
+  /// 评估单个预警规则是否触发
+  bool _evaluateAlert(AlertRule rule, QuoteData quote) {
+    final type = rule.conditionType.isNotEmpty ? rule.conditionType : rule.alertType;
+    switch (type) {
+      case 'price_above':
+      case 'above':
+        return quote.price >= rule.thresholdValue;
+      case 'price_below':
+      case 'below':
+        return quote.price <= rule.thresholdValue;
+      case 'change_above':
+      case 'rise':
+        return quote.changePct >= rule.thresholdValue;
+      case 'change_below':
+      case 'fall':
+        return quote.changePct <= -rule.thresholdValue;
+      case 'indicator':
+        return _evaluateIndicatorAlert(rule, quote);
+      default:
+        return false;
+    }
+  }
+
+  /// 评估指标类预警
+  bool _evaluateIndicatorAlert(AlertRule rule, QuoteData quote) {
+    // 指标预警需要K线数据，此处仅基于行情数据做简单判断
+    // 完整指标计算需要在应用内维护K线缓存，当前版本先支持基础指标
+    switch (rule.indicatorType) {
+      case '成交量':
+        // 成交量超过阈值（手数）
+        return quote.volume > 0 && quote.volume >= rule.thresholdValue;
+      default:
+        // RSI/MACD/KDJ/MA 等需要K线数据，暂不支持自动触发
+        return false;
+    }
+  }
+
+  /// 格式化预警描述
+  String _formatAlertDesc(AlertRule rule, QuoteData quote) {
+    final type = rule.conditionType.isNotEmpty ? rule.conditionType : rule.alertType;
+    switch (type) {
+      case 'price_above':
+      case 'above':
+        return '当前价 ${quote.price.toStringAsFixed(2)}，已高于 ${rule.thresholdValue.toStringAsFixed(2)}';
+      case 'price_below':
+      case 'below':
+        return '当前价 ${quote.price.toStringAsFixed(2)}，已低于 ${rule.thresholdValue.toStringAsFixed(2)}';
+      case 'change_above':
+      case 'rise':
+        return '当前涨幅 ${quote.changePct.toStringAsFixed(2)}%，已超过 ${rule.thresholdValue.toStringAsFixed(1)}%';
+      case 'change_below':
+      case 'fall':
+        return '当前跌幅 ${quote.changePct.toStringAsFixed(2)}%，已超过 ${rule.thresholdValue.toStringAsFixed(1)}%';
+      case 'indicator':
+        return '${rule.indicatorType} 触发阈值 ${rule.thresholdValue}';
+      default:
+        return '预警条件已满足';
+    }
+  }
+
   Future<void> _showNotification({
     required int id,
     required String title,
@@ -196,6 +319,29 @@ class NotificationService {
       importance: Importance.high,
       priority: Priority.high,
       showWhen: true,
+    );
+    const iosDetails = DarwinNotificationDetails();
+    final details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+    await _plugin.show(id, title, body, details, payload: payload);
+  }
+
+  Future<void> _showAlertNotification({
+    required int id,
+    required String title,
+    required String body,
+    String? payload,
+  }) async {
+    final androidDetails = AndroidNotificationDetails(
+      _alertChannelId,
+      _alertChannelName,
+      channelDescription: _alertChannelDesc,
+      importance: Importance.high,
+      priority: Priority.high,
+      showWhen: true,
+      color: const Color(0xFFE74C3C),
     );
     const iosDetails = DarwinNotificationDetails();
     final details = NotificationDetails(

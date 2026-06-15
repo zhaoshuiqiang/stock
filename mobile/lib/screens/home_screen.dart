@@ -6,6 +6,7 @@ import '../analysis/sector_pick_engine.dart';
 import '../storage/database_service.dart';
 import 'quote_screen.dart';
 import 'sector_screen.dart';
+import 'quant_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -237,6 +238,45 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             child: ListView(
               padding: const EdgeInsets.all(8),
               children: [
+                Card(
+                  margin: const EdgeInsets.all(8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const QuantScreen()),
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.analytics, color: Colors.blue, size: 28),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('量化分析', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 2),
+                                Text('选择股票，运行热门量化策略实时分析', style: textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right, color: Colors.white38),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
                 Card(
                   margin: const EdgeInsets.all(8),
                   child: Padding(
