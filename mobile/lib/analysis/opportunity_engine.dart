@@ -251,11 +251,17 @@ class OpportunityEngine {
     }
   }
 
-  /// 获取市场择时结果（仅调用一次）
+  /// 获取市场择时结果（仅调用一次，含情绪数据）
   static Future<MarketTimingResult?> _fetchMarketTiming() async {
     try {
-      final context = await MarketContextProvider.getMarketContext();
-      return MarketTiming.analyze(marketContext: context);
+      final results = await Future.wait([
+        MarketContextProvider.getMarketContext(),
+        ApiClient().getMarketSentiment(),
+      ]);
+      return MarketTiming.analyze(
+        marketContext: results[0] as MarketContext?,
+        marketSentiment: results[1] as MarketSentiment?,
+      );
     } catch (_) { return null; }
   }
 

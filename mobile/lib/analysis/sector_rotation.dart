@@ -19,7 +19,7 @@ class SectorRotation {
       if (s.limitUpCount >= 10) ss += 4.0; else if (s.limitUpCount >= 5) ss += 3.0; else if (s.limitUpCount >= 3) ss += 2.0; else if (s.limitUpCount >= 1) ss += 1.0;
       if (s.mainNetFlow > 5) ss += 2.0; else if (s.mainNetFlow > 2) ss += 1.5; else if (s.mainNetFlow > 0) ss += 0.8; else if (s.mainNetFlow < -3) ss -= 0.5;
       int cd = 0;
-      if (historyData != null && historyData.containsKey(s.code)) for (int i = historyData[s.code]!.length - 1; i >= 0; i--) { if (historyData[s.code]![i] >= 5.0) cd++; else break; }
+      if (historyData != null && historyData.containsKey(s.code)) for (int i = (historyData[s.code]?.length ?? 0) - 1; i >= 0; i--) { if ((historyData[s.code]?[i] ?? 0) >= 5.0) cd++; else break; }
       if (cd >= 3) ss += 1.0; else if (cd >= 2) ss += 0.5;
       analyses.add(SectorAnalysis(name: s.name, code: s.code, changePct: s.changePct, limitUpCount: s.limitUpCount, mainNetFlow: s.mainNetFlow, consecutiveStrongDays: cd, strengthScore: ss, isMainLine: ss >= 6.5 && s.limitUpCount >= 2));
     }

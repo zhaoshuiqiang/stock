@@ -6,10 +6,11 @@ class RealtimeScorer {
     double s = 5.0;
     if (quote != null && quote.price > 0) {
       final cp = quote.changePct;
-      if (cp > 8) s += 0.3;
-      else if (cp > 5) s += 1.5;
-      else if (cp > 2) s += 2.0;
-      else if (cp > 0) s += 1.2;
+      // 倒U型评分：小涨最优，大涨抑制追高，大跌惩罚
+      if (cp > 8) s += 0.8;       // 大涨：抑制追高但给一定认可
+      else if (cp > 5) s += 1.5;  // 强势上涨
+      else if (cp > 2) s += 2.0;  // 温和上涨，最优区间
+      else if (cp > 0) s += 1.2;  // 小幅上涨
       else if (cp >= -2) s += 0.5;
       else if (cp >= -5) s -= 0.5;
       else if (cp >= -8) s -= 1.5;

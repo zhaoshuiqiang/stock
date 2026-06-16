@@ -163,8 +163,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
     }
     // 无分析数据或推荐为空时用涨跌幅
     if (quote.changePct > 0) return '偏多观望';
-    if (quote.changePct < 0) return '偏空观望';
-    return '偏空观望';
+    if (quote.changePct < 0) return '中性';
+    return '中性';
   }
 
   List<Map<String, dynamic>> _getFilteredAndSortedItems() {

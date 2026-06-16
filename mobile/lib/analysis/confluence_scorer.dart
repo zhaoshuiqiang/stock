@@ -40,8 +40,10 @@ class ConfluenceScorer {
     final bollBear = last.bollMid > 0 && last.close < last.bollMid;
     final volBull = last.volMa5 > 0 && last.volume > last.volMa5 && last.close > last.open;
     final volBear = last.volMa5 > 0 && last.volume > last.volMa5 && last.close < last.open;
-    final wrBull = last.wr14 != null && last.wr14! > 80;
-    final wrBear = last.wr14 != null && last.wr14! < 20;
+    // WR是倒挂指标：值越小越超买，越大越超卖
+    // <20=超买(偏空)，>80=超卖(偏多)
+    final wrBull = last.wr14 != null && last.wr14! > 80; // 超卖→看多
+    final wrBear = last.wr14 != null && last.wr14! < 20; // 超买→看空
     final cciBull = last.cci14 != null && last.cci14! > 100;
     final cciBear = last.cci14 != null && last.cci14! < -100;
     final hasGapUp = signals.any((s) => s.signal.contains('向上跳空'));

@@ -16,6 +16,7 @@ class LimitUpAnalysis {
 }
 
 class LimitUpAnalyzer {
+  static const _probByDays = [0.75, 0.65, 0.55, 0.45, 0.40];
   static LimitUpAnalysis analyzeSingle(LimitUpStock stock) {
     double score = 5.0; final signals = <String>[];
     if (stock.consecutiveDays >= 5) { score += 3.0; signals.add('${stock.consecutiveDays}连板，市场龙头'); }
@@ -47,7 +48,7 @@ class LimitUpAnalyzer {
     double prob = 0.5;
     if (stock.consecutiveDays == 1) prob = tm < 10*60 ? 0.75 : tm < 13*60 ? 0.65 : 0.45;
     else if (stock.consecutiveDays == 2) prob = tm < 10*60 ? 0.80 : 0.60;
-    else prob = [0.75,0.65,0.55,0.45,0.40][stock.consecutiveDays.clamp(3,7)-3];
+    else prob = _probByDays[stock.consecutiveDays.clamp(3,7)-3];
     if (stock.limitUpType.contains('一字板')) prob += 0.1;
 
     String quality;
