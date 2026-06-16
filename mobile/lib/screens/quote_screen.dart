@@ -2258,14 +2258,13 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
   String _formatMarketCap(double value) {
     if (value <= 0) return '--';
+    // 自动修正：市值<1亿大概率是单位错误(万元未转元)，×10000恢复
+    if (value < 1e8 && value > 0) value *= 10000;
     if (value.abs() >= 1e12) {
       return '${(value / 1e12).toStringAsFixed(2)}万亿';
-    } else if (value.abs() >= 1e8) {
+    } else {
       return '${(value / 1e8).toStringAsFixed(2)}亿';
-    } else if (value.abs() >= 1e4) {
-      return '${(value / 1e4).toStringAsFixed(2)}万';
     }
-    return '${value.toStringAsFixed(0)}元';
   }
 
   @override
