@@ -7,7 +7,8 @@ import '../models/stock_models.dart';
 import '../analysis/indicators.dart';
 import '../analysis/signal_layer.dart';
 import '../analysis/signal_engine.dart';
-import '../analysis/strategy_engine.dart';
+import '../analysis/market_timing.dart';
+import '../api/market_context_provider.dart';
 import '../storage/database_service.dart';
 
 /// 机会分析结果
@@ -131,6 +132,7 @@ class OpportunityEngine {
 
   /// 释放资源并重置内部状态，允许单例后续继续使用
   void dispose() {
+    _isRunning = false;
     _progressController.close();
   }
 
@@ -145,13 +147,12 @@ class OpportunityEngine {
   OpportunityProgress? _latestProgress;
   OpportunityProgress? get latestProgress => _latestProgress;
 
-  /// 执行机会分析（异步，通过 progressStream 广播进度）
+  /// 执行机会分析（优化版：MarketTiming仅计算一次，并发度提升，K线天数缩减）
   Future<void> analyze() async {
     if (_isRunning) {
       _emit(OpportunityProgress(status: OpportunityStatus.alreadyRunning));
       return;
     }
-
     _isRunning = true;
 
     try {
@@ -159,96 +160,78 @@ class OpportunityEngine {
       _emit(OpportunityProgress(status: OpportunityStatus.fetching));
       final watchlist = await _dbService.getWatchlist();
       if (watchlist.isEmpty) {
-        _emit(OpportunityProgress(
-          status: OpportunityStatus.complete,
-          results: [],
-          totalCount: 0,
-        ));
+        _emit(OpportunityProgress(status: OpportunityStatus.complete, results: [], totalCount: 0));
+        _isRunning = false;
         return;
       }
-
       final totalCount = watchlist.length;
-      _emit(OpportunityProgress(
-        status: OpportunityStatus.analyzing,
-        totalCount: totalCount,
-        completedCount: 0,
-      ));
 
-      // 2. 批量获取行情
+      // 2. 批量获取行情 + 市场环境（并行）
       final prefixedCodes = watchlist.map((item) => _apiClient.addMarketPrefix(item.code)).toList();
-      List<QuoteData> batchQuotes;
-      try {
-        batchQuotes = await _apiClient.getBatchRealtimeQuotes(prefixedCodes);
-      } catch (e) {
-        batchQuotes = [];
-      }
+      final futures = <Future>[
+        _apiClient.getBatchRealtimeQuotes(prefixedCodes).catchError((_) => <QuoteData>[]),
+        _fetchMarketTiming(),
+      ];
+      final results_futures = await Future.wait(futures);
+      final batchQuotes = results_futures[0] as List<QuoteData>;
 
       final quoteMap = <String, QuoteData>{};
       for (final q in batchQuotes) {
         quoteMap[q.code] = q;
       }
 
-      // 3. 分批分析，并发5
-      const batchSize = 5;
+      final marketTimingResult = results_futures[1] as MarketTimingResult?;
+      final positionFactor = marketTimingResult != null ? MarketTiming.getPositionAdjustment(marketTimingResult) : null;
+
+      _emit(OpportunityProgress(status: OpportunityStatus.analyzing, totalCount: totalCount, completedCount: 0));
+
+      // 3. 分批分析，并发10（优化：kline days=60）
+      const batchSize = 10;
+      const klineDays = 60;
       final results = <OpportunityResult?>[];
       int completedCount = 0;
 
       for (int i = 0; i < watchlist.length; i += batchSize) {
         final batch = watchlist.sublist(i, (i + batchSize).clamp(0, watchlist.length));
-        final batchResults = await Future.wait(
-          batch.map((item) async {
-            try {
-              final prefixedCode = _apiClient.addMarketPrefix(item.code);
-              QuoteData? quote = quoteMap[prefixedCode];
-              if (quote == null) {
-                try {
-                  quote = await _apiClient.getRealtimeQuote(prefixedCode);
-                } catch (e) {
-                  // ignore
-                }
-              }
-
-              final klines = await _apiClient.getStockHistory(prefixedCode, days: 120);
-              if (klines.isEmpty) return null;
-
-              final calculated = calcAllIndicators(klines);
-              final signals = SignalLayer.detectAllSignals(calculated);
-              final analysis = generateAnalysis(calculated, quote);
-              final strategies = evaluateStrategies(calculated, signals);
-              final activeStrategies = strategies.where((s) => s.isActive).length;
-
-              final last = calculated.last;
-              final topSignals = signals.take(2).map((s) =>
-                  '${s.type == 'buy' ? '▲' : '▼'}${s.signal}').toList();
-
-              return OpportunityResult(
-                code: item.code,
-                name: item.name,
-                price: quote?.price ?? last.close,
-                changePct: quote?.changePct ?? last.changePct,
-                score: analysis.score,
-                recommendation: analysis.recommendation,
-                riskLevel: analysis.riskLevel,
-                buySignalCount: signals.where((s) => s.type == 'buy').length,
-                sellSignalCount: signals.where((s) => s.type == 'sell').length,
-                activeStrategyCount: activeStrategies,
-                confluenceScore: analysis.confluenceScore,
-                tradeLevels: analysis.tradeLevels,
-                topSignals: topSignals,
-              );
-            } catch (e) {
-              return null;
+        final batchResults = await Future.wait(batch.map((item) async {
+          try {
+            final prefixedCode = _apiClient.addMarketPrefix(item.code);
+            QuoteData? quote = quoteMap[prefixedCode];
+            if (quote == null) {
+              try { quote = await _apiClient.getRealtimeQuote(prefixedCode); } catch (_) {}
             }
-          }),
-        );
+
+            final klines = await _apiClient.getStockHistory(prefixedCode, days: klineDays);
+            if (klines.isEmpty) return null;
+
+            final calculated = calcAllIndicators(klines);
+            final analysis = generateAnalysis(calculated, quote);
+
+            final signals = analysis.signals;
+            final last = calculated.last;
+            final topSignals = signals.take(2).map((s) =>
+                '${s.type == 'buy' ? '▲' : '▼'}${s.signal}').toList();
+
+            return OpportunityResult(
+              code: item.code, name: item.name,
+              price: quote?.price ?? last.close,
+              changePct: quote?.changePct ?? last.changePct,
+              score: analysis.score, recommendation: analysis.recommendation,
+              riskLevel: analysis.riskLevel,
+              buySignalCount: signals.where((s) => s.type == 'buy').length,
+              sellSignalCount: signals.where((s) => s.type == 'sell').length,
+              activeStrategyCount: 0,
+              confluenceScore: analysis.confluenceScore,
+              tradeLevels: analysis.tradeLevels,
+              topSignals: topSignals,
+            );
+          } catch (_) { return null; }
+        }));
+
         results.addAll(batchResults);
         completedCount += batch.length;
-
-        _emit(OpportunityProgress(
-          status: OpportunityStatus.analyzing,
-          totalCount: totalCount,
-          completedCount: completedCount.clamp(0, totalCount),
-        ));
+        _emit(OpportunityProgress(status: OpportunityStatus.analyzing,
+            totalCount: totalCount, completedCount: completedCount.clamp(0, totalCount)));
       }
 
       // 4. 排序并保存
@@ -256,23 +239,24 @@ class OpportunityEngine {
       opportunities.sort((a, b) => b.score.compareTo(a.score));
 
       _emit(OpportunityProgress(status: OpportunityStatus.saving));
-      final now = DateTime.now();
-      final maps = opportunities.map((o) => o.toMap(now)).toList();
-      await _dbService.replaceOpportunityResults(maps);
+      await _dbService.replaceOpportunityResults(
+          opportunities.map((o) => o.toMap(DateTime.now())).toList());
 
-      debugPrint('OpportunityEngine completed: ${opportunities.length} stocks');
-      _emit(OpportunityProgress(
-        status: OpportunityStatus.complete,
-        results: opportunities,
-        totalCount: totalCount,
-        completedCount: totalCount,
-      ));
+      _emit(OpportunityProgress(status: OpportunityStatus.complete,
+          results: opportunities, totalCount: totalCount, completedCount: totalCount));
     } catch (e) {
-      debugPrint('OpportunityEngine error: $e');
       _emit(OpportunityProgress(status: OpportunityStatus.error, message: '分析出错：$e'));
     } finally {
       _isRunning = false;
     }
+  }
+
+  /// 获取市场择时结果（仅调用一次）
+  static Future<MarketTimingResult?> _fetchMarketTiming() async {
+    try {
+      final context = await MarketContextProvider.getMarketContext();
+      return MarketTiming.analyze(marketContext: context);
+    } catch (_) { return null; }
   }
 
   void _emit(OpportunityProgress progress) {

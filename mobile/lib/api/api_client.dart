@@ -590,7 +590,7 @@ class ApiClient {
     try {
       final tencentResult = await _fetchStockHistoryFromTencent(code, days);
       if (tencentResult.isNotEmpty) {
-        _setCached(cacheKey, tencentResult, duration: const Duration(seconds: 60));
+        _setCached(cacheKey, tencentResult, duration: const Duration(minutes: 5));
         return tencentResult;
       }
     } catch (e) {
@@ -601,7 +601,7 @@ class ApiClient {
     try {
       final sinaResult = await _fetchStockHistoryFromSina(code, days);
       if (sinaResult.isNotEmpty) {
-        _setCached(cacheKey, sinaResult, duration: const Duration(seconds: 60));
+        _setCached(cacheKey, sinaResult, duration: const Duration(minutes: 5));
         return sinaResult;
       }
     } catch (e) {
@@ -612,7 +612,7 @@ class ApiClient {
     try {
       final emResult = await _fetchStockHistoryFromEastMoney(code, days);
       if (emResult.isNotEmpty) {
-        _setCached(cacheKey, emResult, duration: const Duration(seconds: 60));
+        _setCached(cacheKey, emResult, duration: const Duration(minutes: 5));
         return emResult;
       }
     } catch (e) {
