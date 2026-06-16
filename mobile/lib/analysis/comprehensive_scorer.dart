@@ -15,6 +15,9 @@ class ComprehensiveScoreResult {
 }
 
 class ComprehensiveScorer {
+  /// 精确ST检测（避免EAST/WEST等误判）
+  static bool isSTStock(String name) => name.startsWith('ST') || name.startsWith('*ST');
+
   /// 6维度加权：技术28%+资金17%+实时22%+共振15%+情绪10%+基本面8%
   static ComprehensiveScoreResult combine({
     required double technicalScore, required double realtimeScore, required double confluenceScore,
@@ -54,7 +57,7 @@ class ComprehensiveScorer {
     final adjustedScore = (rawScore * combinedAdjustment).clamp(0.0, 10.0);
 
     // ST股票封顶：最高"偏多观望"，防止推荐高风险标的
-    final isST = quote != null && quote.name.contains('ST');
+    final isST = quote != null && isSTStock(quote.name);
     final totalScore = isST
         ? (adjustedScore / 10.0 * 9 + 1).round().clamp(1, 5)
         : (adjustedScore / 10.0 * 9 + 1).round().clamp(1, 10);

@@ -38,6 +38,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
   List<OpportunityResult> _oppResults = [];
   bool _oppLoading = false;
   StreamSubscription<OpportunityProgress>? _oppSub;
+  StreamSubscription? _sectorSub;
   // 分析结果索引，O(1) 查找
   Map<String, OpportunityResult> _oppMap = {};
 
@@ -77,6 +78,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     _refreshTimer?.cancel();
     _searchController.dispose();
     _oppSub?.cancel();
+    _sectorSub?.cancel();
     super.dispose();
   }
 
@@ -434,10 +436,12 @@ class WatchlistScreenState extends State<WatchlistScreen>
         return;
       }
       final engine = SectorPickEngine.instance;
-      final sub = engine.progressStream.listen((p) {
+      _sectorSub?.cancel();
+      _sectorSub = engine.progressStream.listen((p) {
         if (!mounted) return;
         if (p.status == SectorPickStatus.complete && p.picks != null && p.picks!.isNotEmpty) {
           _showPickResults(p.picks!);
+          _sectorSub?.cancel();
         }
       });
       engine.pick(sectors);

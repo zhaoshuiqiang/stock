@@ -91,7 +91,7 @@ class ExploreEngine {
           for (final stock in sectorStocksList[j]) {
             if (seenCodes.contains(stock.code)) continue;
             if (!_apiClient.isMainBoardStock(stock.code)) continue;
-            if (stock.price <= 0 || stock.name.isEmpty || stock.name.contains('ST')) continue;
+            if (stock.price <= 0 || stock.name.isEmpty || stock.name.startsWith('ST') || stock.name.startsWith('*ST')) continue;
             seenCodes.add(stock.code);
             allStocks.add(stock);
           }

@@ -13,6 +13,7 @@ import 'strategy_builder.dart';
 import 'strategy_engine.dart';
 import 'backtest_engine.dart';
 import 'sr_quality.dart';
+import 'capital_flow_analyzer.dart';
 
 /// 向后兼容：检测特有信号（量价背离、布林收口）
 List<SignalItem> detectSignals(List<HistoryKline> data) {
@@ -124,11 +125,19 @@ AnalysisResult generateAnalysis(
   // 4. 共振评分
   final confluenceResult = ConfluenceScorer.score(last, signals);
 
+  // 4a. 资金流向分析
+  double? capitalFlowScore;
+  try {
+    final flowResult = CapitalFlowAnalyzer.analyze(klineData: data, quote: quote);
+    capitalFlowScore = flowResult.score;
+  } catch (_) {}
+
   // 5. 综合评分
   final compResult = ComprehensiveScorer.combine(
     technicalScore: techResult.totalScore,
     realtimeScore: realtimeScore,
     confluenceScore: confluenceResult.score,
+    capitalFlowScore: capitalFlowScore,
     quote: quote,
     marketContext: marketContext,
     newsList: newsList,
@@ -159,15 +168,11 @@ AnalysisResult generateAnalysis(
 
   // 10. 回测统计
   Map<String, BacktestResult> backtestResults = {};
-  try {
-    if (data.length >= 60) {
-      backtestResults['MACD金叉'] = BacktestEngine.backtestMACDCross(data);
-      backtestResults['MA金叉'] = BacktestEngine.backtestMACross(data);
-      backtestResults['KDJ超卖'] = BacktestEngine.backtestKDJOversoldCross(data);
-      backtestResults['RSI超卖'] = BacktestEngine.backtestRSIOversoldRecovery(data);
-    }
-  } catch (_) {
-    backtestResults = {};
+  if (data.length >= 60) {
+    try { backtestResults['MACD金叉'] = BacktestEngine.backtestMACDCross(data); } catch (_) {}
+    try { backtestResults['MA金叉'] = BacktestEngine.backtestMACross(data); } catch (_) {}
+    try { backtestResults['KDJ超卖'] = BacktestEngine.backtestKDJOversoldCross(data); } catch (_) {}
+    try { backtestResults['RSI超卖'] = BacktestEngine.backtestRSIOversoldRecovery(data); } catch (_) {}
   }
 
   // 11. 分层策略

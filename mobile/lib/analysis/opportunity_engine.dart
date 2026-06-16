@@ -220,7 +220,7 @@ class OpportunityEngine {
               riskLevel: analysis.riskLevel,
               buySignalCount: signals.where((s) => s.type == 'buy').length,
               sellSignalCount: signals.where((s) => s.type == 'sell').length,
-              activeStrategyCount: 0,
+              activeStrategyCount: analysis.shortTermStrategies.length + analysis.longTermStrategies.length,
               confluenceScore: analysis.confluenceScore,
               tradeLevels: analysis.tradeLevels,
               topSignals: topSignals,
