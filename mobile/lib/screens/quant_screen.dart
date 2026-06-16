@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import '../analysis/signal_engine.dart';
@@ -135,8 +137,37 @@ class _QuantScreenState extends State<QuantScreen> {
   @override
   void initState() {
     super.initState();
-    // 默认全选策略
     _selectedStrategies.addAll(_strategies.map((s) => s.id));
+    _loadSavedStocks();
+  }
+
+  /// 从本地存储恢复上次选择的股票
+  Future<void> _loadSavedStocks() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString('quant_selected_stocks');
+      if (saved == null || saved.isEmpty) return;
+      final List<dynamic> list = jsonDecode(saved);
+      for (final item in list) {
+        if (item is Map<String, dynamic>) {
+          _selectedStocks.add(StockInfo(
+            code: item['code'] ?? '',
+            name: item['name'] ?? '',
+            display: item['display'] ?? '',
+          ));
+        }
+      }
+      if (_selectedStocks.isNotEmpty) setState(() {});
+    } catch (_) {}
+  }
+
+  /// 保存当前选择到本地存储
+  Future<void> _saveSelectedStocks() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final data = _selectedStocks.map((s) => s.toJson()).toList();
+      await prefs.setString('quant_selected_stocks', jsonEncode(data));
+    } catch (_) {}
   }
 
   @override
@@ -188,6 +219,7 @@ class _QuantScreenState extends State<QuantScreen> {
       _searchController.clear();
       _searchResults = [];
     });
+    _saveSelectedStocks();
     _searchFocusNode.unfocus();
   }
 
@@ -197,6 +229,7 @@ class _QuantScreenState extends State<QuantScreen> {
       _analysisResults.removeWhere((a) => a.stock.code == code);
       _expandedStocks.remove(code);
     });
+    _saveSelectedStocks();
   }
 
   // ─── 分析逻辑 ──────────────────────────────────────────────────

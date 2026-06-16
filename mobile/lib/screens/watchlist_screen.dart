@@ -4,6 +4,7 @@ import '../api/api_client.dart';
 import '../analysis/opportunity_engine.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
+import '../analysis/sector_pick_engine.dart';
 import '../widgets/stock_card.dart';
 import 'quote_screen.dart';
 import 'alerts_screen.dart';
@@ -40,6 +41,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
   // 分析结果索引，O(1) 查找
   Map<String, OpportunityResult> _oppMap = {};
 
+  // ─── 预警状态 ──────────────────────────────────────────────────
+  Set<String> _alertCodes = {}; // 已有预警的股票代码
+
   // ─── 颜色常量 ──────────────────────────────────────────────────
   static const Color _bgColor = Color(0xFF0D1117);
   static const Color _cardColor = Color(0xFF161B22);
@@ -58,6 +62,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     _loadWatchlist();
     _startRefreshTimer();
     _loadOppFromDb();
+    _loadAlerts();
 
     // 订阅自选分析进度
     _oppSub = _oppEngine.progressStream.listen(_onOppProgress);
@@ -408,6 +413,116 @@ class WatchlistScreenState extends State<WatchlistScreen>
     }
   }
 
+  Future<void> _loadAlerts() async {
+    try {
+      final alerts = await _dbService.getAlerts();
+      if (mounted) {
+        setState(() { _alertCodes = alerts.map((a) => a.code).toSet(); });
+      }
+    } catch (_) {}
+  }
+
+  // ─── 精选板块选股 ──────────────────────────────────────────────
+
+  Future<void> _runSectorPick() async {
+    try {
+      final sectors = await _apiClient.getHotSectors();
+      if (sectors.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('无法获取板块数据'), duration: Duration(seconds: 1)),
+        );
+        return;
+      }
+      final engine = SectorPickEngine.instance;
+      final sub = engine.progressStream.listen((p) {
+        if (!mounted) return;
+        if (p.status == SectorPickStatus.complete && p.picks != null && p.picks!.isNotEmpty) {
+          _showPickResults(p.picks!);
+        }
+      });
+      engine.pick(sectors);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('正在分析热门板块...'), duration: Duration(seconds: 1)),
+      );
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('分析失败，请稍后重试'), duration: Duration(seconds: 1)),
+      );
+    }
+  }
+
+  void _showPickResults(List<Map<String, dynamic>> picks) {
+    if (!mounted || picks.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Text('精选标的', style: TextStyle(color: _textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                Text('${picks.length}只', style: const TextStyle(color: _textSecondary)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: picks.take(10).length,
+                itemBuilder: (ctx, i) {
+                  final p = picks[i];
+                  final name = p['name'] ?? '';
+                  final code = p['code'] ?? '';
+                  final score = p['score'] is num ? (p['score'] as num).toInt() : 0;
+                  final rec = p['recommendation'] ?? '';
+                  return ListTile(
+                    dense: true,
+                    title: Text('$name($code)', style: const TextStyle(color: _textPrimary, fontSize: 14)),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('$score分 ', style: TextStyle(color: rec.contains('强烈') ? _accentColor : _textSecondary)),
+                        Text(rec, style: const TextStyle(color: _textSecondary, fontSize: 12)),
+                      ],
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _searchAndAddStockByName(name, code);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _searchAndAddStockByName(String name, String code) async {
+    final prefixed = _apiClient.addMarketPrefix(code);
+    final exists = _watchlist.any((w) => w.code == code);
+    if (exists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$name 已在自选中'), duration: const Duration(seconds: 1)),
+      );
+      return;
+    }
+    await _dbService.addToWatchlist(code, name);
+    await _loadWatchlist();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$name 已加入自选'), backgroundColor: _accentColor, duration: const Duration(seconds: 1)),
+    );
+  }
+
   // ─── 评分信息弹窗 ──────────────────────────────────────────────
 
   void _showScoringInfo() {
@@ -617,6 +732,14 @@ class WatchlistScreenState extends State<WatchlistScreen>
             ),
           ),
           const SizedBox(width: 4),
+          // 精选按钮
+          IconButton(
+            icon: const Icon(Icons.auto_awesome, color: _accentColor, size: 18),
+            onPressed: _runSectorPick,
+            tooltip: '精选板块选股',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          ),
           // 一键归档按钮
           IconButton(
             icon: Icon(
@@ -866,10 +989,15 @@ class WatchlistScreenState extends State<WatchlistScreen>
           actions: actions.isNotEmpty ? actions : null,
           onTap: () => _onStockTap(codeWithPrefix, item.name),
           trailing: IconButton(
-            icon: const Icon(Icons.add_alert,
-                color: _accentColor, size: 22),
-            onPressed: () => _addAlert(codeWithPrefix, item.name),
-            tooltip: '添加预警',
+            icon: Icon(
+              _alertCodes.contains(item.code) ? Icons.notifications_active : Icons.add_alert,
+              color: _alertCodes.contains(item.code) ? _accentColor : _textSecondary,
+              size: 22,
+            ),
+            onPressed: () => _alertCodes.contains(item.code)
+                ? Navigator.push(context, MaterialPageRoute(builder: (_) => const AlertsScreen()))
+                : _addAlert(codeWithPrefix, item.name),
+            tooltip: _alertCodes.contains(item.code) ? '查看预警' : '添加预警',
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
           ),
@@ -1343,6 +1471,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('预警已添加')),
                   );
+                  _loadAlerts();
                 }
               },
               child:
