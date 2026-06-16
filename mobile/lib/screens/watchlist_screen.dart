@@ -463,24 +463,25 @@ class WatchlistScreenState extends State<WatchlistScreen>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(16),
+      builder: (ctx) => SizedBox(
+        height: MediaQuery.of(context).size.height * 0.6,
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                const Text('精选标的', style: TextStyle(color: _textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
-                const Spacer(),
-                Text('${picks.length}只', style: const TextStyle(color: _textSecondary)),
-              ],
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const Text('精选标的', style: TextStyle(color: _textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  Text('${picks.length}只', style: const TextStyle(color: _textSecondary)),
+                ],
+              ),
             ),
-            const SizedBox(height: 12),
-            Flexible(
+            Expanded(
               child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: picks.take(10).length,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: picks.length,
                 itemBuilder: (ctx, i) {
                   final p = picks[i];
                   final name = p['name'] ?? '';

@@ -294,7 +294,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
     try {
       // Fetch fresh klines bypassing cache
-      final klines = await _apiClient.getStockHistory(widget.code, days: 60);
+      final klines = await _apiClient.getStockHistory(widget.code, days: 120);
       if (klines.isEmpty) return;
       if (!mounted) return;
 
@@ -427,7 +427,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     try {
       var quote = await _apiClient.getRealtimeQuote(widget.code);
       final mainFundFlow = await _apiClient.getMainFundFlow(widget.code);
-      final klines = await _apiClient.getStockHistory(widget.code, days: 60);
+      final klines = await _apiClient.getStockHistory(widget.code, days: 120);
       final calculated = calcAllIndicators(klines);
       final analysis = generateAnalysis(calculated, quote);
 
