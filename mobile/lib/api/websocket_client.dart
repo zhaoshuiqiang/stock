@@ -88,8 +88,8 @@ class QuotePollingClient {
     if (parts.length >= 40) pe = _parseDouble(parts[39]);
     if (parts.length >= 47) pb = _parseDouble(parts[46]);
     if (parts.length >= 39) turnover = _parseDouble(parts[38]);
-    if (parts.length >= 45) circulatingMarketCap = _parseDouble(parts[44]) * 10000;
-    if (parts.length >= 46) totalMarketCap = _parseDouble(parts[45]) * 10000;
+    if (parts.length >= 44) circulatingMarketCap = _parseDouble(parts[43]) * 10000;
+    if (parts.length >= 45) totalMarketCap = _parseDouble(parts[44]) * 10000;
 
     final code = parts[2] ?? '';
     final high = _parseDouble(parts[33]);

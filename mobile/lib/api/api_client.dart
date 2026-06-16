@@ -210,7 +210,7 @@ class ApiClient {
           double turnover = 0;
 
           // 腾讯API字段映射：
-          // [38]=换手率, [39]=市盈率, [44]=流通市值(万元), [45]=总市值(万元), [46]=市净率
+          // [38]=换手率, [39]=市盈率, [43]=流通市值(万), [44]=总市值(万), [46]=市净率
           if (parts.length >= 40) {
             pe = _parseDouble(parts[39]);
           }
@@ -220,13 +220,12 @@ class ApiClient {
           if (parts.length >= 39) {
             turnover = _parseDouble(parts[38]);
           }
-          if (parts.length >= 45) {
-            // API返回单位为万元，转换为元
-            circulatingMarketCap = _parseDouble(parts[44]) * 10000;
+          if (parts.length >= 44) {
+            // 腾讯API fields: [44]=总市值(万), [43]=流通市值(万)
+            circulatingMarketCap = _parseDouble(parts[43]) * 10000; // 万元→元
           }
-          if (parts.length >= 46) {
-            // API返回单位为万元，转换为元
-            totalMarketCap = _parseDouble(parts[45]) * 10000;
+          if (parts.length >= 45) {
+            totalMarketCap = _parseDouble(parts[44]) * 10000; // 万元→元
           }
 
           // PB/PE 合理性校验
@@ -1354,8 +1353,8 @@ class ApiClient {
               turnover: parts.length > 38 ? _parseDouble(parts[38]) : 0,
               pe: parts.length > 39 ? _parseDouble(parts[39]) : 0,
               pb: parts.length > 46 ? _parseDouble(parts[46]) : 0,
-              totalMarketCap: parts.length > 45 ? _parseDouble(parts[45]) * 10000 : 0,
-              circulatingMarketCap: parts.length > 44 ? _parseDouble(parts[44]) * 10000 : 0,
+              totalMarketCap: parts.length > 44 ? _parseDouble(parts[44]) * 10000 : 0,
+              circulatingMarketCap: parts.length > 43 ? _parseDouble(parts[43]) * 10000 : 0,
             ));
           }
         }
