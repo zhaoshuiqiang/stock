@@ -352,10 +352,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _onPickTapped() {
     if (_cachedPicks.isNotEmpty) {
       _showPickResults(_cachedPicks);
-      // 后台静默刷新
-      if (_sectors.isNotEmpty) {
-        _startPickAnalysis();
-      }
+      return; // 有缓存直接展示，用户可点击刷新按钮重新分析
     } else if (_sectors.isNotEmpty) {
       // 无缓存但有板块数据，启动分析
       _startPickAnalysis();
