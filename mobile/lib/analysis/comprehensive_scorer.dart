@@ -52,17 +52,26 @@ class ComprehensiveScorer {
     if (marketContext != null) marketAdjustment = marketContext.getMarketAdjustmentFactor();
     final combinedAdjustment = marketAdjustment * 0.4 + positionFactor * 0.6;
     final adjustedScore = (rawScore * combinedAdjustment).clamp(0.0, 10.0);
-    final totalScore = (adjustedScore / 10.0 * 9 + 1).round().clamp(1, 10);
+
+    // ST股票封顶：最高"偏多观望"，防止推荐高风险标的
+    final isST = quote != null && quote.name.contains('ST');
+    final totalScore = isST
+        ? (adjustedScore / 10.0 * 9 + 1).round().clamp(1, 5)
+        : (adjustedScore / 10.0 * 9 + 1).round().clamp(1, 10);
 
     String recommendation;
-    if (totalScore >= 8) recommendation = '强烈买入';
-    else if (totalScore >= 7) recommendation = '买入';
-    else if (totalScore >= 6) recommendation = '谨慎买入';
-    else if (totalScore >= 5) recommendation = '偏多观望';
-    else if (totalScore >= 4) recommendation = '偏空观望';
-    else if (totalScore >= 3) recommendation = '谨慎卖出';
-    else if (totalScore >= 2) recommendation = '卖出';
-    else recommendation = '强烈卖出';
+    if (isST) {
+      recommendation = totalScore >= 5 ? '偏多观望' : totalScore >= 3 ? '谨慎卖出' : '卖出';
+    } else {
+      if (totalScore >= 8) recommendation = '强烈买入';
+      else if (totalScore >= 7) recommendation = '买入';
+      else if (totalScore >= 6) recommendation = '谨慎买入';
+      else if (totalScore >= 5) recommendation = '偏多观望';
+      else if (totalScore >= 4) recommendation = '偏空观望';
+      else if (totalScore >= 3) recommendation = '谨慎卖出';
+      else if (totalScore >= 2) recommendation = '卖出';
+      else recommendation = '强烈卖出';
+    }
 
     double positionAdvice = adjustedScore / 10.0;
     String positionLabel;

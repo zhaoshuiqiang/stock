@@ -111,8 +111,15 @@ class RiskAnalyzer {
       }
     }
 
+    // ST风险检测
+    if (quote != null && _isST(quote.name)) {
+      riskFactors.add('ST股票，存在退市风险，涨跌幅限制5%，投机性极强');
+    }
+
     return riskFactors;
   }
+
+  static bool _isST(String name) => name.contains('ST') || name.contains('*ST');
 
   static String _determineLevel(List<String> riskFactors) {
     if (riskFactors.length >= 3 ||
