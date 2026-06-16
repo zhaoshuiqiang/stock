@@ -625,157 +625,138 @@ class WatchlistScreenState extends State<WatchlistScreen>
     );
   }
 
-  // ─── 控制栏：筛选 + 排序 + 分析操作 ────────────────────────────
+  // ─── 控制栏：筛选 + 排序 → 操作按钮（两行布局） ────────────
 
   Widget _buildControlBar() {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // 筛选下拉框
-          const Text('筛选', style: TextStyle(color: _textSecondary, fontSize: 12)),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              decoration: BoxDecoration(
-                color: _filterType != '全部'
-                    ? _accentColor.withOpacity(0.1)
-                    : _darkSurface,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _filterType != '全部' ? _accentColor : _borderColor,
-                ),
+          // 第一行：筛选 + 排序
+          Row(
+            children: [
+              const Text('筛选', style: TextStyle(color: _textSecondary, fontSize: 12)),
+              const SizedBox(width: 4),
+              Expanded(flex: 3, child: _buildFilterDropdown()),
+              const SizedBox(width: 8),
+              const Text('排序', style: TextStyle(color: _textSecondary, fontSize: 12)),
+              const SizedBox(width: 4),
+              Expanded(flex: 2, child: _buildSortDropdown()),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // 第二行：操作按钮
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildActionButton(Icons.auto_awesome, _accentColor, '精选', _runSectorPick),
+              _buildActionButton(
+                _oppLoading ? Icons.hourglass_empty : Icons.refresh,
+                _oppLoading ? _textSecondary.withOpacity(0.4) : _accentColor,
+                _oppLoading ? '分析中' : '刷新分析',
+                _oppLoading ? null : () => _oppEngine.analyze(),
               ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _filterType,
-                  isDense: true,
-                  iconEnabledColor: _filterType != '全部' ? _accentColor : _textSecondary,
-                  dropdownColor: _darkSurface,
-                  style: TextStyle(
-                    color: _filterType != '全部' ? _accentColor : _textPrimary,
-                    fontSize: 13,
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: '全部', child: Text('全部')),
-                    DropdownMenuItem(value: '强烈买入', child: Text('强烈买入')),
-                    DropdownMenuItem(value: '买入', child: Text('买入')),
-                    DropdownMenuItem(value: '谨慎买入', child: Text('谨慎买入')),
-                    DropdownMenuItem(value: '偏多观望', child: Text('偏多观望')),
-                    DropdownMenuItem(value: '偏空观望', child: Text('偏空观望')),
-                    DropdownMenuItem(value: '谨慎卖出', child: Text('谨慎卖出')),
-                    DropdownMenuItem(value: '卖出', child: Text('卖出')),
-                    DropdownMenuItem(value: '强烈卖出', child: Text('强烈卖出')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _filterType = v);
-                  },
-                ),
+              _buildActionButton(
+                Icons.archive_outlined,
+                _oppResults.isEmpty ? _textSecondary.withOpacity(0.4) : _accentColor,
+                '归档',
+                _oppResults.isEmpty ? null : _oneClickArchive,
               ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          // 排序下拉框
-          const Text('排序', style: TextStyle(color: _textSecondary, fontSize: 12)),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              decoration: BoxDecoration(
-                color: _sortBy != 'default'
-                    ? _accentColor.withOpacity(0.1)
-                    : _darkSurface,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _sortBy != 'default' ? _accentColor : _borderColor,
-                ),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _sortBy == 'change_pct'
-                      ? (_sortAscending ? '涨幅↑' : '涨幅↓')
-                      : _sortBy == 'score'
-                          ? (_sortAscending ? '评分↑' : '评分↓')
-                          : '默认',
-                  isDense: true,
-                  iconEnabledColor: _sortBy != 'default' ? _accentColor : _textSecondary,
-                  dropdownColor: _darkSurface,
-                  style: TextStyle(
-                    color: _sortBy != 'default' ? _accentColor : _textPrimary,
-                    fontSize: 13,
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: '默认', child: Text('默认排序')),
-                    DropdownMenuItem(value: '涨幅↓', child: Text('涨幅降序')),
-                    DropdownMenuItem(value: '涨幅↑', child: Text('涨幅升序')),
-                    DropdownMenuItem(value: '评分↓', child: Text('评分降序')),
-                    DropdownMenuItem(value: '评分↑', child: Text('评分升序')),
-                  ],
-                  onChanged: (v) {
-                    if (v == null) return;
-                    setState(() {
-                      if (v == '默认') {
-                        _sortBy = 'default';
-                      } else if (v == '涨幅↓') {
-                        _sortBy = 'change_pct';
-                        _sortAscending = false;
-                      } else if (v == '涨幅↑') {
-                        _sortBy = 'change_pct';
-                        _sortAscending = true;
-                      } else if (v == '评分↓') {
-                        _sortBy = 'score';
-                        _sortAscending = false;
-                      } else if (v == '评分↑') {
-                        _sortBy = 'score';
-                        _sortAscending = true;
-                      }
-                    });
-                  },
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          // 精选按钮
-          IconButton(
-            icon: const Icon(Icons.auto_awesome, color: _accentColor, size: 18),
-            onPressed: _runSectorPick,
-            tooltip: '精选板块选股',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          ),
-          // 一键归档按钮
-          IconButton(
-            icon: Icon(
-              Icons.archive_outlined,
-              color: _oppResults.isEmpty ? _textSecondary.withOpacity(0.4) : _accentColor,
-              size: 18,
-            ),
-            onPressed: _oppResults.isEmpty ? null : _oneClickArchive,
-            tooltip: '一键归档',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          ),
-          IconButton(
-            icon: const Icon(Icons.info_outline, color: _textSecondary, size: 18),
-            onPressed: _showScoringInfo,
-            tooltip: '评分说明',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.refresh,
-              color: _oppLoading ? _textSecondary.withOpacity(0.4) : _accentColor,
-              size: 18,
-            ),
-            onPressed: _oppLoading ? null : () => _oppEngine.analyze(),
-            tooltip: '刷新分析',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              _buildActionButton(Icons.info_outline, _textSecondary, '评分', _showScoringInfo),
+            ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFilterDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: _filterType != '全部' ? _accentColor.withOpacity(0.1) : _darkSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _filterType != '全部' ? _accentColor : _borderColor),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _filterType,
+          isDense: true,
+          dropdownColor: _darkSurface,
+          style: TextStyle(color: _filterType != '全部' ? _accentColor : _textPrimary, fontSize: 13),
+          items: const [
+            DropdownMenuItem(value: '全部', child: Text('全部')),
+            DropdownMenuItem(value: '强烈买入', child: Text('强烈买入')),
+            DropdownMenuItem(value: '买入', child: Text('买入')),
+            DropdownMenuItem(value: '谨慎买入', child: Text('谨慎买入')),
+            DropdownMenuItem(value: '偏多观望', child: Text('偏多观望')),
+            DropdownMenuItem(value: '偏空观望', child: Text('偏空观望')),
+            DropdownMenuItem(value: '谨慎卖出', child: Text('谨慎卖出')),
+            DropdownMenuItem(value: '卖出', child: Text('卖出')),
+            DropdownMenuItem(value: '强烈卖出', child: Text('强烈卖出')),
+          ],
+          onChanged: (v) { if (v != null) setState(() => _filterType = v); },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSortDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: _sortBy != 'default' ? _accentColor.withOpacity(0.1) : _darkSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _sortBy != 'default' ? _accentColor : _borderColor),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _sortBy == 'change_pct' ? (_sortAscending ? '涨幅↑' : '涨幅↓')
+              : _sortBy == 'score' ? (_sortAscending ? '评分↑' : '评分↓') : '默认',
+          isDense: true,
+          dropdownColor: _darkSurface,
+          style: TextStyle(color: _sortBy != 'default' ? _accentColor : _textPrimary, fontSize: 13),
+          items: const [
+            DropdownMenuItem(value: '默认', child: Text('默认排序')),
+            DropdownMenuItem(value: '涨幅↓', child: Text('涨幅降序')),
+            DropdownMenuItem(value: '涨幅↑', child: Text('涨幅升序')),
+            DropdownMenuItem(value: '评分↓', child: Text('评分降序')),
+            DropdownMenuItem(value: '评分↑', child: Text('评分升序')),
+          ],
+          onChanged: (v) {
+            if (v == null) return;
+            setState(() {
+              if (v == '默认') { _sortBy = 'default'; }
+              else if (v == '涨幅↓') { _sortBy = 'change_pct'; _sortAscending = false; }
+              else if (v == '涨幅↑') { _sortBy = 'change_pct'; _sortAscending = true; }
+              else if (v == '评分↓') { _sortBy = 'score'; _sortAscending = false; }
+              else { _sortBy = 'score'; _sortAscending = true; }
+            });
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionButton(IconData icon, Color color, String label, VoidCallback? onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: onTap != null ? color.withOpacity(0.1) : _darkSurface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: onTap != null ? color.withOpacity(0.3) : _borderColor),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: onTap != null ? color : _textSecondary.withOpacity(0.4), size: 16),
+            const SizedBox(width: 4),
+            Text(label, style: TextStyle(color: onTap != null ? color : _textSecondary.withOpacity(0.4), fontSize: 12)),
+          ],
+        ),
       ),
     );
   }
