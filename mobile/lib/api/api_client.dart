@@ -457,8 +457,8 @@ class ApiClient {
       final change = _parseDouble(d['f171']); // fltt=2时已是正确单位
       final pe = _parseDouble(d['f162']); // 市盈率(动)
       final pb = _parseDouble(d['f167']); // 市净率
-      final totalMarketCap = _parseDouble(d['f116']); // 总市值
-      final circulatingMarketCap = _parseDouble(d['f117']); // 流通市值
+      final totalMarketCap = _parseDouble(d['f116']) * 10000; // 万元→元
+      final circulatingMarketCap = _parseDouble(d['f117']) * 10000; // 万元→元
       final name = d['f58']?.toString() ?? '';
 
       final amplitude = preClose > 0 ? (high - low) / preClose * 100 : 0.0;
