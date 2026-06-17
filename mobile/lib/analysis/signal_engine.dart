@@ -20,12 +20,13 @@ List<SignalItem> detectSignals(List<HistoryKline> data) {
   return SignalLayer.detectUniqueSignals(data);
 }
 
-/// 计算交易价位
+/// 计算交易价位（v2.25: ATR动态止损 + 追踪止损 + 分级止盈）
 Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
   if (data.isEmpty) return {};
 
   final last = data[data.length - 1];
   final price = last.close;
+  final atr = last.atr14 > 0 ? last.atr14 : price * 0.03;
 
   final supportLevels = calcSupportResistance(data);
   final supports = supportLevels['support'] as List<double>? ?? [];
@@ -34,12 +35,44 @@ Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
   final nearestSupport = supports.isNotEmpty ? supports.first : null;
   final nearestResistance = resistances.isNotEmpty ? resistances.first : null;
 
-  final entryLow = nearestSupport ?? price * 0.98;
-  final entryHigh = price * 1.01;
-  final target = nearestResistance ?? price * 1.1;
-  final stopLoss = last.ma60 > 0
-      ? [entryLow * 0.98, last.ma60 * 0.97].reduce((a, b) => a < b ? a : b)
-      : entryLow * 0.98;
+  // ATR动态入场区间
+  // 入场低: 最近支撑或价格-1.5倍ATR（取更保守的）
+  final rawEntryLow = nearestSupport ?? (price - atr * 1.5);
+  // 入场高: 价格+0.5倍ATR（短线不过分追高）
+  final entryLow = rawEntryLow > price * 0.95 ? rawEntryLow : price * 0.95;
+  final entryHigh = price + atr * 0.5;
+
+  // ATR动态止损：2倍ATR或最近20日最低点，取更紧的
+  double atrStopLoss = entryLow - atr * 2.0;
+  if (data.length >= 20) {
+    final recent20Low = data.sublist(data.length - 20).map((d) => d.low).reduce(
+        (a, b) => a < b ? a : b);
+    // 近期最低点下方0.5%作为摆动止损
+    final swingStop = recent20Low * 0.995;
+    // 取更紧的止损（更高的止损价，更快止损减少回撤）
+    if (swingStop > atrStopLoss) {
+      atrStopLoss = swingStop;
+    }
+  }
+  // MA60作为长线最后防线
+  if (last.ma60 > 0 && last.ma60 > atrStopLoss) {
+    atrStopLoss = last.ma60;
+  }
+  final stopLoss = atrStopLoss;
+
+  // 分级止盈目标
+  // TP1: 1:1盈亏比（保守目标，保本）
+  final riskAmount = (entryLow - stopLoss).clamp(entryLow * 0.005, double.infinity);
+  final tp1 = entryLow + riskAmount * 1.5;
+  // TP2: 最近阻力位（中等目标）
+  final tp2 = nearestResistance ?? (entryLow + riskAmount * 2.5);
+  // TP3: 布林上轨或3倍盈亏比（激进目标）
+  final tp3 = last.bollUpper > 0 ? last.bollUpper : (entryLow + riskAmount * 3.5);
+  final target = tp2; // 主目标设为TP2
+
+  // 追踪止损相关参数（供前端UI展示）
+  final trailingStopActivation = price + atr * 2.0; // 盈利2×ATR后启动追踪
+  final trailingStopDistance = atr * 1.5; // 追踪止损距离
 
   final entryMid = (entryLow + entryHigh) / 2;
   final reward = target - entryMid;
@@ -59,6 +92,23 @@ Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
     'risk_reward_ratio': riskRewardRatio,
     'has_support': nearestSupport != null,
     'has_resistance': nearestResistance != null,
+    // 新增：分级止盈
+    'tp1': tp1,
+    'tp2': tp2,
+    'tp3': tp3,
+    // 新增：追踪止损参数
+    'trailing_stop_activation': trailingStopActivation,
+    'trailing_stop_distance': trailingStopDistance,
+    // 新增：ATR参考值
+    'atr': atr,
+    'atr_stop_width': atr * 2.0,
+    // 新增：风险金额（基于入场低和止损）
+    'risk_per_share': (entryLow - stopLoss).abs(),
+    'risk_pct': entryLow > 0
+        ? ((entryLow - stopLoss) / entryLow * 100).abs().toStringAsFixed(2)
+        : '0.00',
+    // 新增：止损类型描述
+    'stop_loss_type': _getStopLossType(data, last, atrStopLoss),
   };
 
   // 支撑压力位质量评估
@@ -83,6 +133,78 @@ Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
     }
   }
   return tradeLevels;
+}
+
+/// 判断止损类型
+String _getStopLossType(List<HistoryKline> data, HistoryKline last, double stopPrice) {
+  if (last.ma60 > 0 && (stopPrice - last.ma60).abs() < last.ma60 * 0.005) {
+    return '均线止损(MA60)';
+  }
+  if (data.length >= 20) {
+    final recent20Low = data.sublist(data.length - 20).map((d) => d.low).reduce(
+        (a, b) => a < b ? a : b);
+    if ((stopPrice - recent20Low * 0.995).abs() < recent20Low * 0.003) {
+      return '20日低点止损';
+    }
+  }
+  return 'ATR动态止损(${(last.atr14 / last.close * 100).toStringAsFixed(1)}%)';
+}
+
+/// 信号名 → 回测策略名映射（匹配 backtest_engine 的 key）
+/// 返回 null 表示该信号类型暂无对应回测策略，不参与置信度调整
+/// 卖出信号通过 2.0-adj 反向映射：回测表现越好 → 买入置信度越低
+String? mapSignalToBacktestKey(String signalName) {
+  const map = {
+    // ── 买入类：回测表现好 → 提升置信度 ──
+    'MACD金叉': 'MACD交叉',
+    'MACD零轴上方金叉': 'MACD交叉',
+    'MACD底背离': 'MACD交叉',
+    'MA5上穿MA10': 'MA金叉',
+    'MA10上穿MA20': 'MA金叉',
+    'KDJ金叉': 'KDJ超卖',
+    'RSI超卖回升': 'RSI超卖',
+    '跌破下轨': '布林支撑',
+    '均线多头排列': '均线多头',
+
+    // ── 卖出类：回测表现好 → 降低信心（应用 2.0-adj 反向） ──
+    'MACD死叉': 'MACD交叉',
+    'MACD顶背离': 'MACD交叉',
+    'MA5下穿MA10': 'MA金叉',
+    'MA10下穿MA20': 'MA金叉',
+    'KDJ死叉': 'KDJ超卖',
+    'RSI超买回落': 'RSI超卖',
+    '均线空头排列': '均线多头',
+
+    // ── 暂无回测映射（保留 null 显式标记） ──
+    '放量上涨': null,
+    'WR超卖': null,
+    'OBV放量上涨': null,
+    'CCI超卖回升': null,
+    '向上跳空突破': null,
+    '底部锤子线': null,
+    '刺透形态': null,
+    '阳包阴': null,
+    '低位十字星': null,
+    '三阳开泰': null,
+    '启明星': null,
+    '主力吸筹迹象': null,
+    '地量见底': null,
+    '趋势突破上轨': null,
+    'WR超买': null,
+    'CCI超买回落': null,
+    '缩量上涨': null,
+    '向下跳空破位': null,
+    '顶部吊颈线': null,
+    '乌云盖顶': null,
+    '阴包阳': null,
+    '高位十字星': null,
+    '三只乌鸦': null,
+    '黄昏星': null,
+    '主力派发迹象': null,
+    '趋势强度强劲': null,
+    '盘整趋势': null,
+  };
+  return map[signalName];
 }
 
 /// 生成分析结果（薄编排器）
@@ -166,13 +288,14 @@ AnalysisResult generateAnalysis(
     totalScore: totalScore,
   );
 
-  // 10. 回测统计
+  // 10. 全策略回测 + 反馈闭环
   Map<String, BacktestResult> backtestResults = {};
+  String backtestSummary = '';
   if (data.length >= 60) {
-    try { backtestResults['MACD金叉'] = BacktestEngine.backtestMACDCross(data); } catch (_) {}
-    try { backtestResults['MA金叉'] = BacktestEngine.backtestMACross(data); } catch (_) {}
-    try { backtestResults['KDJ超卖'] = BacktestEngine.backtestKDJOversoldCross(data); } catch (_) {}
-    try { backtestResults['RSI超卖'] = BacktestEngine.backtestRSIOversoldRecovery(data); } catch (_) {}
+    try {
+      backtestResults = BacktestEngine.megaBacktest(data);
+      backtestSummary = BacktestEngine.getBacktestSummary(backtestResults);
+    } catch (_) {}
   }
 
   // 11. 分层策略
@@ -195,7 +318,34 @@ AnalysisResult generateAnalysis(
     newsSentiment: compResult.newsSentiment,
     marketContext: marketContext,
   );
-  final confidenceScore = confResult.confidenceScore;
+  // 回测反馈闭环：根据策略历史表现调整置信度
+  double confidenceScore = confResult.confidenceScore;
+  if (backtestResults.isNotEmpty) {
+    final adjustments = <double>[];
+    // 买入信号：回测表现好 → 提升置信度
+    for (final signal in buySignals) {
+      final strategyName = mapSignalToBacktestKey(signal.signal);
+      if (strategyName != null) {
+        final adj = BacktestEngine.getStrategyConfidenceAdjustment(
+          strategyName, backtestResults);
+        adjustments.add(adj);
+      }
+    }
+    // 卖出信号：回测表现好 → 降低置信度（反向确认）
+    for (final signal in sellSignals) {
+      final strategyName = mapSignalToBacktestKey(signal.signal);
+      if (strategyName != null) {
+        final adj = BacktestEngine.getStrategyConfidenceAdjustment(
+          strategyName, backtestResults);
+        // 卖出信号可靠性高 → 买入置信度应降低
+        adjustments.add(2.0 - adj); // adj 1.0 → 1.0, adj 1.3 → 0.7, adj 0.7 → 1.3
+      }
+    }
+    if (adjustments.isNotEmpty) {
+      final avgAdjustment = adjustments.reduce((a, b) => a + b) / adjustments.length;
+      confidenceScore = (confidenceScore * (0.5 + avgAdjustment * 0.5)).clamp(0.2, 0.95);
+    }
+  }
   final validatedSignals = confResult.validatedSignals;
   final confidenceBreakdown = ConfidenceCalculator.breakdown(
     buySignals: buySignals,
@@ -248,6 +398,7 @@ AnalysisResult generateAnalysis(
     confidenceScore: confidenceScore,
     detailedReasons: detailedReasons,
     backtestResults: backtestResults,
+    backtestSummary: backtestSummary.isEmpty ? null : backtestSummary,
     fundamentalScore: compResult.fundamentalScore,
     newsSentiment: compResult.newsSentiment,
     validatedSignals: validatedSignals,

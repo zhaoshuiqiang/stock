@@ -291,7 +291,7 @@ class SignalDetector {
           confidence: isTrending ? 0.7 : 0.65,
           signalCount: 1,
         ));
-      } else if (last.close < last.bollLower && prev.close >= prev.bollLower) {
+      } else if (last.bollLower > 0 && last.close < last.bollLower && prev.close >= prev.bollLower) {
         signals.add(SignalItem(
           type: 'buy',
           indicator: 'BOLL',
@@ -479,7 +479,7 @@ class SignalDetector {
       if (last.j > 80) base -= 0.05; // 超买区金叉不可靠
     } else {
       if (last.j > 80) base += 0.05; // 超买区死叉更可靠
-      if (last.j < 0) base -= 0.05;  // 超卖区死叉不可靠
+      if (last.j < 20) base -= 0.05;  // 超卖区死叉不可靠
     }
     return base.clamp(0.6, 0.9);
   }
@@ -705,6 +705,170 @@ class SignalDetector {
           confidence: 0.75,
           signalCount: 2,
         ));
+      }
+    }
+
+    // ──�� 多日形态识别（3-5日） ──────────────────────────────
+
+    // 阳包阴（看涨吞没）- 当前阳线实体完全吞没前阴线实体
+    if (isBullish && prevBearish) {
+      final prevBody = prev.open - prev.close;
+      if (body > prevBody && last.open <= prev.close && last.close >= prev.open) {
+        final strength = body > prevBody * 1.5 ? 80 : 75;
+        signals.add(SignalItem(
+          type: 'buy',
+          indicator: 'K线形态',
+          signal: '阳包阴',
+          description: '当前阳线实体完全吞没前日阴线实体，看涨反转信号',
+          strength: strength,
+          timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.78,
+          signalCount: 2,
+        ));
+      }
+    }
+
+    // 阴包阳（看跌吞没）- 当前阴线实体完全吞没前阳线实体
+    if (isBearish && prevBullish) {
+      final prevBody = prev.close - prev.open;
+      if (body > prevBody && last.open >= prev.close && last.close <= prev.open) {
+        final strength = body > prevBody * 1.5 ? 80 : 75;
+        signals.add(SignalItem(
+          type: 'sell',
+          indicator: 'K线形态',
+          signal: '阴包阳',
+          description: '当前阴线实体完全吞没前日阳线实体，看跌反转信号',
+          strength: strength,
+          timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.78,
+          signalCount: 2,
+        ));
+      }
+    }
+
+    // 十字星（多空均衡）- 实体极小，上下影线对称
+    if (bodyPct < 0.3) {
+      final shadowRatio = upperShadow > 0 ? lowerShadow / upperShadow : 999;
+      final isDoji = shadowRatio > 0.7 && shadowRatio < 1.4;
+      if (isDoji) {
+        // 高位十字星 = 见顶信号
+        if (inUptrend && last.close > last.ma10) {
+          signals.add(SignalItem(
+            type: 'sell',
+            indicator: 'K线形态',
+            signal: '高位十字星',
+            description: '上涨趋势中出现十字星，多空分歧加大，警惕回调',
+            strength: 65,
+            timestamp: last.date,
+            duration: SignalDuration.shortTerm,
+            confidence: 0.65,
+            signalCount: 1,
+          ));
+        }
+        // 低位十字星 = 见底信号
+        if (inDowntrend && last.close < last.ma10) {
+          signals.add(SignalItem(
+            type: 'buy',
+            indicator: 'K线形态',
+            signal: '低位十字星',
+            description: '下跌趋势中出现十字星，卖盘衰竭，关注反弹',
+            strength: 65,
+            timestamp: last.date,
+            duration: SignalDuration.shortTerm,
+            confidence: 0.65,
+            signalCount: 1,
+          ));
+        }
+      }
+    }
+
+    // 三阳开泰（Three White Soldiers）- 连续3日阳线上涨
+    // 启明星（Morning Star）和黄昏星（Evening Star）- 3日反转形态
+    if (data.length >= 3) {
+      final pp = data[data.length - 3]; // 前前日
+
+      // 三阳开泰：连续3日阳线、实体递增、收盘创近期新高
+      if (isBullish && prevBullish && pp.close > pp.open) {
+        final ppBody = pp.close - pp.open;
+        final prevBody = prev.close - prev.open;
+        if (prevBody > ppBody * 0.7 && body > prevBody * 0.5 &&
+            last.close > prev.close && prev.close > pp.close) {
+          // 确认趋势向上
+          final inTrend = last.ma5 > 0 && last.close > last.ma5 && last.ma5 > last.ma10;
+          signals.add(SignalItem(
+            type: 'buy',
+            indicator: 'K线形态',
+            signal: '三阳开泰',
+            description: '连续3日阳线递增上涨，趋势强势${inTrend ? '' : "，但均线需确认"}',
+            strength: inTrend ? 85 : 75,
+            timestamp: last.date,
+            duration: SignalDuration.shortTerm,
+            confidence: inTrend ? 0.82 : 0.72,
+            signalCount: 3,
+          ));
+        }
+      }
+
+      // 三只乌鸦：连续3日阴线下跌、收盘创近期新低
+      if (isBearish && prevBearish && pp.close < pp.open) {
+        final ppBody = pp.open - pp.close;
+        final prevBody = prev.open - prev.close;
+        if (prevBody > ppBody * 0.7 && body > prevBody * 0.5 &&
+            last.close < prev.close && prev.close < pp.close) {
+          signals.add(SignalItem(
+            type: 'sell',
+            indicator: 'K线形态',
+            signal: '三只乌鸦',
+            description: '连续3日阴线递增下跌，趋势弱势',
+            strength: 80,
+            timestamp: last.date,
+            duration: SignalDuration.shortTerm,
+            confidence: 0.78,
+            signalCount: 3,
+          ));
+        }
+      }
+
+      // 启明星（Morning Star）- 阴线 + 小实体(星线) + 阳线突破阴线实体中点
+      if (pp.close < pp.open && isBullish) {
+        final ppBody = pp.open - pp.close;
+        final prevBodySmall = (prev.close - prev.open).abs() / prev.open * 100;
+        if (prevBodySmall < 0.8 && body > ppBody * 0.6 &&
+            last.close > (pp.open + pp.close) / 2) {
+          signals.add(SignalItem(
+            type: 'buy',
+            indicator: 'K线形态',
+            signal: '启明星',
+            description: '3日反转形态：阴→星→阳，阳线收盘突破阴线实体中点，底部反转信号',
+            strength: 80,
+            timestamp: last.date,
+            duration: SignalDuration.shortTerm,
+            confidence: 0.78,
+            signalCount: 3,
+          ));
+        }
+      }
+
+      // 黄昏星（Evening Star）- 阳线 + 小实体(星线) + 阴线跌入阳线实体
+      if (pp.close > pp.open && isBearish) {
+        final ppBody = pp.close - pp.open;
+        final prevBodySmall = (prev.close - prev.open).abs() / prev.open * 100;
+        if (prevBodySmall < 0.8 && body > ppBody * 0.6 &&
+            last.close < (pp.open + pp.close) / 2) {
+          signals.add(SignalItem(
+            type: 'sell',
+            indicator: 'K线形态',
+            signal: '黄昏星',
+            description: '3日反转形态：阳→星→阴，阴线收盘跌破阳线实体中点，顶部反转信号',
+            strength: 80,
+            timestamp: last.date,
+            duration: SignalDuration.shortTerm,
+            confidence: 0.78,
+            signalCount: 3,
+          ));
+        }
       }
     }
 

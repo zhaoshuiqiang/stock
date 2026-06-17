@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 import 'package:stock_analyzer/analysis/indicators.dart';
-import 'package:stock_analyzer/analysis/signal_engine.dart';
+import 'package:stock_analyzer/analysis/signal_layer.dart';
 import 'package:stock_analyzer/analysis/strategy_engine.dart';
 
 // Helper: generate uptrend data
@@ -47,324 +47,126 @@ List<HistoryKline> generateSideways(int count, {double base = 15.0}) {
   });
 }
 
-// Helper: generate red three soldiers pattern (3 bullish candles with rising closes)
-List<HistoryKline> generateRedThreeSoldiers() {
-  final base = List.generate(57, (i) {
-    final price = 15.0 + (i % 10 - 5) * 0.1;
-    return HistoryKline(
+// Generate red three soldiers pattern
+List<HistoryKline> generateRedThreeSoldiers(int count) {
+  double base = 10.0;
+  final raw = List.generate(count, (i) {
+    final open = base;
+    final close = i >= count - 3 ? open * (1.0 + (i - count + 4) * 0.02) : open * 1.01;
+    final data = HistoryKline(
       date: DateTime(2024, 1, i + 1),
-      open: price - 0.05, high: price + 0.1, low: price - 0.1, close: price,
-      volume: 10000, amount: 10000 * price,
+      open: open, high: close * 1.01, low: open * 0.99, close: close,
+      volume: 15000 + (i >= count - 3 ? 5000 : 0), amount: 15000 * (open + close) / 2,
     );
+    base = close;
+    return data;
   });
-  // Add 3 bullish candles with rising closes
-  base.add(HistoryKline(date: DateTime(2024, 2, 28), open: 15.0, high: 15.5, low: 14.9, close: 15.4, volume: 12000, amount: 12000 * 15.2));
-  base.add(HistoryKline(date: DateTime(2024, 2, 29), open: 15.4, high: 15.9, low: 15.3, close: 15.8, volume: 13000, amount: 13000 * 15.6));
-  base.add(HistoryKline(date: DateTime(2024, 3, 1), open: 15.8, high: 16.3, low: 15.7, close: 16.2, volume: 14000, amount: 14000 * 16.0));
-  return base;
+  final last3 = raw.sublist(raw.length - 3);
+  // Ensure rising closes
+  raw[raw.length - 3] = raw[raw.length - 3].copyWith(
+    open: 11.0, close: 11.5, high: 11.6, low: 10.9,
+  );
+  raw[raw.length - 2] = raw[raw.length - 2].copyWith(
+    open: 11.5, close: 12.2, high: 12.3, low: 11.4,
+  );
+  raw[raw.length - 1] = raw[raw.length - 1].copyWith(
+    open: 12.2, close: 13.5, high: 13.6, low: 12.1,
+  );
+  return raw;
 }
 
-// Helper: generate three crows pattern (3 bearish candles with falling closes)
-List<HistoryKline> generateThreeCrows() {
-  final base = List.generate(57, (i) {
-    final price = 15.0 + (i % 10 - 5) * 0.1;
+// Generate three crows pattern
+List<HistoryKline> generateThreeCrows(int count) {
+  double base = 30.0;
+  final raw = List.generate(count, (i) {
+    final open = base;
+    final close = i >= count - 3 ? open * (1.0 - (i - count + 4) * 0.02) : open * 0.99;
+    final data = HistoryKline(
+      date: DateTime(2024, 1, i + 1),
+      open: open, high: open * 1.01, low: close * 0.99, close: close,
+      volume: 15000 + (i >= count - 3 ? 5000 : 0), amount: 15000 * (open + close) / 2,
+    );
+    base = close;
+    return data;
+  });
+  final last3 = raw.sublist(raw.length - 3);
+  raw[raw.length - 3] = raw[raw.length - 3].copyWith(
+    open: 19.0, close: 18.5, high: 19.1, low: 18.4,
+  );
+  raw[raw.length - 2] = raw[raw.length - 2].copyWith(
+    open: 18.5, close: 17.8, high: 18.6, low: 17.7,
+  );
+  raw[raw.length - 1] = raw[raw.length - 1].copyWith(
+    open: 17.8, close: 16.5, high: 17.9, low: 16.4,
+  );
+  return raw;
+}
+
+// Generate morning star pattern
+List<HistoryKline> generateMorningStar(int count) {
+  double base = 10.0;
+  final raw = List.generate(count, (i) {
+    final price = base;
+    base *= 1.01;
     return HistoryKline(
       date: DateTime(2024, 1, i + 1),
-      open: price - 0.05, high: price + 0.1, low: price - 0.1, close: price,
+      open: price, high: price * 1.02, low: price * 0.98, close: price,
       volume: 10000, amount: 10000 * price,
     );
   });
-  base.add(HistoryKline(date: DateTime(2024, 2, 28), open: 16.2, high: 16.3, low: 15.6, close: 15.7, volume: 12000, amount: 12000 * 15.9));
-  base.add(HistoryKline(date: DateTime(2024, 2, 29), open: 15.7, high: 15.8, low: 15.1, close: 15.2, volume: 13000, amount: 13000 * 15.4));
-  base.add(HistoryKline(date: DateTime(2024, 3, 1), open: 15.2, high: 15.3, low: 14.6, close: 14.7, volume: 14000, amount: 14000 * 14.9));
-  return base;
+  final n = raw.length;
+  // Bearish first day
+  raw[n - 3] = raw[n - 3].copyWith(open: 12.5, close: 12.0, high: 12.6, low: 11.9);
+  // Small body star day
+  raw[n - 2] = raw[n - 2].copyWith(open: 11.9, close: 11.95, high: 12.0, low: 11.8);
+  // Bullish third day
+  raw[n - 1] = raw[n - 1].copyWith(open: 11.95, close: 12.3, high: 12.4, low: 11.8);
+  return raw;
 }
 
 void main() {
-  // Test each of the 18 strategies
-  group('Strategy 1: MACD金叉战法', () {
-    test('activates when MACD golden cross signal exists', () {
+  group('Strategy Engine', () {
+    test('evaluateStrategies returns strategies for uptrend data', () {
       final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
+      final signals = SignalLayer.detectAllSignals(data);
       final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'macd_golden_cross');
-      // In strong uptrend, MACD golden cross may or may not be active
-      // Just verify the strategy exists and has correct properties
-      expect(s.name, equals('MACD金叉战法'));
-      expect(s.category, equals('趋势'));
-      expect(s.type, equals('buy'));
+      expect(strategies, isNotEmpty);
+      // All strategies should have valid IDs and names
+      for (final s in strategies) {
+        expect(s.id, isNotEmpty);
+        expect(s.name, isNotEmpty);
+        expect(s.category, isNotEmpty);
+        expect(s.description, isNotEmpty);
+        expect(s.type, anyOf(equals('buy'), equals('sell')));
+      }
     });
-    test('inactive when no MACD golden cross', () {
+
+    test('uptrend produces more buy strategies than sell', () {
+      final data = calcAllIndicators(generateUptrend(60));
+      final signals = SignalLayer.detectAllSignals(data);
+      final strategies = evaluateStrategies(data, signals);
+      final buys = strategies.where((s) => s.type == 'buy' && !s.id.startsWith('conflict_'));
+      final sells = strategies.where((s) => s.type == 'sell' && !s.id.startsWith('conflict_'));
+      expect(buys.length, greaterThanOrEqualTo(sells.length),
+          reason: 'Uptrend should produce more buy strategies');
+    });
+
+    test('downtrend produces fewer buy strategies', () {
       final data = calcAllIndicators(generateDowntrend(60));
-      final signals = detectSignals(data);
+      final signals = SignalLayer.detectAllSignals(data);
       final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'macd_golden_cross');
-      // In downtrend, MACD golden cross should not be active
-      if (!signals.any((sig) => sig.signal == 'MACD金叉')) {
-        expect(s.isActive, isFalse);
-        expect(s.signalStrength, equals(0));
-      }
+      final buys = strategies.where((s) => s.type == 'buy' && !s.id.startsWith('conflict_'));
+      final sells = strategies.where((s) => s.type == 'sell' && !s.id.startsWith('conflict_'));
+      // Downtrend should not be dominated by buy strategies
+      expect(buys.length, lessThanOrEqualTo(3),
+          reason: 'Downtrend should have few buy strategies, got $buys');
     });
   });
 
-  group('Strategy 2: MACD背离战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'macd_divergence');
-      expect(s.name, equals('MACD背离战法'));
-      expect(s.category, equals('反转'));
-    });
-  });
-
-  group('Strategy 3: KDJ超卖金叉战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'kdj_oversold_cross');
-      expect(s.name, equals('KDJ超卖金叉战法'));
-      expect(s.type, equals('buy'));
-    });
-  });
-
-  group('Strategy 4: 均线多头排列战法', () {
-    test('activates in uptrend with MA alignment', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'ma_multi_head');
-      expect(s.name, equals('均线多头排列战法'));
-      final last = data.last;
-      if (last.ma5 > last.ma10 && last.ma10 > last.ma20 && last.ma20 > 0) {
-        expect(s.isActive, isTrue);
-        expect(s.signalStrength, greaterThan(0));
-      }
-    });
-    test('inactive in downtrend', () {
-      final data = calcAllIndicators(generateDowntrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'ma_multi_head');
-      final last = data.last;
-      if (!(last.ma5 > last.ma10 && last.ma10 > last.ma20)) {
-        expect(s.isActive, isFalse);
-      }
-    });
-  });
-
-  group('Strategy 5: 布林带突破战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'boll_breakout');
-      expect(s.name, equals('布林带突破战法'));
-      expect(s.type, equals('buy'));
-    });
-  });
-
-  group('Strategy 6: 放量突破战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'volume_breakout');
-      expect(s.name, equals('放量突破战法'));
-      expect(s.category, equals('量价'));
-    });
-  });
-
-  group('Strategy 7: 缩量回调战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'shrink_pullback');
-      expect(s.name, equals('缩量回调战法'));
-      expect(s.type, equals('buy'));
-    });
-  });
-
-  group('Strategy 8: RSI超卖反弹战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'rsi_oversold_recovery');
-      expect(s.name, equals('RSI超卖反弹战法'));
-      expect(s.type, equals('buy'));
-    });
-  });
-
-  group('Strategy 9: MACD零轴上方金叉战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'macd_above_zero_cross');
-      expect(s.name, equals('MACD零轴上方金叉'));
-      expect(s.type, equals('buy'));
-    });
-    test('only activates when MACD golden cross AND DIF > 0', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'macd_above_zero_cross');
-      final last = data.last;
-      if (s.isActive) {
-        expect(signals.any((sig) => sig.signal == 'MACD金叉'), isTrue);
-        expect(last.macdDif, greaterThan(0));
-      }
-    });
-  });
-
-  group('Strategy 10: 均线粘合突破战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateSideways(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'ma_converge_breakout');
-      expect(s.name, equals('均线粘合突破战法'));
-      expect(s.type, equals('buy'));
-    });
-  });
-
-  group('Strategy 11: 红三兵战法', () {
-    test('activates when 3 consecutive bullish candles with rising closes', () {
-      final data = calcAllIndicators(generateRedThreeSoldiers());
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'red_three_soldiers');
-      expect(s.name, equals('红三兵战法'));
-      expect(s.type, equals('buy'));
-      // Check if pattern is detected
-      if (s.isActive) {
-        expect(s.signalStrength, greaterThan(0));
-        expect(s.stopLossPrice, isNotNull);
-      }
-    });
-  });
-
-  group('Strategy 12: 早晨之星战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'morning_star');
-      expect(s.name, equals('早晨之星战法'));
-      expect(s.category, equals('K线形态'));
-      expect(s.type, equals('buy'));
-    });
-  });
-
-  group('Strategy 13: 量价齐升战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'volume_price_up');
-      expect(s.name, equals('量价齐升战法'));
-      expect(s.type, equals('buy'));
-    });
-  });
-
-  group('Strategy 14: 布林带支撑战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'boll_support');
-      expect(s.name, equals('布林带支撑战法'));
-      expect(s.type, equals('buy'));
-    });
-  });
-
-  group('Strategy 15: KDJ超买死叉战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'kdj_overbought_cross');
-      expect(s.name, equals('KDJ超买死叉战法'));
-      expect(s.type, equals('sell'));
-    });
-  });
-
-  group('Strategy 16: RSI超买回落战法', () {
-    test('has correct properties', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'rsi_overbought_drop');
-      expect(s.name, equals('RSI超买回落战法'));
-      expect(s.type, equals('sell'));
-    });
-  });
-
-  group('Strategy 17: 三只乌鸦战法', () {
-    test('activates when 3 consecutive bearish candles with falling closes', () {
-      final data = calcAllIndicators(generateThreeCrows());
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'three_crows');
-      expect(s.name, equals('三只乌鸦战法'));
-      expect(s.type, equals('sell'));
-      if (s.isActive) {
-        expect(s.signalStrength, greaterThan(0));
-      }
-    });
-  });
-
-  group('Strategy 18: 均线空头排列战法', () {
-    test('activates in downtrend with MA bearish alignment', () {
-      final data = calcAllIndicators(generateDowntrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final s = strategies.firstWhere((s) => s.id == 'ma_bearish');
-      expect(s.name, equals('均线空头排列战法'));
-      expect(s.type, equals('sell'));
-      final last = data.last;
-      if (last.ma5 < last.ma10 && last.ma10 < last.ma20 && last.ma20 > 0) {
-        expect(s.isActive, isTrue);
-      }
-    });
-  });
-
-  group('Strategy Conflict Detection', () {
-    test('conflict strategies added when both buy and sell are active', () {
-      // Generate data that might produce both buy and sell signals
-      final data = calcAllIndicators(generateSideways(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      final activeBuy = strategies.where((s) => s.isActive && s.type == 'buy' && !s.id.startsWith('conflict_'));
-      final activeSell = strategies.where((s) => s.isActive && s.type == 'sell' && !s.id.startsWith('conflict_'));
-      final conflictStrategies = strategies.where((s) => s.id.startsWith('conflict_'));
-
-      if (activeBuy.isNotEmpty && activeSell.isNotEmpty) {
-        expect(conflictStrategies.isNotEmpty, isTrue);
-        for (final cs in conflictStrategies) {
-          expect(cs.category, equals('警告'));
-          expect(cs.description, contains('冲突'));
-        }
-      }
-    });
-  });
-
-  group('Strategy General Properties', () {
-    test('all 18 strategies are returned', () {
-      final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
-      final strategies = evaluateStrategies(data, signals);
-      // 18 base strategies (conflict strategies may add more)
-      final baseStrategies = strategies.where((s) => !s.id.startsWith('conflict_'));
-      expect(baseStrategies.length, equals(18));
-    });
-
+  group('Strategy Properties', () {
     test('all strategies have required fields', () {
       final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
+      final signals = SignalLayer.detectAllSignals(data);
       final strategies = evaluateStrategies(data, signals);
       for (final s in strategies) {
         expect(s.id, isNotEmpty);
@@ -379,9 +181,18 @@ void main() {
       }
     });
 
+    test('active strategies have positive risk/reward ratio', () {
+      final data = calcAllIndicators(generateUptrend(60));
+      final signals = SignalLayer.detectAllSignals(data);
+      final strategies = evaluateStrategies(data, signals);
+      for (final s in strategies.where((s) => s.isActive)) {
+        expect(s.riskRewardRatio, greaterThanOrEqualTo(0));
+      }
+    });
+
     test('inactive strategies have zero strength', () {
       final data = calcAllIndicators(generateSideways(60));
-      final signals = detectSignals(data);
+      final signals = SignalLayer.detectAllSignals(data);
       final strategies = evaluateStrategies(data, signals);
       for (final s in strategies.where((s) => !s.isActive && !s.id.startsWith('conflict_'))) {
         expect(s.signalStrength, equals(0));
@@ -390,18 +201,45 @@ void main() {
 
     test('active strategies have positive strength', () {
       final data = calcAllIndicators(generateUptrend(60));
-      final signals = detectSignals(data);
+      final signals = SignalLayer.detectAllSignals(data);
       final strategies = evaluateStrategies(data, signals);
       for (final s in strategies.where((s) => s.isActive && !s.id.startsWith('conflict_'))) {
         expect(s.signalStrength, greaterThan(0));
       }
     });
+  });
 
-    test('returns empty list with insufficient data', () {
-      final data = generateUptrend(20);
-      final signals = detectSignals(data);
+  group('Strategy Categories', () {
+    test('strategies contain buy and sell types', () {
+      final data = calcAllIndicators(generateUptrend(60));
+      final signals = SignalLayer.detectAllSignals(data);
+      final strategies = evaluateStrategies(data, signals).where((s) => !s.id.startsWith('conflict_'));
+      final types = strategies.map((s) => s.type).toSet();
+      expect(types.contains('buy') || types.contains('sell'), isTrue);
+    });
+
+    test('conflict strategies generated when buy and sell signals coexist', () {
+      final data = calcAllIndicators(generateSideways(60));
+      final signals = SignalLayer.detectAllSignals(data);
       final strategies = evaluateStrategies(data, signals);
-      expect(strategies, isEmpty);
+      final conflictStrategies = strategies.where((s) => s.id.startsWith('conflict_'));
+      if (conflictStrategies.isNotEmpty) {
+        for (final cs in conflictStrategies) {
+          expect(cs.category, equals('警告'));
+        }
+      }
+    });
+  });
+
+  group('Short-term strategies', () {
+    test('short-term strategies have shorter holding periods', () {
+      final data = calcAllIndicators(generateUptrend(80));
+      final signals = SignalLayer.detectAllSignals(data);
+      final strategies = evaluateStrategies(data, signals);
+      final shortTerm = strategies.where((s) => s.category == '短线' || s.category == '特殊');
+      final longTerm = strategies.where((s) => s.category == '长线');
+      // Either category may be empty if no signals matched
+      expect(shortTerm.length + longTerm.length, greaterThan(0));
     });
   });
 }

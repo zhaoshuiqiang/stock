@@ -31,18 +31,16 @@ class ConfidenceCalculator {
     final signalCount = buyCount + sellCount;
     if (signalCount > 0) {
       final dominantDirection = buyCount >= sellCount ? 'buy' : 'sell';
-      final dominantCount = buyCount > sellCount ? buyCount : sellCount;
+      final dominantCount = buyCount >= sellCount ? buyCount : sellCount;
       final concentration = dominantCount / signalCount;
-      final alignment = (totalScore >= 7 && dominantDirection == 'buy') ||
-                        (totalScore <= 4 && dominantDirection == 'sell') ||
-                        (totalScore == 6 && dominantDirection == 'buy') ||
-                        (totalScore == 5 && dominantDirection == 'sell');
+      final alignment = (totalScore >= 6 && dominantDirection == 'buy') ||
+                        (totalScore <= 5 && dominantDirection == 'sell');
       signalConsistency = alignment
           ? 0.3 + concentration * 0.7
           : 0.3 + (1 - concentration) * 0.4;
     }
 
-    // 2. 基本面支撑(25%): 基本面评分与推荐方向一致时加分
+    // 2. 基本面支撑(10%): 缩减权重，短线交易PE/PB参考价值有限
     double fundamentalSupport = 0.5;
     if (fundamentalScore != null) {
       if (totalScore >= 7 && fundamentalScore.totalScore >= 6) {
@@ -70,7 +68,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 4. 市场环境(15%): 大盘趋势与推荐方向一致时加分
+    // 4. 市场环境(20%): 大盘趋势权重提升，短线需顺势操作
     double marketConfirm = 0.5;
     if (marketContext != null) {
       if (totalScore >= 7 && marketContext.avgChangePct > 0.5) {
@@ -84,7 +82,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 5. 信号新鲜度(10%): 近期信号权重高于远期
+    // 5. 信号时效性(20%): 短中期信号权重高于长期（短线交易核心维度）
     double signalFreshness = 0.5;
     final recentBuySignals = buySignals.where((s) =>
       s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm
@@ -92,15 +90,15 @@ class ConfidenceCalculator {
     final recentSellSignals = sellSignals.where((s) =>
       s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm
     ).length;
-    if (recentBuySignals + recentSellSignals > 0) {
-      signalFreshness = 0.3 + (recentBuySignals + recentSellSignals) / (signalCount > 0 ? signalCount : 1) * 0.7;
+    if (signalCount > 0 && recentBuySignals + recentSellSignals > 0) {
+      signalFreshness = 0.3 + (recentBuySignals + recentSellSignals) / signalCount * 0.7;
     }
 
     var confidenceScore = (signalConsistency * 0.30 +
-        fundamentalSupport * 0.25 +
+        fundamentalSupport * 0.10 +
         sentimentConfirm * 0.20 +
-        marketConfirm * 0.15 +
-        signalFreshness * 0.10).clamp(0.3, 0.95);
+        marketConfirm * 0.20 +
+        signalFreshness * 0.20).clamp(0.3, 0.95);
 
     // 信号对抗验证调整
     List<ValidatedSignal> validatedSignals = [];
@@ -145,18 +143,16 @@ class ConfidenceCalculator {
     double signalConsistency = 0.5;
     if (signalCount > 0) {
       final dominantDirection = buyCount >= sellCount ? 'buy' : 'sell';
-      final dominantCount = buyCount > sellCount ? buyCount : sellCount;
+      final dominantCount = buyCount >= sellCount ? buyCount : sellCount;
       final concentration = dominantCount / signalCount;
-      final alignment = (totalScore >= 7 && dominantDirection == 'buy') ||
-                        (totalScore <= 4 && dominantDirection == 'sell') ||
-                        (totalScore == 6 && dominantDirection == 'buy') ||
-                        (totalScore == 5 && dominantDirection == 'sell');
+      final alignment = (totalScore >= 6 && dominantDirection == 'buy') ||
+                        (totalScore <= 5 && dominantDirection == 'sell');
       signalConsistency = alignment
           ? 0.3 + concentration * 0.7
           : 0.3 + (1 - concentration) * 0.4;
     }
 
-    // 2. 基本面支撑(25%)
+    // 2. 基本面支撑(10%): 缩减权重，短线交易PE/PB参考价值有限
     double fundamentalSupport = 0.5;
     if (fundamentalScore != null) {
       if (totalScore >= 7 && fundamentalScore.totalScore >= 6) {
@@ -184,7 +180,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 4. 市场环境(15%)
+    // 4. 市场环境(20%): 大盘趋势权重提升，短线需顺势操作
     double marketConfirm = 0.5;
     if (marketContext != null) {
       if (totalScore >= 7 && marketContext.avgChangePct > 0.5) {
@@ -198,7 +194,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 5. 信号新鲜度(10%)
+    // 5. 信号时效性(20%): 短中期信号权重高于长期（短线交易核心维度）
     double signalFreshness = 0.5;
     final recentBuySignals = buySignals.where((s) =>
       s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm
@@ -206,8 +202,8 @@ class ConfidenceCalculator {
     final recentSellSignals = sellSignals.where((s) =>
       s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm
     ).length;
-    if (recentBuySignals + recentSellSignals > 0) {
-      signalFreshness = 0.3 + (recentBuySignals + recentSellSignals) / (signalCount > 0 ? signalCount : 1) * 0.7;
+    if (signalCount > 0 && recentBuySignals + recentSellSignals > 0) {
+      signalFreshness = 0.3 + (recentBuySignals + recentSellSignals) / signalCount * 0.7;
     }
 
     return {

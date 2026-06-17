@@ -95,7 +95,7 @@ class BacktestEngine {
       // MACD死叉卖出信号
       else if (curr.macdDif < curr.macdDea && prev.macdDif >= prev.macdDea && buyPrice != null) {
         final sellPrice = curr.close;
-        final returnPct = (sellPrice - buyPrice) / buyPrice;
+        final returnPct = _safeReturnPct(buyPrice, sellPrice);
         tradeReturns.add(returnPct);
         
         currentEquity *= (1 + returnPct);
@@ -151,7 +151,7 @@ class BacktestEngine {
         buyPrice = curr.close;
       } else if (curr.ma5 < curr.ma10 && prev.ma5 >= prev.ma10 && buyPrice != null) {
         final sellPrice = curr.close;
-        final returnPct = (sellPrice - buyPrice) / buyPrice;
+        final returnPct = _safeReturnPct(buyPrice, sellPrice);
         tradeReturns.add(returnPct);
         currentEquity *= (1 + returnPct);
         if (currentEquity > peakEquity) peakEquity = currentEquity;
@@ -183,7 +183,7 @@ class BacktestEngine {
         '胜率: ${(result.winRate * 100).toStringAsFixed(1)}%\n'
         '盈利次数: ${result.winningTrades} | 亏损次数: ${result.losingTrades}\n'
         '平均盈利: ${result.avgWinPct.toStringAsFixed(2)}% | 平均亏损: ${result.avgLossPct.toStringAsFixed(2)}%\n'
-        '盈亏比: ${result.profitFactor == double.infinity ? "全胜" : (result.profitFactor > 0 ? result.profitFactor.toStringAsFixed(2) : "N/A")}\n'
+        '盈亏比: ${!result.profitFactor.isFinite ? "全胜" : (result.profitFactor > 0 ? result.profitFactor.toStringAsFixed(2) : "N/A")}\n'
         '总收益: ${result.totalReturn.toStringAsFixed(2)}%\n'
         '最大回撤: ${(result.maxDrawdown * 100).toStringAsFixed(2)}%';
   }
@@ -207,7 +207,7 @@ class BacktestEngine {
         buyPrice = curr.close;
       } else if (curr.k < curr.d && prev.k >= prev.d && buyPrice != null) {
         final sellPrice = curr.close;
-        final returnPct = (sellPrice - buyPrice) / buyPrice;
+        final returnPct = _safeReturnPct(buyPrice, sellPrice);
         tradeReturns.add(returnPct);
         currentEquity *= (1 + returnPct);
         if (currentEquity > peakEquity) peakEquity = currentEquity;
@@ -220,7 +220,7 @@ class BacktestEngine {
         final atrStop = buyPrice - curr.atr14 * 1.0;
         if (curr.low <= atrStop) {
           final sellPrice = atrStop;
-          final returnPct = (sellPrice - buyPrice) / buyPrice;
+          final returnPct = _safeReturnPct(buyPrice, sellPrice);
           tradeReturns.add(returnPct);
           currentEquity *= (1 + returnPct);
           if (currentEquity > peakEquity) peakEquity = currentEquity;
@@ -261,7 +261,7 @@ class BacktestEngine {
         buyPrice = curr.close;
       } else if (curr.rsi6 < 50 && prev.rsi6 >= 50 && buyPrice != null) {
         final sellPrice = curr.close;
-        final returnPct = (sellPrice - buyPrice) / buyPrice;
+        final returnPct = _safeReturnPct(buyPrice, sellPrice);
         tradeReturns.add(returnPct);
         currentEquity *= (1 + returnPct);
         if (currentEquity > peakEquity) peakEquity = currentEquity;
@@ -274,7 +274,7 @@ class BacktestEngine {
         final atrStop = buyPrice - curr.atr14 * 1.0;
         if (curr.low <= atrStop) {
           final sellPrice = atrStop;
-          final returnPct = (sellPrice - buyPrice) / buyPrice;
+          final returnPct = _safeReturnPct(buyPrice, sellPrice);
           tradeReturns.add(returnPct);
           currentEquity *= (1 + returnPct);
           if (currentEquity > peakEquity) peakEquity = currentEquity;
@@ -314,7 +314,7 @@ class BacktestEngine {
         buyPrice = curr.close;
       } else if (curr.bollMid > 0 && curr.close > curr.bollMid && buyPrice != null) {
         final sellPrice = curr.close;
-        final returnPct = (sellPrice - buyPrice) / buyPrice;
+        final returnPct = _safeReturnPct(buyPrice, sellPrice);
         tradeReturns.add(returnPct);
         currentEquity *= (1 + returnPct);
         if (currentEquity > peakEquity) peakEquity = currentEquity;
@@ -327,7 +327,7 @@ class BacktestEngine {
         final atrStop = buyPrice - curr.atr14 * 1.5;
         if (curr.low <= atrStop) {
           final sellPrice = atrStop;
-          final returnPct = (sellPrice - buyPrice) / buyPrice;
+          final returnPct = _safeReturnPct(buyPrice, sellPrice);
           tradeReturns.add(returnPct);
           currentEquity *= (1 + returnPct);
           if (currentEquity > peakEquity) peakEquity = currentEquity;
@@ -371,7 +371,7 @@ class BacktestEngine {
         buyPrice = curr.close;
       } else if (curr.ma5 < curr.ma10 && prev.ma5 >= prev.ma10 && buyPrice != null) {
         final sellPrice = curr.close;
-        final returnPct = (sellPrice - buyPrice) / buyPrice;
+        final returnPct = _safeReturnPct(buyPrice, sellPrice);
         tradeReturns.add(returnPct);
         currentEquity *= (1 + returnPct);
         if (currentEquity > peakEquity) peakEquity = currentEquity;
@@ -384,7 +384,7 @@ class BacktestEngine {
         final atrStop = buyPrice - curr.atr14 * 1.5;
         if (curr.low <= atrStop) {
           final sellPrice = atrStop;
-          final returnPct = (sellPrice - buyPrice) / buyPrice;
+          final returnPct = _safeReturnPct(buyPrice, sellPrice);
           tradeReturns.add(returnPct);
           currentEquity *= (1 + returnPct);
           if (currentEquity > peakEquity) peakEquity = currentEquity;
@@ -429,7 +429,10 @@ class BacktestEngine {
     } else if (losses.isEmpty) {
       profitFactor = wins.isNotEmpty ? double.infinity : 0;
     } else {
-      profitFactor = (wins.isNotEmpty ? wins.reduce((a, b) => a + b) : 0) / losses.map((l) => l.abs()).reduce((a, b) => a + b);
+      final totalLoss = losses.map((l) => l.abs()).reduce((a, b) => a + b);
+      profitFactor = totalLoss > 0
+          ? (wins.isNotEmpty ? wins.reduce((a, b) => a + b) : 0) / totalLoss
+          : double.infinity;
     }
 
     // 完成的交易数（tradeReturns）才是有效信号数
@@ -447,5 +450,111 @@ class BacktestEngine {
       totalReturn: (currentEquity - 1) * 100,
       tradeReturns: tradeReturns,
     );
+  }
+
+  /// 安全计算收益率: (sellPrice - buyPrice) / buyPrice，buyPrice=0 时返回 0
+  static double _safeReturnPct(double buyPrice, double sellPrice) {
+    if (buyPrice <= 0) return 0.0;
+    return (sellPrice - buyPrice) / buyPrice;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 反馈闭环：回测结果 → 策略权重调整
+  // ═══════════════════════════════════════════════════════════════
+
+  /// 全策略回测：使用 walk-forward 方法在滚动窗口上评估
+  static Map<String, BacktestResult> megaBacktest(List<HistoryKline> data) {
+    if (data.length < 60) return {};
+
+    final results = <String, BacktestResult>{};
+    try { results['MACD交叉'] = backtestMACDCross(data); } catch (_) {}
+    try { results['MA金叉'] = backtestMACross(data); } catch (_) {}
+    try { results['KDJ超卖'] = backtestKDJOversoldCross(data); } catch (_) {}
+    try { results['RSI超卖'] = backtestRSIOversoldRecovery(data); } catch (_) {}
+    try { results['布林支撑'] = backtestBollSupport(data); } catch (_) {}
+    try { results['均线多头'] = backtestMAMultiHead(data); } catch (_) {}
+
+    return results;
+  }
+
+  /// 根据回测表现调整信号置信度
+  /// 返回调整系数 (0.7 ~ 1.3)，>1.0 表示策略历史表现好可提高置信度
+  static double getStrategyConfidenceAdjustment(
+    String strategyName,
+    Map<String, BacktestResult> backtestResults,
+  ) {
+    final result = backtestResults[strategyName];
+    if (result == null || result.totalSignals < 3) return 1.0;
+
+    // 综合评分：胜率(40%) + 盈亏比(40%) + 信号数量可信度(20%)
+    double winRateScore = result.winRate;
+    double pfScore;
+    if (result.profitFactor == double.infinity) {
+      pfScore = 1.0;
+    } else if (result.profitFactor >= 2.0) {
+      pfScore = 1.0;
+    } else if (result.profitFactor >= 1.5) {
+      pfScore = 0.8;
+    } else if (result.profitFactor >= 1.0) {
+      pfScore = 0.5;
+    } else {
+      pfScore = 0.2;
+    }
+
+    // 信号充足度：信号越多统计越可靠
+    double sampleScore = (result.totalSignals / 10.0).clamp(0.0, 1.0);
+
+    final compositeScore = winRateScore * 0.4 + pfScore * 0.4 + sampleScore * 0.2;
+
+    // 映射到 [0.7, 1.3] 调整区间
+    final adjustment = 0.7 + compositeScore * 0.6;
+    return adjustment;
+  }
+
+  /// 获取策略表现排序（用于UI展示）
+  static List<MapEntry<String, double>> getStrategyPerformanceRanking(
+    Map<String, BacktestResult> results,
+  ) {
+    final scores = <String, double>{};
+    for (final entry in results.entries) {
+      if (entry.value.totalSignals < 3) continue;
+      final winRate = entry.value.winRate;
+      final pf = entry.value.profitFactor == double.infinity ? 5.0 : entry.value.profitFactor;
+      scores[entry.key] = winRate * 0.5 + (pf / 5.0).clamp(0.0, 1.0) * 0.5;
+    }
+    final sorted = scores.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return sorted;
+  }
+
+  /// 回测综合评分摘要（用于分析结果展示）
+  static String getBacktestSummary(Map<String, BacktestResult> results) {
+    if (results.isEmpty) return '回测数据不足';
+
+    final ranking = getStrategyPerformanceRanking(results);
+    if (ranking.isEmpty) return '无可信策略回测结果';
+
+    final best = ranking.first;
+    final bestResult = results[best.key]!;
+
+    final winRateStr = (bestResult.winRate * 100).toStringAsFixed(0);
+    final pfStr = bestResult.profitFactor == double.infinity
+        ? '全胜'
+        : bestResult.profitFactor.toStringAsFixed(2);
+
+    final buf = StringBuffer();
+    buf.writeln('最佳策略: ${best.key} (胜率${winRateStr}% 盈亏比$pfStr)');
+    buf.writeln('历史回测: ${bestResult.totalSignals}笔交易'
+        ' | 总收益${bestResult.totalReturn.toStringAsFixed(1)}%'
+        ' | 最大回撤${(bestResult.maxDrawdown * 100).toStringAsFixed(1)}%');
+
+    // 显示次优策略
+    if (ranking.length >= 2) {
+      final second = results[ranking[1].key]!;
+      buf.write('次优: ${ranking[1].key} '
+          '(胜率${(second.winRate * 100).toStringAsFixed(0)}% '
+          '总收益${second.totalReturn.toStringAsFixed(1)}%)');
+    }
+    return buf.toString();
   }
 }

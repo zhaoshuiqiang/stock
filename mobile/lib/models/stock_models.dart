@@ -463,9 +463,9 @@ class SignalItem {
     if (value == null) return null;
     if (value is int) {
       switch (value) {
-        case 2: return SignalDuration.shortTerm;
-        case 10: return SignalDuration.mediumTerm;
-        case 30: return SignalDuration.longTerm;
+        case 0: return SignalDuration.shortTerm;
+        case 1: return SignalDuration.mediumTerm;
+        case 2: return SignalDuration.longTerm;
         default: return null;
       }
     }
@@ -777,6 +777,7 @@ class AnalysisResult {
   final double confidenceScore;                     // 推荐可信度（0.0-1.0）
   final List<RecommendationReason> detailedReasons;  // 详细推荐理由
   final Map<String, BacktestResult>? backtestResults; // 回测结果
+  final String? backtestSummary; // 回测综合摘要
 
   // 多维分析新增字段 - 参考 TradingAgents
   final FundamentalScore? fundamentalScore;          // 基本面评分
@@ -804,6 +805,7 @@ class AnalysisResult {
     this.confidenceScore = 0.5,
     this.detailedReasons = const [],
     this.backtestResults,
+    this.backtestSummary,
     this.fundamentalScore,
     this.newsSentiment,
     this.validatedSignals,
@@ -872,6 +874,7 @@ class AnalysisResult {
       backtestResults: json['backtest_results'] != null
           ? (json['backtest_results'] as Map<String, dynamic>).map((k, v) => MapEntry(k, BacktestResult.fromJson(v as Map<String, dynamic>)))
           : null,
+      backtestSummary: json['backtest_summary'] as String?,
       fundamentalScore: json['fundamental_score'] != null
           ? FundamentalScore.fromJson(json['fundamental_score'] as Map<String, dynamic>)
           : null,
@@ -909,6 +912,7 @@ class AnalysisResult {
         'duration': r.duration,
       }).toList(),
       'backtest_results': backtestResults?.map((k, v) => MapEntry(k, v.toJson())),
+      'backtest_summary': backtestSummary,
       'fundamental_score': fundamentalScore?.toJson(),
       'news_sentiment': newsSentiment?.toJson(),
       'validated_signals': validatedSignals?.map((s) => s.toJson()).toList(),
@@ -979,7 +983,9 @@ class AlertRule {
       name: json['name'] ?? '',
       conditionType: json['condition_type'] ?? json['alert_type'] ?? '',
       thresholdValue: QuoteData._parseDouble(json['threshold_value'] ?? json['threshold']),
-      createdAt: DateTime.now(),
+      createdAt: json['created_at'] != null
+          ? DateTime.tryParse(json['created_at'] as String) ?? DateTime.now()
+          : DateTime.now(),
       enabled: json['enabled'] ?? true,
       alertType: json['alert_type'] ?? json['condition_type'] ?? '',
       threshold: json['threshold'] != null ? QuoteData._parseDouble(json['threshold']) : null,

@@ -71,7 +71,7 @@ void main() {
 
       // Score should reflect weighted strength, not just count
       expect(analysis.score, greaterThanOrEqualTo(0));
-      expect(analysis.score, lessThanOrEqualTo(100));
+      expect(analysis.score, lessThanOrEqualTo(10));
     });
 
     test('Score is within valid range for any data', () {
@@ -79,13 +79,13 @@ void main() {
       for (final data in datasets) {
         final analysis = generateAnalysis(data, null);
         expect(analysis.score, greaterThanOrEqualTo(0));
-        expect(analysis.score, lessThanOrEqualTo(100));
+        expect(analysis.score, lessThanOrEqualTo(10));
       }
     });
 
     test('Empty data returns default score', () {
       final analysis = generateAnalysis([], null);
-      expect(analysis.score, equals(50));
+      expect(analysis.score, equals(5));
       expect(analysis.recommendation, equals('观望'));
     });
   });
@@ -107,7 +107,7 @@ void main() {
       if (last.adx14 > 25) {
         final analysis = generateAnalysis(data, null);
         // Uptrend with strong ADX should produce good score
-        expect(analysis.score, greaterThan(40));
+        expect(analysis.score, greaterThan(5));
       }
     });
 
@@ -153,7 +153,7 @@ void main() {
 
       // Confluence details should have 7 dimensions
       expect(analysis.confluenceDetails, isNotNull);
-      expect(analysis.confluenceDetails!.length, equals(7));
+      expect(analysis.confluenceDetails!.length, equals(10));
     });
 
     test('High confluence score boosts total score', () {
@@ -162,7 +162,7 @@ void main() {
 
       // If confluence is high (many bullish dimensions), score should reflect it
       if (analysis.confluenceScore >= 5) {
-        expect(analysis.score, greaterThan(50),
+        expect(analysis.score, greaterThan(5),
             reason: 'High confluence should boost score');
       }
     });
@@ -360,7 +360,7 @@ void main() {
 
       // Score should be valid
       expect(analysis.score, greaterThanOrEqualTo(0));
-      expect(analysis.score, lessThanOrEqualTo(100));
+      expect(analysis.score, lessThanOrEqualTo(10));
       // Confluence score should be populated
       expect(analysis.confluenceScore, greaterThanOrEqualTo(0));
     });

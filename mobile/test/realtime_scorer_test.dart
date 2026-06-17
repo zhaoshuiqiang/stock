@@ -13,7 +13,7 @@ void main() {
       expect(RealtimeScorer.score(quote), equals(5.0));
     });
 
-    test('strong rise gets high score', () {
+    test('strong rise gets high score (倒U型评分抑制追高)', () {
       final quote = QuoteData(
         code: '000001',
         name: '测试',
@@ -23,8 +23,8 @@ void main() {
         mainNetFlow: 1000000,
         mainNetFlowRate: 12.0,
       );
-      // base 5.0 + 2.5 (changePct>8) + 1.5 (rate>10) + 0.5 (turnover 1-5) = 9.5
-      expect(RealtimeScorer.score(quote), equals(9.5));
+      // base 5.0 + 0.8 (cp>8抑制追高) + 1.5 (rate>10) + 0.8 (turnover 2-5) = 8.1
+      expect(RealtimeScorer.score(quote), equals(8.1));
     });
 
     test('strong fall gets low score', () {
@@ -37,8 +37,8 @@ void main() {
         mainNetFlow: -1000000,
         mainNetFlowRate: -12.0,
       );
-      // base 5.0 - 2.5 (changePct<-8) - 1.5 (rate<=-10) - 0.5 (turnover>10) = 0.5
-      expect(RealtimeScorer.score(quote), equals(0.5));
+      // base 5.0 - 2.5 (cp<-8) - 1.5 (rate<-6) - 0.2 (turnover 8-15) = 0.8
+      expect(RealtimeScorer.score(quote), equals(0.8));
     });
 
     test('positive fund flow increases score', () {
@@ -58,10 +58,10 @@ void main() {
         mainNetFlow: 1000000,
         mainNetFlowRate: 6.0,
       );
-      // No flow: 5.0 + 1.0 = 6.0
-      expect(RealtimeScorer.score(quoteNoFlow), equals(6.0));
-      // With flow: 5.0 + 1.0 + 1.0 = 7.0
-      expect(RealtimeScorer.score(quoteWithFlow), equals(7.0));
+      // No flow: 5.0 + 1.2 (cp>0) = 6.2
+      expect(RealtimeScorer.score(quoteNoFlow), equals(6.2));
+      // With flow: 5.0 + 1.2 (cp>0) + 1.0 (rate>5) = 7.2
+      expect(RealtimeScorer.score(quoteWithFlow), equals(7.2));
       expect(
         RealtimeScorer.score(quoteWithFlow) > RealtimeScorer.score(quoteNoFlow),
         isTrue,
@@ -79,7 +79,6 @@ void main() {
         mainNetFlow: 1000000,
         mainNetFlowRate: 50.0,
       );
-      // 5.0 + 2.5 + 1.5 + 0.5 = 9.5, still within range
       final scorePositive = RealtimeScorer.score(extremePositive);
       expect(scorePositive, greaterThanOrEqualTo(0.0));
       expect(scorePositive, lessThanOrEqualTo(10.0));
@@ -94,7 +93,6 @@ void main() {
         mainNetFlow: -1000000,
         mainNetFlowRate: -50.0,
       );
-      // 5.0 - 2.5 - 1.5 - 0.5 = 0.5, clamped to >= 0
       final scoreNegative = RealtimeScorer.score(extremeNegative);
       expect(scoreNegative, greaterThanOrEqualTo(0.0));
       expect(scoreNegative, lessThanOrEqualTo(10.0));
@@ -110,8 +108,8 @@ void main() {
         mainNetFlow: 500000,
         mainNetFlowRate: 3.0,
       );
-      // 5.0 + 1.5 (changePct>2) + 0.5 (rate>0) + 0.5 (turnover 1-5) = 7.5
-      expect(RealtimeScorer.score(quote), equals(7.5));
+      // 5.0 + 2.0 (cp>2温和上涨最优) + 0.5 (rate>0) + 0.8 (turnover 2-5) = 8.3
+      expect(RealtimeScorer.score(quote), equals(8.3));
     });
 
     test('zero turnover does not affect score', () {
@@ -122,8 +120,8 @@ void main() {
         changePct: 1.0,
         turnover: 0,
       );
-      // 5.0 + 1.0 = 6.0 (turnover <= 0, no adjustment)
-      expect(RealtimeScorer.score(quote), equals(6.0));
+      // 5.0 + 1.2 (cp>0) = 6.2 (turnover=0, no adjustment)
+      expect(RealtimeScorer.score(quote), equals(6.2));
     });
   });
 }

@@ -92,6 +92,8 @@ class DiscoverScreenState extends State<DiscoverScreen> {
       switch (p.status) {
         case ExploreStatus.fetchingSectors:
         case ExploreStatus.fetchingStocks:
+        case ExploreStatus.fetchingKlines:
+        case ExploreStatus.fetchingQuotes:
         case ExploreStatus.analyzing:
         case ExploreStatus.saving:
           _exploreLoading = true;
@@ -238,29 +240,43 @@ class DiscoverScreenState extends State<DiscoverScreen> {
 
   Widget _buildExploreHeader() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 排序下拉框
+          // 排序
           const Text('排序', style: TextStyle(color: _kTextSecondary, fontSize: 12)),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           Expanded(
+            flex: 4,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.only(left: 8, right: 2),
               decoration: BoxDecoration(
                 color: const Color(0xFF21262D),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(6),
                 border: Border.all(color: _kBorder),
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   value: _exploreSort,
                   isDense: true,
+                  isExpanded: true,
+                  icon: const Padding(
+                    padding: EdgeInsets.only(top: 2),
+                    child: Icon(Icons.expand_more, color: _kTextSecondary, size: 18),
+                  ),
                   iconEnabledColor: _kTextSecondary,
                   dropdownColor: const Color(0xFF21262D),
-                  style: const TextStyle(color: _kTextPrimary, fontSize: 13),
+                  alignment: Alignment.centerLeft,
+                  style: const TextStyle(color: _kTextPrimary, fontSize: 12),
                   items: ['评分', '涨幅', '名称'].map((s) {
-                    return DropdownMenuItem(value: s, child: Text(s));
+                    return DropdownMenuItem(
+                      value: s,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(s, style: const TextStyle(fontSize: 12)),
+                      ),
+                    );
                   }).toList(),
                   onChanged: (v) {
                     if (v != null) setState(() => _exploreSort = v);
@@ -269,27 +285,40 @@ class DiscoverScreenState extends State<DiscoverScreen> {
               ),
             ),
           ),
-          const SizedBox(width: 12),
-          // 筛选下拉框
-          const Text('筛选', style: TextStyle(color: _kTextSecondary, fontSize: 12)),
           const SizedBox(width: 6),
+          // 筛选
+          const Text('筛选', style: TextStyle(color: _kTextSecondary, fontSize: 12)),
+          const SizedBox(width: 4),
           Expanded(
+            flex: 4,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.only(left: 8, right: 2),
               decoration: BoxDecoration(
                 color: const Color(0xFF21262D),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(6),
                 border: Border.all(color: _kBorder),
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   value: _exploreFilter,
                   isDense: true,
+                  isExpanded: true,
+                  icon: const Padding(
+                    padding: EdgeInsets.only(top: 2),
+                    child: Icon(Icons.expand_more, color: _kTextSecondary, size: 18),
+                  ),
                   iconEnabledColor: _kTextSecondary,
                   dropdownColor: const Color(0xFF21262D),
-                  style: const TextStyle(color: _kTextPrimary, fontSize: 13),
+                  alignment: Alignment.centerLeft,
+                  style: const TextStyle(color: _kTextPrimary, fontSize: 12),
                   items: ['全部', '买入', '观望'].map((f) {
-                    return DropdownMenuItem(value: f, child: Text(f));
+                    return DropdownMenuItem(
+                      value: f,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(f, style: const TextStyle(fontSize: 12)),
+                      ),
+                    );
                   }).toList(),
                   onChanged: (v) {
                     if (v != null) setState(() => _exploreFilter = v);
@@ -298,10 +327,12 @@ class DiscoverScreenState extends State<DiscoverScreen> {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 4),
           // 刷新
           IconButton(
-            icon: const Icon(Icons.refresh, color: _kTextSecondary, size: 20),
+            icon: const Icon(Icons.refresh, color: _kTextSecondary, size: 18),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             onPressed: _exploreLoading ? null : () => _exploreEngine.explore(),
             tooltip: '刷新探索',
           ),
@@ -323,6 +354,12 @@ class DiscoverScreenState extends State<DiscoverScreen> {
         break;
       case ExploreStatus.fetchingStocks:
         statusText = '获取成分股 ${total}只';
+        break;
+      case ExploreStatus.fetchingKlines:
+        statusText = '预取K线 $analyzed/$total';
+        break;
+      case ExploreStatus.fetchingQuotes:
+        statusText = '批量获取行情...';
         break;
       case ExploreStatus.analyzing:
         statusText = '分析中 $analyzed/$total · 已发现$found只';

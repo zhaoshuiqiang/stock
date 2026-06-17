@@ -7,11 +7,11 @@ import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import '../analysis/indicators.dart';
 import '../analysis/signal_engine.dart';
-import '../analysis/backtest_engine.dart';
 import '../storage/database_service.dart';
 import '../widgets/signal_card.dart';
 import '../widgets/technical_indicators_panel.dart';
 import '../widgets/strategy_panel.dart';
+import '../widgets/trading_dashboard.dart';
 import '../core/trading_session.dart';
 
 const _kChartLeftReservedSize = 42.0;
@@ -379,40 +379,68 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             try {
               _analysis = generateAnalysis(_klines, _quote);
             } catch (e) {
-              // 重新生成失败时仅更新quote引用
-              _analysis = AnalysisResult(
-                quote: _quote,
-                indicators: _analysis!.indicators,
-                signals: _analysis!.signals,
-                score: _analysis!.score,
-                recommendation: _analysis!.recommendation,
-                riskLevel: _analysis!.riskLevel,
-                riskFactors: _analysis!.riskFactors,
-                suggestions: _analysis!.suggestions,
-                tradeLevels: _analysis!.tradeLevels,
-                confluenceScore: _analysis!.confluenceScore,
-                confluenceDetails: _analysis!.confluenceDetails,
-                reasons: _analysis!.reasons,
-                opportunities: _analysis!.opportunities,
-              );
+              // 重新生成失败时仅更新quote引用，保留所有已有分析字段
+              final prev = _analysis;
+              if (prev != null) {
+                _analysis = AnalysisResult(
+                  quote: _quote,
+                  indicators: prev.indicators,
+                  signals: prev.signals,
+                  score: prev.score,
+                  recommendation: prev.recommendation,
+                  riskLevel: prev.riskLevel,
+                  riskFactors: prev.riskFactors,
+                  suggestions: prev.suggestions,
+                  tradeLevels: prev.tradeLevels,
+                  confluenceScore: prev.confluenceScore,
+                  confluenceDetails: prev.confluenceDetails,
+                  reasons: prev.reasons,
+                  opportunities: prev.opportunities,
+                  shortTermStrategies: prev.shortTermStrategies,
+                  longTermStrategies: prev.longTermStrategies,
+                  marketContext: prev.marketContext,
+                  confidenceScore: prev.confidenceScore,
+                  detailedReasons: prev.detailedReasons,
+                  backtestResults: prev.backtestResults,
+                  backtestSummary: prev.backtestSummary,
+                  fundamentalScore: prev.fundamentalScore,
+                  newsSentiment: prev.newsSentiment,
+                  validatedSignals: prev.validatedSignals,
+                  confidenceBreakdown: prev.confidenceBreakdown,
+                );
+              }
             }
           } else {
-            // 非刷新周期仅更新quote引用
-            _analysis = AnalysisResult(
-              quote: _quote,
-              indicators: _analysis!.indicators,
-              signals: _analysis!.signals,
-              score: _analysis!.score,
-              recommendation: _analysis!.recommendation,
-              riskLevel: _analysis!.riskLevel,
-              riskFactors: _analysis!.riskFactors,
-              suggestions: _analysis!.suggestions,
-              tradeLevels: _analysis!.tradeLevels,
-              confluenceScore: _analysis!.confluenceScore,
-              confluenceDetails: _analysis!.confluenceDetails,
-              reasons: _analysis!.reasons,
-              opportunities: _analysis!.opportunities,
-            );
+            // 非刷新周期仅更新quote引用，保留所有已有分析字段
+            final prev = _analysis;
+            if (prev != null) {
+              _analysis = AnalysisResult(
+                quote: _quote,
+                indicators: prev.indicators,
+                signals: prev.signals,
+                score: prev.score,
+                recommendation: prev.recommendation,
+                riskLevel: prev.riskLevel,
+                riskFactors: prev.riskFactors,
+                suggestions: prev.suggestions,
+                tradeLevels: prev.tradeLevels,
+                confluenceScore: prev.confluenceScore,
+                confluenceDetails: prev.confluenceDetails,
+                reasons: prev.reasons,
+                opportunities: prev.opportunities,
+                shortTermStrategies: prev.shortTermStrategies,
+                longTermStrategies: prev.longTermStrategies,
+                marketContext: prev.marketContext,
+                confidenceScore: prev.confidenceScore,
+                detailedReasons: prev.detailedReasons,
+                backtestResults: prev.backtestResults,
+                backtestSummary: prev.backtestSummary,
+                fundamentalScore: prev.fundamentalScore,
+                newsSentiment: prev.newsSentiment,
+                validatedSignals: prev.validatedSignals,
+                confidenceBreakdown: prev.confidenceBreakdown,
+              );
+            }
           }
         }
       });
@@ -544,7 +572,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               Tab(text: 'K线'),
               Tab(text: '信号'),
               Tab(text: '战法'),
-              Tab(text: '分析'),
+              Tab(text: '决策'),
               Tab(text: '指标'),
             ],
           ),
@@ -558,7 +586,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                 _buildKlineChart(),
                 _buildSignalList(),
                 StrategyPanel(klines: _klines, signals: _analysis?.signals ?? []),
-                _buildAnalysis(),
+                _buildDashboard(),
                 TechnicalIndicatorsPanel(klines: _klines),
               ],
             ),
@@ -1758,480 +1786,13 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     );
   }
 
-  Widget _buildAnalysis() {
-    if (_analysis == null) {
-      return Center(child: Text('暂无分析数据', style: Theme.of(context).textTheme.bodyMedium));
-    }
-
-    final analysis = _analysis!;
-    final textTheme = Theme.of(context).textTheme;
-    final quote = _quote;
-
-    return ListView(
-      padding: const EdgeInsets.all(8),
-      children: [
-        Card(
-          margin: const EdgeInsets.all(8),
-          color: const Color(0xFF161B22),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              children: [
-                Text('综合评分', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
-                const SizedBox(height: 16),
-                Container(
-                  width: 120,
-                  height: 120,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Color(0xFF161B22),
-                  ),
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          analysis.score.toString(),
-                          style: textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white),
-                        ),
-                        Text(
-                          analysis.recommendation,
-                          style: textTheme.titleLarge?.copyWith(
-                            color: analysis.score >= 6 ? const Color(0xFFef5350) : const Color(0xFF26a69a),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        Card(
-          margin: const EdgeInsets.all(8),
-          color: const Color(0xFF161B22),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              children: [
-                Text(
-                  '风险等级: ${analysis.riskLevel}',
-                  style: textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: analysis.riskLevel == '高' ? Colors.red : analysis.riskLevel == '中等' ? Colors.orange : Colors.green,
-                  ),
-                ),
-                if (analysis.riskFactors.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text('风险因素:', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
-                  for (final factor in analysis.riskFactors)
-                    Text('- $factor', style: textTheme.bodyMedium?.copyWith(color: Colors.red)),
-                ],
-              ],
-            ),
-          ),
-        ),
-        if (quote != null)
-          Card(
-            margin: const EdgeInsets.all(8),
-            color: const Color(0xFF161B22),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  Text('估值分析', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
-                  const SizedBox(height: 8),
-                  _buildValuationAnalysis(quote),
-                ],
-              ),
-            ),
-          ),
-        if (quote != null && quote.mainNetFlow != 0)
-          Card(
-            margin: const EdgeInsets.all(8),
-            color: const Color(0xFF161B22),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  Text('资金流向分析', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
-                  const SizedBox(height: 8),
-                  _buildFundFlowAnalysis(quote),
-                ],
-              ),
-            ),
-          ),
-        Card(
-          margin: const EdgeInsets.all(8),
-          color: const Color(0xFF161B22),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              children: [
-                Text('操作建议:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
-                const SizedBox(height: 8),
-                for (final suggestion in analysis.suggestions)
-                  Text('- $suggestion', style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
-              ],
-            ),
-          ),
-        ),
-        if (analysis.signals.where((s) => s.type == 'buy').isNotEmpty)
-          Card(
-            margin: const EdgeInsets.all(8),
-            color: const Color(0xFF161B22),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('机会识别', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: const Color(0xFFef5350))),
-                  const SizedBox(height: 8),
-                  for (final signal in analysis.signals.where((s) => s.type == 'buy').take(3))
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.trending_up, color: Color(0xFFef5350), size: 16),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(signal.indicator, style: textTheme.bodyMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w600)),
-                                Text(signal.desc.isNotEmpty ? signal.desc : signal.description, style: textTheme.bodySmall?.copyWith(color: Colors.white54)),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  const SizedBox(height: 8),
-                  Text('注：机会识别基于技术指标，仅供参考', style: textTheme.bodySmall?.copyWith(color: Colors.grey, fontSize: 11)),
-                ],
-              ),
-            ),
-          ),
-        if (analysis.indicators.isNotEmpty)
-          Card(
-            margin: const EdgeInsets.all(8),
-            color: const Color(0xFF161B22),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  Text('指标摘要:', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
-                  const SizedBox(height: 8),
-                  for (final entry in analysis.indicators.entries)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(entry.key, style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
-                          Text(entry.value.toString(), style: textTheme.bodyMedium?.copyWith(color: Colors.white)),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        if (analysis.tradeLevels != null && analysis.tradeLevels!.isNotEmpty)
-          Card(
-            margin: const EdgeInsets.all(8),
-            color: const Color(0xFF161B22),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('交易计划', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
-                  const SizedBox(height: 12),
-                  _buildTradeLevelRow('入场区间',
-                      '${(analysis.tradeLevels!['entry_low'] as double).toStringAsFixed(2)} - ${(analysis.tradeLevels!['entry_high'] as double).toStringAsFixed(2)}',
-                      Colors.white),
-                  const SizedBox(height: 6),
-                  _buildTradeLevelRow('目标价位',
-                      '${(analysis.tradeLevels!['target'] as double).toStringAsFixed(2)}',
-                      const Color(0xFFef5350)),
-                  const SizedBox(height: 6),
-                  _buildTradeLevelRow('止损价位',
-                      '${(analysis.tradeLevels!['stop_loss'] as double).toStringAsFixed(2)}',
-                      const Color(0xFF26a69a)),
-                  const SizedBox(height: 6),
-                  _buildTradeLevelRow('盈亏比',
-                      '${(analysis.tradeLevels!['risk_reward_ratio'] as double).toStringAsFixed(1)}:1',
-                      (analysis.tradeLevels!['risk_reward_ratio'] as double) >= 2 ? const Color(0xFFef5350) : Colors.orange),
-                ],
-              ),
-            ),
-          ),
-        if (analysis.backtestResults != null)
-          _buildBacktestSummary(analysis.backtestResults!),
-        if (analysis.confluenceDetails.isNotEmpty)
-          Card(
-            margin: const EdgeInsets.all(8),
-            color: const Color(0xFF161B22),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('多指标共振', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.white)),
-                      Text(
-                        '共振 ${analysis.confluenceScore}/10',
-                        style: TextStyle(
-                          color: analysis.confluenceScore >= 6 ? const Color(0xFFef5350) : analysis.confluenceScore >= 4 ? Colors.orange : const Color(0xFF26a69a),
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: (analysis.confluenceScore / 10).clamp(0.0, 1.0),
-                      backgroundColor: const Color(0xFF26a69a).withOpacity(0.3),
-                      valueColor: AlwaysStoppedAnimation(
-                        analysis.confluenceScore >= 6 ? const Color(0xFFef5350) : analysis.confluenceScore >= 4 ? Colors.orange : const Color(0xFF26a69a),
-                      ),
-                      minHeight: 8,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: analysis.confluenceDetails.map((d) {
-                      final name = d['name'] as String;
-                      final bull = d['bull'] as bool;
-                      final bear = d['bear'] as bool;
-                      final weighted = d['weighted'] as bool? ?? false;
-                      Color color;
-                      String label;
-                      if (bull) {
-                        color = const Color(0xFFef5350);
-                        label = '$name ✓${weighted ? " ×2" : ""}';
-                      } else if (bear) {
-                        color = const Color(0xFF26a69a);
-                        label = '$name ✗';
-                      } else {
-                        color = Colors.white38;
-                        label = '$name —';
-                      }
-                      return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: color.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: color.withOpacity(0.4)),
-                        ),
-                        child: Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
-                      );
-                    }).toList(),
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildTradeLevelRow(String label, String value, Color valueColor) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 13)),
-        Text(value, style: TextStyle(color: valueColor, fontSize: 14, fontWeight: FontWeight.bold)),
-      ],
-    );
-  }
-
-  Widget _buildBacktestSummary(Map<String, BacktestResult>? backtestResults) {
-    if (backtestResults == null || backtestResults.isEmpty) return const SizedBox.shrink();
-
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.analytics, size: 16, color: Colors.cyan),
-              const SizedBox(width: 6),
-              Text('历史回测统计', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.cyan.shade200)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ...backtestResults.entries.map((entry) {
-            final r = entry.value;
-            if (r.totalSignals == 0) return const SizedBox.shrink();
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                children: [
-                  SizedBox(width: 80, child: Text(entry.key, style: const TextStyle(fontSize: 12, color: Colors.white70))),
-                  Expanded(
-                    child: Text(
-                      '胜率${(r.winRate * 100).toStringAsFixed(0)}% | 盈亏比${r.profitFactor == double.infinity ? "全胜" : r.profitFactor.toStringAsFixed(2)} | 最大回撤${(r.maxDrawdown * 100).toStringAsFixed(1)}%',
-                      style: TextStyle(fontSize: 11, color: r.winRate > 0.4 ? Colors.green.shade300 : Colors.orange.shade300),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildValuationAnalysis(QuoteData quote) {
-    final textTheme = Theme.of(context).textTheme;
-    final pe = quote.pe;
-    final pb = quote.pb;
-
-    String peAnalysis;
-    Color peColor;
-    if (pe <= 0) {
-      peAnalysis = '市盈率为负，公司处于亏损状态，需关注基本面';
-      peColor = Colors.red;
-    } else if (pe < 15) {
-      peAnalysis = '市盈率较低，估值相对便宜，具有一定安全边际';
-      peColor = Colors.green;
-    } else if (pe < 30) {
-      peAnalysis = '市盈率适中，估值处于合理区间';
-      peColor = Colors.orange;
-    } else if (pe < 60) {
-      peAnalysis = '市盈率偏高，市场给予较高预期，注意业绩兑现风险';
-      peColor = Colors.red;
-    } else {
-      peAnalysis = '市盈率极高，估值泡沫风险较大，谨慎参与';
-      peColor = Colors.red;
-    }
-
-    String pbAnalysis;
-    Color pbColor;
-    if (pb <= 0) {
-      pbAnalysis = '市净率为负，资不抵债，风险极高';
-      pbColor = Colors.red;
-    } else if (pb < 1) {
-      pbAnalysis = '市净率低于1（破净），股价低于每股净资产';
-      pbColor = Colors.green;
-    } else if (pb < 3) {
-      pbAnalysis = '市净率适中，估值合理';
-      pbColor = Colors.orange;
-    } else if (pb < 6) {
-      pbAnalysis = '市净率偏高，关注资产质量和盈利能力';
-      pbColor = Colors.red;
-    } else {
-      pbAnalysis = '市净率很高，资产溢价较大，注意回调风险';
-      pbColor = Colors.red;
-    }
-
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('市盈率(PE)', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
-            Text(pe.toStringAsFixed(1), style: textTheme.bodyMedium?.copyWith(color: peColor)),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(peAnalysis, style: textTheme.bodySmall?.copyWith(color: peColor)),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('市净率(PB)', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
-            Text(pb.toStringAsFixed(2), style: textTheme.bodyMedium?.copyWith(color: pbColor)),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(pbAnalysis, style: textTheme.bodySmall?.copyWith(color: pbColor)),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: const Color(0xFF161B22).withOpacity(0.5),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Text(
-            '注：估值分析仅供参考，不同行业估值标准差异较大，需结合行业特点综合判断',
-            style: textTheme.bodySmall?.copyWith(color: Colors.grey[400], fontSize: 11),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildFundFlowAnalysis(QuoteData quote) {
-    final textTheme = Theme.of(context).textTheme;
-    final netFlow = quote.mainNetFlow;
-    final netFlowRate = quote.mainNetFlowRate;
-    final isInflow = netFlow >= 0;
-    final color = isInflow ? const Color(0xFFef5350) : const Color(0xFF26a69a);
-
-    String flowAnalysis;
-    if (isInflow) {
-      if (netFlowRate > 5) {
-        flowAnalysis = '主力资金大幅流入，看好后市';
-      } else if (netFlowRate > 2) {
-        flowAnalysis = '主力资金持续流入，有资金关注';
-      } else {
-        flowAnalysis = '主力资金小幅流入，观望为主';
-      }
-    } else {
-      if (netFlowRate < -5) {
-        flowAnalysis = '主力资金大幅流出，谨慎观望';
-      } else if (netFlowRate < -2) {
-        flowAnalysis = '主力资金持续流出，注意风险';
-      } else {
-        flowAnalysis = '主力资金小幅流出，波动正常';
-      }
-    }
-
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('主力净流入', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
-            Text(
-              '${isInflow ? '+' : ''}${_formatAmount(netFlow)}',
-              style: textTheme.bodyMedium?.copyWith(color: color),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('净流入率', style: textTheme.bodyMedium?.copyWith(color: Colors.grey)),
-            Text(
-              '${isInflow ? '+' : ''}${netFlowRate.toStringAsFixed(2)}%',
-              style: textTheme.bodyMedium?.copyWith(color: color),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(flowAnalysis, style: textTheme.bodySmall?.copyWith(color: color)),
-      ],
+  Widget _buildDashboard() {
+    return TradingDashboard(
+      quote: _quote,
+      analysis: _analysis,
+      isRefreshing: _isAnalysisRefreshing,
+      lastUpdateTime: _lastUpdateTime,
+      onRefresh: () => _refreshAnalysis(),
     );
   }
 

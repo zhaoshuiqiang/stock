@@ -47,6 +47,7 @@ class ComprehensiveScorer {
     else if (!hasFund) { techW=0.30; capW=0.18; realW=0.24; confW=0.16; sentW=0.12; fundW=0; }
     else if (!hasSent) { techW=0.30; capW=0.18; realW=0.24; confW=0.16; fundW=0.12; sentW=0; }
     else if (!hasCapital) { techW=0.33; realW=0.25; confW=0.17; sentW=0.12; fundW=0.13; capW=0; }
+    else { /* 全维度可用: 使用默认权重 */ }
 
     final rawScore = (technicalScore*techW + capitalScoreValue*capW + sentimentScoreValue*sentW + realtimeScore*realW + confluenceScore*confW + fundamentalScoreValue*fundW).clamp(0.0, 10.0);
 
@@ -58,9 +59,12 @@ class ComprehensiveScorer {
 
     // ST股票封顶：最高"偏多观望"，防止推荐高风险标的
     final isST = quote != null && isSTStock(quote.name);
-    final totalScore = isST
-        ? (adjustedScore / 10.0 * 9 + 1).round().clamp(1, 5)
-        : (adjustedScore / 10.0 * 9 + 1).round().clamp(1, 10);
+    final int totalScore;
+    if (isST) {
+      totalScore = (adjustedScore * 0.9 + 1).floor().clamp(1, 5);
+    } else {
+      totalScore = (adjustedScore * 0.9 + 1).floor().clamp(1, 10);
+    }
 
     String recommendation;
     if (isST) {

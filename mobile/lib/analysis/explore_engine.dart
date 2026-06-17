@@ -10,6 +10,7 @@ import 'signal_engine.dart';
 
 /// 探索引擎：后台批量分析沪深主板股票，筛选买入级别以上标的
 /// 使用全局单例 + BroadcastStream，确保切换Tab不中断分析
+/// v2.25 优化：批量K线获取 + 内存缓存 + 批量行情
 class ExploreEngine {
   static final ExploreEngine _instance = ExploreEngine._();
   static ExploreEngine get instance => _instance;
@@ -31,6 +32,7 @@ class ExploreEngine {
   Stream<ExploreProgress> get progressStream => _ensureController().stream;
 
   /// 释放资源并重置内部状态，允许单例后续继续使用
+  /// 注意: 不会中止正在运行的 explore() 调用（使用 _ensureController 自动重建）
   void dispose() {
     _progressController.close();
   }
@@ -74,12 +76,12 @@ class ExploreEngine {
 
       final allStocks = <QuoteData>[];
       final seenCodes = <String>{};
-      const batchSize = 5;
+      const sectorBatchSize = 5;
 
-      for (int i = 0; i < topSectors.length; i += batchSize) {
+      for (int i = 0; i < topSectors.length; i += sectorBatchSize) {
         final batch = topSectors.sublist(
           i,
-          i + batchSize > topSectors.length ? topSectors.length : i + batchSize,
+          i + sectorBatchSize > topSectors.length ? topSectors.length : i + sectorBatchSize,
         );
 
         final sectorStocksList = await Future.wait(
@@ -109,7 +111,61 @@ class ExploreEngine {
         return;
       }
 
-      // 3. 分批分析
+      // 3. 批量预取K线数据（内存缓存，单次探索内复用）
+      _emit(ExploreProgress(status: ExploreStatus.fetchingKlines, totalStocks: allStocks.length));
+
+      final klineCache = <String, List<HistoryKline>>{};
+      const klineBatchSize = 15;
+
+      for (int i = 0; i < allStocks.length; i += klineBatchSize) {
+        final end = min(i + klineBatchSize, allStocks.length);
+        final batch = allStocks.sublist(i, end);
+
+        final klineResults = await Future.wait(
+          batch.map((stock) =>
+              _apiClient.getStockHistory(stock.code).catchError((_) => <HistoryKline>[])),
+        );
+
+        for (int j = 0; j < batch.length; j++) {
+          klineCache[batch[j].code] = klineResults[j];
+        }
+
+        _emit(ExploreProgress(
+          status: ExploreStatus.fetchingKlines,
+          totalStocks: allStocks.length,
+          analyzedStocks: end,
+        ));
+      }
+
+      // 4. 批量获取实时行情（一次请求替代N次独立请求）
+      _emit(ExploreProgress(status: ExploreStatus.fetchingQuotes, totalStocks: allStocks.length));
+
+      final quoteCache = <String, QuoteData>{};
+      const quoteBatchSize = 50; // 腾讯批量接口支持多个代码
+
+      for (int i = 0; i < allStocks.length; i += quoteBatchSize) {
+        final end = min(i + quoteBatchSize, allStocks.length);
+        final batchCodes = allStocks.sublist(i, end).map((s) => s.code).toList();
+
+        List<QuoteData> batchQuotes;
+        try {
+          batchQuotes = await _apiClient.getBatchRealtimeQuotes(batchCodes);
+        } catch (_) {
+          batchQuotes = [];
+        }
+
+        for (final quote in batchQuotes) {
+          quoteCache[quote.code] = quote;
+        }
+
+        _emit(ExploreProgress(
+          status: ExploreStatus.fetchingQuotes,
+          totalStocks: allStocks.length,
+          analyzedStocks: end,
+        ));
+      }
+
+      // 5. 分析阶段（使用缓存数据，无需网络请求）
       _emit(ExploreProgress(
         status: ExploreStatus.analyzing,
         totalStocks: allStocks.length,
@@ -117,17 +173,18 @@ class ExploreEngine {
       ));
 
       final results = <ExploreResult>[];
-      const analyzeBatchSize = 10;
+      const analyzeBatchSize = 30; // 增大分析批次，只需CPU计算
 
       for (int i = 0; i < allStocks.length; i += analyzeBatchSize) {
         final end = min(i + analyzeBatchSize, allStocks.length);
         final batch = allStocks.sublist(i, end);
 
-        final batchResults = await Future.wait(
-          batch.map((stock) => _analyzeSingle(stock)),
-        );
-
-        for (final result in batchResults) {
+        // 同步分析（无网络IO），使用 compute 或 isolate 加速大量计算
+        for (int j = 0; j < batch.length; j++) {
+          final stock = batch[j];
+          final klineData = klineCache[stock.code] ?? <HistoryKline>[];
+          final quote = quoteCache[stock.code] ?? stock;
+          final result = _analyzeCached(stock, klineData, quote);
           if (result != null) {
             results.add(result);
           }
@@ -142,15 +199,15 @@ class ExploreEngine {
         ));
       }
 
-      // 4. 按评分降序排列
+      // 6. 按评分降序排列
       results.sort((a, b) => b.score.compareTo(a.score));
 
-      // 5. 持久化到数据库
+      // 7. 持久化到数据库
       _emit(ExploreProgress(status: ExploreStatus.saving));
       await _dbService.replaceExploreResults(results);
 
       final elapsed = DateTime.now().difference(startTime);
-      debugPrint('Explore completed: ${results.length} stocks in ${elapsed.inSeconds}s');
+      debugPrint('Explore completed: ${results.length} stocks in ${elapsed.inSeconds}s (optimized)');
 
       _emit(ExploreProgress(
         status: ExploreStatus.complete,
@@ -172,22 +229,18 @@ class ExploreEngine {
     _ensureController().add(progress);
   }
 
-  /// 分析单只股票，返回 ExploreResult 或 null（不满足条件）
-  Future<ExploreResult?> _analyzeSingle(QuoteData stock) async {
+  /// 使用缓存数据同步分析（无网络IO）
+  ExploreResult? _analyzeCached(
+    QuoteData stock,
+    List<HistoryKline> klineData,
+    QuoteData quote,
+  ) {
     try {
-      final klineData = await _apiClient.getStockHistory(stock.code);
       if (klineData.length < 20) return null;
 
       final indicators = calcAllIndicators(klineData);
 
-      QuoteData? quote;
-      try {
-        quote = await _apiClient.getRealtimeQuote(stock.code);
-      } catch (_) {
-        quote = stock;
-      }
-
-      if (quote != null && !_passValuationFilter(quote)) {
+      if (!_passValuationFilter(quote)) {
         return null;
       }
 
@@ -200,23 +253,25 @@ class ExploreEngine {
       return ExploreResult(
         code: stock.code,
         name: stock.name,
-        price: quote?.price ?? stock.price,
-        changePct: quote?.changePct ?? stock.changePct,
-        pe: quote?.pe ?? 0,
-        pb: quote?.pb ?? 0,
+        price: quote.price,
+        changePct: quote.changePct,
+        pe: quote.pe,
+        pb: quote.pb,
         score: analysis.score,
         recommendation: analysis.recommendation,
         confluenceScore: analysis.confluenceScore,
         analyzedAt: DateTime.now(),
       );
     } catch (e) {
-      debugPrint('Analyze ${stock.code} failed: $e');
+      debugPrint('Analyze cached ${stock.code} failed: $e');
       return null;
     }
   }
 
   static bool _passValuationFilter(QuoteData quote) {
-    if (quote.pe <= 0) return true;
+    // PE <= 0 表示亏损，过滤（探索引擎优先找有盈利能力的标的）
+    if (quote.pe <= 0) return false;
+    // PE >= 80 估值过高，过滤
     if (quote.pe < 80 && quote.pb > 0) return true;
     return false;
   }
@@ -232,6 +287,8 @@ enum ExploreStatus {
   idle,
   fetchingSectors,
   fetchingStocks,
+  fetchingKlines,
+  fetchingQuotes,
   analyzing,
   saving,
   complete,

@@ -321,16 +321,16 @@ void main() {
   // 3. generateAnalysis — backtestResults 验证
   // ============================================================
   group('generateAnalysis backtestResults 验证', () {
-    test('数据≥60条时 backtestResults 包含4个回测项', () {
+    test('数据≥60条时 backtestResults 包含6个回测项', () {
       final data = _uptrendData(count: 80);
       final result = generateAnalysis(data, null);
 
       // backtestResults 可能为空（如果回测引擎抛异常），但不应崩溃
       if (result.backtestResults != null && result.backtestResults!.isNotEmpty) {
-        expect(result.backtestResults, contains('MACD金叉'));
-        expect(result.backtestResults, contains('MA金叉'));
-        expect(result.backtestResults, contains('KDJ超卖'));
-        expect(result.backtestResults, contains('RSI超卖'));
+        const expectedKeys = ['MACD交叉', 'MA金叉', 'KDJ超卖', 'RSI超卖', '布林支撑', '均线多头'];
+        for (final key in expectedKeys) {
+          expect(result.backtestResults, contains(key));
+        }
 
         for (final entry in result.backtestResults!.entries) {
           expect(entry.value.totalSignals, greaterThanOrEqualTo(0));
