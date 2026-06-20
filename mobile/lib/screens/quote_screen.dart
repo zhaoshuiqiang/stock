@@ -585,7 +585,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                 _buildRealtimeChart(),
                 _buildKlineChart(),
                 _buildSignalList(),
-                StrategyPanel(klines: _klines, signals: _analysis?.signals ?? []),
+                StrategyPanel(klines: _klines, signals: _analysis?.signals ?? [], marketStructure: _analysis?.marketStructure),
                 _buildDashboard(),
                 TechnicalIndicatorsPanel(klines: _klines),
               ],

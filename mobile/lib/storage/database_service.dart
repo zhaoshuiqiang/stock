@@ -23,7 +23,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 7,
+      version: 8,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -118,6 +118,45 @@ class DatabaseService {
             ALTER TABLE watchlist ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0
           ''');
         }
+        if (oldVersion < 8) {
+          // Phase 2: 概念标签
+          await db.execute('''
+            ALTER TABLE explore_results ADD COLUMN concept_summary TEXT DEFAULT ''
+          ''');
+          await db.execute('''
+            ALTER TABLE explore_results ADD COLUMN day5_return REAL
+          ''');
+          await db.execute('''
+            ALTER TABLE explore_results ADD COLUMN day10_return REAL
+          ''');
+          await db.execute('''
+            ALTER TABLE explore_results ADD COLUMN day20_return REAL
+          ''');
+          await db.execute('''
+            ALTER TABLE explore_results ADD COLUMN market_structure TEXT DEFAULT ''
+          ''');
+          // Phase 3: 推荐收益追踪
+          await db.execute('''
+            CREATE TABLE recommendation_tracking (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              code TEXT NOT NULL,
+              name TEXT NOT NULL,
+              signal_price REAL NOT NULL,
+              signal_date INTEGER NOT NULL,
+              market_structure TEXT DEFAULT '',
+              strategy TEXT DEFAULT '',
+              concept_tags TEXT DEFAULT '',
+              day5_price REAL,
+              day5_return REAL,
+              day10_price REAL,
+              day10_return REAL,
+              day20_price REAL,
+              day20_return REAL,
+              last_checked_date INTEGER,
+              is_closed INTEGER DEFAULT 0
+            )
+          ''');
+        }
       },
     );
   }
@@ -179,7 +218,12 @@ class DatabaseService {
         recommendation TEXT NOT NULL,
         sector TEXT DEFAULT '',
         confluence_score INTEGER DEFAULT 0,
-        analyzed_at INTEGER NOT NULL
+        analyzed_at INTEGER NOT NULL,
+        concept_summary TEXT DEFAULT '',
+        day5_return REAL,
+        day10_return REAL,
+        day20_return REAL,
+        market_structure TEXT DEFAULT ''
       )
     ''');
 
@@ -218,6 +262,27 @@ class DatabaseService {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
         updated_at INTEGER NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE recommendation_tracking (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        signal_price REAL NOT NULL,
+        signal_date INTEGER NOT NULL,
+        market_structure TEXT DEFAULT '',
+        strategy TEXT DEFAULT '',
+        concept_tags TEXT DEFAULT '',
+        day5_price REAL,
+        day5_return REAL,
+        day10_price REAL,
+        day10_return REAL,
+        day20_price REAL,
+        day20_return REAL,
+        last_checked_date INTEGER,
+        is_closed INTEGER DEFAULT 0
       )
     ''');
   }
@@ -578,5 +643,61 @@ class DatabaseService {
     if (json == null) return [];
     final list = jsonDecode(json) as List;
     return list.map((e) => SectorInfo.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  // ========== 推荐收益追踪 CRUD ==========
+
+  Future<void> insertRecommendationSnapshot(Map<String, dynamic> snapshot) async {
+    final db = await database;
+    await db.insert('recommendation_tracking', snapshot);
+  }
+
+  Future<void> updateRecommendationReturn(int id, int days, double price, double returnPct) async {
+    final db = await database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (days == 5) {
+      await db.update('recommendation_tracking',
+        {'day5_price': price, 'day5_return': returnPct, 'last_checked_date': now},
+        where: 'id = ?', whereArgs: [id]);
+    } else if (days == 10) {
+      await db.update('recommendation_tracking',
+        {'day10_price': price, 'day10_return': returnPct, 'last_checked_date': now},
+        where: 'id = ?', whereArgs: [id]);
+    } else if (days == 20) {
+      await db.update('recommendation_tracking',
+        {'day20_price': price, 'day20_return': returnPct, 'last_checked_date': now},
+        where: 'id = ?', whereArgs: [id]);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getRecentRecommendations({int limit = 50}) async {
+    final db = await database;
+    return db.query('recommendation_tracking',
+      orderBy: 'signal_date DESC',
+      limit: limit);
+  }
+
+  Future<Map<String, dynamic>?> getRecommendationByCode(String code) async {
+    final db = await database;
+    final results = await db.query('recommendation_tracking',
+      where: 'code = ? AND is_closed = 0',
+      whereArgs: [code],
+      orderBy: 'signal_date DESC',
+      limit: 1);
+    return results.isNotEmpty ? results.first : null;
+  }
+
+  Future<void> closeRecommendation(int id) async {
+    final db = await database;
+    await db.update('recommendation_tracking',
+      {'is_closed': 1},
+      where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> clearOldRecommendations({int days = 90}) async {
+    final db = await database;
+    final cutoff = DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
+    await db.delete('recommendation_tracking',
+      where: 'signal_date < ?', whereArgs: [cutoff]);
   }
 }

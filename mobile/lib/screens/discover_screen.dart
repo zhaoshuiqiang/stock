@@ -399,6 +399,23 @@ class DiscoverScreenState extends State<DiscoverScreen> {
     if (r.sector.isNotEmpty) {
       tags.add(SignalTag(text: r.sector, color: _kTextSecondary));
     }
+    // Phase 1: 市场结构标签
+    if (r.marketStructure != null && r.marketStructure!.isNotEmpty) {
+      tags.add(SignalTag(text: r.marketStructure!, color: _kAccent));
+    }
+    // Phase 2: 概念标签
+    if (r.conceptSummary != null && r.conceptSummary!.isNotEmpty) {
+      tags.add(SignalTag(text: r.conceptSummary!, color: _kTextSecondary));
+    }
+    // Phase 3: 20日收益标签
+    if (r.day20Return != null) {
+      final isPositive = r.day20Return! >= 0;
+      final returnText = '20日${isPositive ? "+" : ""}${r.day20Return!.toStringAsFixed(1)}%';
+      tags.add(SignalTag(
+        text: returnText,
+        color: isPositive ? _kUp : _kDown,
+      ));
+    }
 
     return StockCard(
       name: r.name,

@@ -1,5 +1,6 @@
 import '../models/stock_models.dart';
 import 'strategy_builder.dart';
+import 'market_structure_analyzer.dart';
 
 class TradingStrategy {
   final String id;
@@ -9,7 +10,7 @@ class TradingStrategy {
   final String entryRule;
   final String exitRule;
   final String stopLossRule;
-  final bool isActive;
+  bool isActive;
   final int signalStrength;
   final double? entryPrice;
   final double? targetPrice;
@@ -101,11 +102,22 @@ class TradingStrategy {
   }
 }
 
-List<TradingStrategy> evaluateStrategies(List<HistoryKline> data, List<SignalItem> signals) {
+List<TradingStrategy> evaluateStrategies(List<HistoryKline> data, List<SignalItem> signals, {MarketStructureResult? marketStructure}) {
   if (data.length < 30) return [];
 
   // 委托 StrategyBuilder 构建完整策略库
   final strategies = StrategyBuilder.buildLayeredStrategies(data, signals, null);
+
+  // Phase 1: 根据市场结构禁用不兼容策略
+  if (marketStructure != null) {
+    final incompatibleNames = getIncompatibleStrategies(marketStructure.structure);
+    for (final strategy in strategies) {
+      if (incompatibleNames.contains(strategy.name)) {
+        // 将通过传入参数方式禁用
+        strategy.isActive = false;
+      }
+    }
+  }
 
   // 冲突检测：短线与长线策略方向矛盾时生成警告
   final activeShortStrategies = strategies.where((s) => s.isActive && s.strategyType == 'short').toList();

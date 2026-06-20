@@ -1,5 +1,7 @@
 import '../analysis/strategy_engine.dart';
 import '../analysis/backtest_engine.dart';
+import '../analysis/market_structure_analyzer.dart';
+import '../analysis/percentile_analyzer.dart';
 
 enum DataConfidence { high, medium, low }
 
@@ -785,6 +787,11 @@ class AnalysisResult {
   final List<ValidatedSignal>? validatedSignals;     // 对抗验证信号
   final Map<String, double>? confidenceBreakdown;    // 置信度分项明细
 
+  // 市场结构 + 概念 + 分位值 (Phase 1-4)
+  final MarketStructureResult? marketStructure;      // 市场结构分析结果
+  final Map<String, List<String>>? conceptTags;       // 概念标签 {'long': [...], 'short': [...]}
+  final PercentileResult? percentile;                 // 分位值分析结果
+
   AnalysisResult({
     this.quote,
     this.indicators = const {},
@@ -810,6 +817,9 @@ class AnalysisResult {
     this.newsSentiment,
     this.validatedSignals,
     this.confidenceBreakdown,
+    this.marketStructure,
+    this.conceptTags,
+    this.percentile,
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {
@@ -883,6 +893,16 @@ class AnalysisResult {
           : null,
       validatedSignals: validatedSignals,
       confidenceBreakdown: confidenceBreakdown,
+      marketStructure: json['market_structure'] != null
+          ? MarketStructureResult.fromJson(json['market_structure'] as Map<String, dynamic>)
+          : null,
+      conceptTags: json['concept_tags'] != null
+          ? (json['concept_tags'] as Map<String, dynamic>).map(
+              (k, v) => MapEntry(k, List<String>.from(v as List)))
+          : null,
+      percentile: json['percentile'] != null
+          ? PercentileResult.fromJson(json['percentile'] as Map<String, dynamic>)
+          : null,
     );
   }
 
@@ -917,6 +937,9 @@ class AnalysisResult {
       'news_sentiment': newsSentiment?.toJson(),
       'validated_signals': validatedSignals?.map((s) => s.toJson()).toList(),
       'confidence_breakdown': confidenceBreakdown,
+      'market_structure': marketStructure?.toJson(),
+      'concept_tags': conceptTags,
+      'percentile': percentile?.toJson(),
     };
   }
 }
@@ -1199,6 +1222,12 @@ class ExploreResult {
   final String sector;
   final int confluenceScore;
   final DateTime analyzedAt;
+  // Phase 2-3: 概念标签 + 收益追踪
+  final String? conceptSummary;
+  final double? day5Return;
+  final double? day10Return;
+  final double? day20Return;
+  final String? marketStructure;
 
   ExploreResult({
     required this.code,
@@ -1212,6 +1241,11 @@ class ExploreResult {
     this.sector = '',
     this.confluenceScore = 0,
     required this.analyzedAt,
+    this.conceptSummary,
+    this.day5Return,
+    this.day10Return,
+    this.day20Return,
+    this.marketStructure,
   });
 
   Map<String, dynamic> toMap() {
@@ -1227,6 +1261,11 @@ class ExploreResult {
       'sector': sector,
       'confluence_score': confluenceScore,
       'analyzed_at': analyzedAt.millisecondsSinceEpoch,
+      'concept_summary': conceptSummary ?? '',
+      'day5_return': day5Return,
+      'day10_return': day10Return,
+      'day20_return': day20Return,
+      'market_structure': marketStructure ?? '',
     };
   }
 
@@ -1243,6 +1282,11 @@ class ExploreResult {
       sector: map['sector'] as String? ?? '',
       confluenceScore: (map['confluence_score'] as num?)?.toInt() ?? 0,
       analyzedAt: DateTime.fromMillisecondsSinceEpoch((map['analyzed_at'] as num?)?.toInt() ?? 0),
+      conceptSummary: map['concept_summary'] as String?,
+      day5Return: (map['day5_return'] as num?)?.toDouble(),
+      day10Return: (map['day10_return'] as num?)?.toDouble(),
+      day20Return: (map['day20_return'] as num?)?.toDouble(),
+      marketStructure: map['market_structure'] as String?,
     );
   }
 }

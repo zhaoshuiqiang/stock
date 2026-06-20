@@ -1,6 +1,7 @@
 import '../models/stock_models.dart';
 import 'fundamental_analyzer.dart';
 import 'news_sentiment_analyzer.dart';
+import 'market_structure_analyzer.dart';
 
 class ComprehensiveScoreResult {
   final int totalScore;
@@ -18,11 +19,12 @@ class ComprehensiveScorer {
   /// 精确ST检测（避免EAST/WEST等误判）
   static bool isSTStock(String name) => name.startsWith('ST') || name.startsWith('*ST');
 
-  /// 6维度加权：技术28%+资金17%+实时22%+共振15%+情绪10%+基本面8%
+  /// 7维度加权：技术25%+资金15%+实时20%+共振13%+情绪10%+基本面7%+结构10%
   static ComprehensiveScoreResult combine({
     required double technicalScore, required double realtimeScore, required double confluenceScore,
     double? capitalFlowScore, double? marketPositionFactor,
     required QuoteData? quote, required MarketContext? marketContext, required List<dynamic>? newsList,
+    MarketStructureResult? marketStructure,
   }) {
     FundamentalScore? fundamentalScore;
     double fundamentalScoreValue = 5.0;
@@ -39,17 +41,19 @@ class ComprehensiveScorer {
     }
 
     final capitalScoreValue = capitalFlowScore ?? 5.0;
+    final structureScoreValue = marketStructure?.structureScore ?? 5.0;
 
-    double techW=0.28, capW=0.17, realW=0.22, confW=0.15, sentW=0.10, fundW=0.08;
+    // 7维权重: Tech/Cap/Real/Conf/Sent/Fund/Struct
+    // 结构分析始终可用(基于K线)，不需要自适应回退
+    double techW=0.25, capW=0.15, realW=0.20, confW=0.13, sentW=0.10, fundW=0.07, structW=0.10;
     final hasFund = fundamentalScore != null, hasSent = newsSentiment != null, hasCapital = capitalFlowScore != null;
-    if (!hasFund && !hasSent && !hasCapital) { techW=0.45; realW=0.35; confW=0.20; capW=sentW=fundW=0; }
-    else if (!hasFund && !hasSent) { techW=0.35; capW=0.20; realW=0.28; confW=0.17; sentW=fundW=0; }
-    else if (!hasFund) { techW=0.30; capW=0.18; realW=0.24; confW=0.16; sentW=0.12; fundW=0; }
-    else if (!hasSent) { techW=0.30; capW=0.18; realW=0.24; confW=0.16; fundW=0.12; sentW=0; }
-    else if (!hasCapital) { techW=0.33; realW=0.25; confW=0.17; sentW=0.12; fundW=0.13; capW=0; }
-    else { /* 全维度可用: 使用默认权重 */ }
+    if (!hasFund && !hasSent && !hasCapital) { techW=0.40; realW=0.30; confW=0.18; structW=0.12; capW=sentW=fundW=0; }
+    else if (!hasFund && !hasSent) { techW=0.32; capW=0.18; realW=0.25; confW=0.15; structW=0.10; sentW=fundW=0; }
+    else if (!hasFund) { techW=0.28; capW=0.16; realW=0.22; confW=0.14; sentW=0.10; structW=0.10; fundW=0; }
+    else if (!hasSent) { techW=0.28; capW=0.16; realW=0.22; confW=0.14; fundW=0.10; structW=0.10; sentW=0; }
+    else if (!hasCapital) { techW=0.30; realW=0.23; confW=0.15; sentW=0.10; fundW=0.10; structW=0.12; capW=0; }
 
-    final rawScore = (technicalScore*techW + capitalScoreValue*capW + sentimentScoreValue*sentW + realtimeScore*realW + confluenceScore*confW + fundamentalScoreValue*fundW).clamp(0.0, 10.0);
+    final rawScore = (technicalScore*techW + capitalScoreValue*capW + sentimentScoreValue*sentW + realtimeScore*realW + confluenceScore*confW + fundamentalScoreValue*fundW + structureScoreValue*structW).clamp(0.0, 10.0);
 
     final positionFactor = marketPositionFactor ?? 1.0;
     double marketAdjustment = 1.0;

@@ -1,5 +1,6 @@
 import '../models/stock_models.dart';
 import 'signal_validator.dart';
+import 'market_structure_analyzer.dart';
 
 /// 置信度计算结果
 class ConfidenceCalcResult {
@@ -22,6 +23,7 @@ class ConfidenceCalculator {
     FundamentalScore? fundamentalScore,
     NewsSentiment? newsSentiment,
     MarketContext? marketContext,
+    MarketStructureResult? marketStructure,
   }) {
     final buyCount = buySignals.length;
     final sellCount = sellSignals.length;
@@ -68,7 +70,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 4. 市场环境(20%): 大盘趋势权重提升，短线需顺势操作
+    // 4. 市场环境(10%): 大盘趋势确认
     double marketConfirm = 0.5;
     if (marketContext != null) {
       if (totalScore >= 7 && marketContext.avgChangePct > 0.5) {
@@ -82,7 +84,27 @@ class ConfidenceCalculator {
       }
     }
 
-    // 5. 信号时效性(20%): 短中期信号权重高于长期（短线交易核心维度）
+    // 5. 市场结构确认(10%): 分裂自原marketConfirm(20%→10%)，结构趋势与信号方向一致时加分
+    double structureConfirm = 0.5;
+    if (marketStructure != null) {
+      final isBullish = marketStructure.structure == MarketStructure.bullTrend ||
+                         marketStructure.structure == MarketStructure.accumulation;
+      final isBearish = marketStructure.structure == MarketStructure.bearTrend ||
+                        marketStructure.structure == MarketStructure.distribution;
+      if (totalScore >= 7 && isBullish) {
+        structureConfirm = 0.80;
+      } else if (totalScore <= 4 && isBearish) {
+        structureConfirm = 0.80;
+      } else if (totalScore >= 7 && isBearish) {
+        structureConfirm = 0.25;
+      } else if (totalScore <= 4 && isBullish) {
+        structureConfirm = 0.25;
+      } else {
+        structureConfirm = 0.5;
+      }
+    }
+
+    // 6. 信号时效性(10%): 短中期信号权重高于长期（短线交易核心维度）
     double signalFreshness = 0.5;
     final recentBuySignals = buySignals.where((s) =>
       s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm
@@ -96,9 +118,10 @@ class ConfidenceCalculator {
 
     var confidenceScore = (signalConsistency * 0.30 +
         fundamentalSupport * 0.10 +
-        sentimentConfirm * 0.20 +
-        marketConfirm * 0.20 +
-        signalFreshness * 0.20).clamp(0.3, 0.95);
+        sentimentConfirm * 0.10 +
+        marketConfirm * 0.10 +
+        structureConfirm * 0.10 +
+        signalFreshness * 0.10).clamp(0.3, 0.95);
 
     // 信号对抗验证调整
     List<ValidatedSignal> validatedSignals = [];
@@ -134,6 +157,7 @@ class ConfidenceCalculator {
     FundamentalScore? fundamentalScore,
     NewsSentiment? newsSentiment,
     MarketContext? marketContext,
+    MarketStructureResult? marketStructure,
   }) {
     final buyCount = buySignals.length;
     final sellCount = sellSignals.length;
@@ -194,7 +218,27 @@ class ConfidenceCalculator {
       }
     }
 
-    // 5. 信号时效性(20%): 短中期信号权重高于长期（短线交易核心维度）
+    // 5. 结构确认(breakdown)
+    double structureConfirm = 0.5;
+    if (marketStructure != null) {
+      final isBullish = marketStructure.structure == MarketStructure.bullTrend ||
+                         marketStructure.structure == MarketStructure.accumulation;
+      final isBearish = marketStructure.structure == MarketStructure.bearTrend ||
+                        marketStructure.structure == MarketStructure.distribution;
+      if (totalScore >= 7 && isBullish) {
+        structureConfirm = 0.80;
+      } else if (totalScore <= 4 && isBearish) {
+        structureConfirm = 0.80;
+      } else if (totalScore >= 7 && isBearish) {
+        structureConfirm = 0.25;
+      } else if (totalScore <= 4 && isBullish) {
+        structureConfirm = 0.25;
+      } else {
+        structureConfirm = 0.5;
+      }
+    }
+
+    // 6. 信号时效性(breakdown)
     double signalFreshness = 0.5;
     final recentBuySignals = buySignals.where((s) =>
       s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm
@@ -211,6 +255,7 @@ class ConfidenceCalculator {
       'fundamental_support': fundamentalSupport,
       'sentiment_confirm': sentimentConfirm,
       'market_confirm': marketConfirm,
+      'structure_confirm': structureConfirm,
       'signal_freshness': signalFreshness,
     };
   }

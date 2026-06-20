@@ -14,6 +14,8 @@ import 'strategy_engine.dart';
 import 'backtest_engine.dart';
 import 'sr_quality.dart';
 import 'capital_flow_analyzer.dart';
+import 'market_structure_analyzer.dart';
+import 'percentile_analyzer.dart';
 
 /// 向后兼容：检测特有信号（量价背离、布林收口）
 List<SignalItem> detectSignals(List<HistoryKline> data) {
@@ -247,6 +249,12 @@ AnalysisResult generateAnalysis(
   final signals = SignalLayer.detectAllSignals(data);
   final indicators = getIndicatorSummary(data);
 
+  // 1a. 市场结构分析 (Phase 1)
+  final marketStructure = MarketStructureAnalyzer.analyze(data);
+
+  // 1b. 分位值分析 (Phase 4)
+  final percentile = PercentileAnalyzer.analyze(data, quote);
+
   final buySignals = signals.where((s) => s.type == 'buy').toList();
   final sellSignals = signals.where((s) => s.type == 'sell').toList();
 
@@ -275,6 +283,7 @@ AnalysisResult generateAnalysis(
     quote: quote,
     marketContext: marketContext,
     newsList: newsList,
+    marketStructure: marketStructure,
   );
 
   final totalScore = compResult.totalScore;
@@ -316,7 +325,15 @@ AnalysisResult generateAnalysis(
   try {
     shortTermStrategies = StrategyBuilder.buildLayeredStrategies(data, signals, SignalDuration.shortTerm);
     longTermStrategies = StrategyBuilder.buildLayeredStrategies(data, signals, SignalDuration.longTerm);
-  } catch (_) {}
+    // Phase 1: 根据市场结构禁用不兼容策略
+    final incompatibleNames = getIncompatibleStrategies(marketStructure.structure);
+    for (final s in shortTermStrategies) {
+      if (incompatibleNames.contains(s.name)) s.isActive = false;
+    }
+    for (final s in longTermStrategies) {
+      if (incompatibleNames.contains(s.name)) s.isActive = false;
+    }
+  } catch (e) { debugPrint('SignalEngine.structureFilter: $e'); }
 
   // 12. 置信度计算（内部已包含对抗验证）
   final confResult = ConfidenceCalculator.calculate(
@@ -329,6 +346,7 @@ AnalysisResult generateAnalysis(
     fundamentalScore: compResult.fundamentalScore,
     newsSentiment: compResult.newsSentiment,
     marketContext: marketContext,
+    marketStructure: marketStructure,
   );
   // 回测反馈闭环：根据策略历史表现调整置信度
   double confidenceScore = confResult.confidenceScore;
@@ -366,6 +384,7 @@ AnalysisResult generateAnalysis(
     fundamentalScore: compResult.fundamentalScore,
     newsSentiment: compResult.newsSentiment,
     marketContext: marketContext,
+    marketStructure: marketStructure,
   );
 
   // 13. 详细推荐理由
@@ -415,6 +434,8 @@ AnalysisResult generateAnalysis(
     newsSentiment: compResult.newsSentiment,
     validatedSignals: validatedSignals,
     confidenceBreakdown: confidenceBreakdown,
+    marketStructure: marketStructure,
+    percentile: percentile,
   );
 }
 

@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import '../models/stock_models.dart';
 import '../analysis/strategy_engine.dart';
+import '../analysis/market_structure_analyzer.dart';
 
 class StrategyPanel extends StatelessWidget {
   final List<HistoryKline> klines;
   final List<SignalItem> signals;
+  final MarketStructureResult? marketStructure;
 
   const StrategyPanel({
     super.key,
     required this.klines,
     required this.signals,
+    this.marketStructure,
   });
 
   @override
@@ -18,7 +21,7 @@ class StrategyPanel extends StatelessWidget {
       return const Center(child: Text('暂无分析数据', style: TextStyle(color: Colors.white54)));
     }
 
-    final strategies = evaluateStrategies(klines, signals);
+    final strategies = evaluateStrategies(klines, signals, marketStructure: marketStructure);
     final active = strategies.where((s) => s.isActive).toList();
     final inactive = strategies.where((s) => !s.isActive).toList();
 

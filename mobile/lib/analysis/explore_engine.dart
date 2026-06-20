@@ -5,8 +5,11 @@ import 'package:flutter/foundation.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
+import '../data/concept_tag_provider.dart';
 import 'indicators.dart';
 import 'signal_engine.dart';
+import 'market_structure_analyzer.dart';
+import 'recommendation_tracker.dart';
 
 /// 探索引擎：后台批量分析沪深主板股票，筛选买入级别以上标的
 /// 使用全局单例 + BroadcastStream，确保切换Tab不中断分析
@@ -206,6 +209,15 @@ class ExploreEngine {
       _emit(ExploreProgress(status: ExploreStatus.saving));
       await _dbService.replaceExploreResults(results);
 
+      // Phase 3: 更新历史推荐收益率
+      try {
+        final pricesByCode = <String, double>{};
+        for (final q in quoteCache.values) {
+          pricesByCode[q.code] = q.price;
+        }
+        await RecommendationTracker().updateReturns(pricesByCode);
+      } catch (e) { debugPrint('ExploreEngine.updateReturns: $e'); }
+
       final elapsed = DateTime.now().difference(startTime);
       debugPrint('Explore completed: ${results.length} stocks in ${elapsed.inSeconds}s (optimized)');
 
@@ -250,6 +262,22 @@ class ExploreEngine {
         return null;
       }
 
+      // Phase 2: 概念标签
+      String? conceptSummary;
+      try {
+        conceptSummary = ConceptTagProvider.instance.getConceptSummary(stock.code);
+      } catch (e) { debugPrint('ExploreEngine.conceptTags: $e'); }
+
+      // Phase 3: 推荐追踪
+      try {
+        RecommendationTracker().track(analysis);
+      } catch (e) { debugPrint('ExploreEngine.trackRec: $e'); }
+
+      // Phase 1: 市场结构
+      final structureLabel = analysis.marketStructure != null
+          ? MarketStructureAnalyzer.getLabel(analysis.marketStructure!.structure)
+          : '';
+
       return ExploreResult(
         code: stock.code,
         name: stock.name,
@@ -261,6 +289,8 @@ class ExploreEngine {
         recommendation: analysis.recommendation,
         confluenceScore: analysis.confluenceScore,
         analyzedAt: DateTime.now(),
+        conceptSummary: (conceptSummary != null && conceptSummary.isNotEmpty) ? conceptSummary : null,
+        marketStructure: structureLabel.isNotEmpty ? structureLabel : null,
       );
     } catch (e) {
       debugPrint('Analyze cached ${stock.code} failed: $e');

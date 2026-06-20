@@ -1,0 +1,10 @@
+{
+  "_meta": {
+    "description": "概念标签数据(占位)",
+    "generated_at": "2026-06-20",
+    "total_stocks": 0,
+    "stocks_with_long": 0,
+    "stocks_with_short": 0,
+    "note": "运行 scripts/build_concept_tags.py 生成完整数据"
+  }
+}

@@ -8,6 +8,7 @@ import 'package:stock_analyzer/screens/archive_screen.dart';
 import 'package:stock_analyzer/screens/alerts_screen.dart';
 import 'package:stock_analyzer/screens/update_log_screen.dart';
 import 'package:stock_analyzer/services/notification_service.dart';
+import 'package:stock_analyzer/data/concept_tag_provider.dart';
 
 const String appVersion = 'v2.22.0';
 
@@ -15,6 +16,8 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final notificationService = NotificationService();
   await notificationService.init();
+  // 预加载概念标签数据
+  await ConceptTagProvider.instance.load();
   // 如果用户已开启推送，启动轮询
   if (await notificationService.isEnabled()) {
     notificationService.startPolling();

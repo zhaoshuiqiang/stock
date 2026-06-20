@@ -1,5 +1,37 @@
 # 更新日志
 
+## v2.27.0 (2026-06-20)
+
+### 新功能
+- **市场结构识别**：基于ADX+MA排列自动识别5种市场结构（牛市/熊市/盘整/积累/分配），驱动策略权重动态调整和置信度计算
+- **概念标签系统**：Python脚本(akshare)生成股票概念映射，应用端展示长/短线概念标签，辅助行业轮动判断
+- **推荐收益追踪**：记录推荐信号快照，追踪5/10/20日实际收益率，实现推荐置信度实证校准
+- **分位值分析**：PE/PB行业分位 + RSI分位 + 成交量分位，提供多维估值参考
+
+### 优化
+- 综合评分由6维升级至7维（技术25%/资金15%/实时20%/共振13%/情绪10%/基本面7%/结构10%），结构维度权重10%
+- 置信度计算由5维升级至6维，marketConfirm(20%)分裂为marketConfirm(10%)+structureConfirm(10%)
+- 策略引擎根据市场结构自动禁用不兼容策略（牛市中禁用防守策略，熊市中仅保留防守策略）
+- DiscoverScreen卡片新增市场结构/概念标签/20日收益展示
+
+### 新增文件
+- `analysis/market_structure_analyzer.dart` — 市场结构分析器
+- `analysis/percentile_analyzer.dart` — 分位值分析器
+- `analysis/recommendation_tracker.dart` — 推荐收益追踪器
+- `data/concept_tag_provider.dart` — 概念标签提供者（单例）
+- `assets/concept_tags.json` — 概念标签数据
+- `scripts/build_concept_tags.py` — Python概念数据生成脚本
+
+### 数据库
+- DB v7→v8：explore_results新增concept_summary/day5_return/day10_return/day20_return/market_structure列；新增recommendation_tracking表
+- 新增recommendation_tracking CRUD方法
+
+### 代码评审修复
+- StrategyPanel接收marketStructure参数，消除策略过滤死代码路径
+- 所有catch块添加debugPrint日志输出
+- recommendation_tracker中用独立if替代else-if链，避免里程碑遗漏
+- 清理market_structure_analyzer中3个未使用变量
+
 ## v2.26.0 (2026-06-20)
 - 回测引擎全面重构：引入专业量化校验体系（前视偏差修复/涨跌停模拟/完整成本/复权验证/脏数据过滤/过度拟合检测）
 - 回测校验报告：10项专业校验标准化输出
