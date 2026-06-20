@@ -10,6 +10,20 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.27.0',
+        'date': '2026-06-20',
+        'changes': [
+          '市场结构识别：基于ADX+MA排列自动识别5种市场结构（牛市/熊市/盘整/积累/分配），策略引擎动态调整权重',
+          '概念标签系统：Python脚本(akshare)生成股票概念映射，应用端展示长/短线概念标签',
+          '推荐收益追踪：记录推荐信号快照，追踪5/10/20日实际收益率，实现置信度实证校准',
+          '分位值分析：PE/PB行业分位+RSI分位+成交量分位，多维估值参考',
+          '综合评分6维→7维（技术25%+资金15%+实时20%+共振13%+情绪10%+基本面7%+结构10%）',
+          '置信度5维→6维（marketConfirm分为大盘10%+结构10%）',
+          'DiscoverScreen新增市场结构/概念标签/20日收益展示',
+          'DB v7→v8（新增explore_results列+recommendation_tracking表）',
+        ],
+      },
+      {
         'version': 'v2.26.0',
         'date': '2026-06-20',
         'changes': [
