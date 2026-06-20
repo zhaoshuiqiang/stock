@@ -91,13 +91,13 @@ class MarketStructureResult {
 }
 
 /// 各市场结构下兼容的策略名称列表
-/// 名称必须与 strategy_builder.dart 中 TradingStrategy.name 一致
+/// 名称必须与 strategy_builder.dart 中 TradingStrategy.name 完全一致
 const kBullTrendStrategies = [
   '均线多头排列',
-  'MACD零轴上金叉',
-  'ADX趋势强度',
+  'MACD零轴上方金叉',
+  '趋势强度确认',
   '布林带突破',
-  '突破回踩确认',
+  '突破+回踩确认',
   '均线突破',
   '放量突破',
 ];
@@ -107,26 +107,25 @@ const kBearTrendStrategies = <String>[
 ];
 
 const kConsolidationStrategies = [
-  '布林带支撑',
-  'KDJ超卖金叉',
   'RSI超卖反弹',
+  'KDJ超买金叉',
   '缩量回调',
-  '成交量地量止跌',
+  '缩量止跌',
 ];
 
 const kAccumulationStrategies = [
-  'MACD底背离',
-  'KDJ超卖金叉',
+  'MACD底背离短线',
+  'KDJ超买金叉',
   'RSI超卖反弹',
-  '成交量地量止跌',
+  '缩量止跌',
   '均线多头排列',
   'RSI中轨支撑',
 ];
 
 const kDistributionStrategies = [
   '缩量回调',
-  '成交量地量止跌',
-  'KDJ超卖金叉',
+  '缩量止跌',
+  'KDJ超买金叉',
 ];
 
 /// 根据市场结构判定哪些策略应禁用

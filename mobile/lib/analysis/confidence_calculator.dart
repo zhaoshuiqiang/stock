@@ -104,24 +104,24 @@ class ConfidenceCalculator {
       }
     }
 
-    // 6. 信号时效性(10%): 短中期信号权重高于长期（短线交易核心维度）
+    // 6. 信号时效性(13%): 短中期信号权重高于长期（短线交易核心维度）
+    // P0-6修复：按推荐方向过滤，买入推荐只计近期买入信号，卖出推荐只计近期卖出信号
     double signalFreshness = 0.5;
-    final recentBuySignals = buySignals.where((s) =>
-      s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm
-    ).length;
-    final recentSellSignals = sellSignals.where((s) =>
-      s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm
-    ).length;
-    if (signalCount > 0 && recentBuySignals + recentSellSignals > 0) {
-      signalFreshness = 0.3 + (recentBuySignals + recentSellSignals) / signalCount * 0.7;
+    final isBuyRecommendation = totalScore >= 6;
+    final directionalRecentSignals = (isBuyRecommendation ? buySignals : sellSignals)
+        .where((s) => s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm)
+        .length;
+    if (signalCount > 0 && directionalRecentSignals > 0) {
+      signalFreshness = 0.3 + directionalRecentSignals / signalCount * 0.7;
     }
 
-    var confidenceScore = (signalConsistency * 0.30 +
-        fundamentalSupport * 0.10 +
-        sentimentConfirm * 0.10 +
-        marketConfirm * 0.10 +
-        structureConfirm * 0.10 +
-        signalFreshness * 0.10).clamp(0.3, 0.95);
+    // P0-5修复：权重归一化至1.0（原总和仅0.80，系统性低估强信号）
+    var confidenceScore = (signalConsistency * 0.35 +
+        fundamentalSupport * 0.13 +
+        sentimentConfirm * 0.13 +
+        marketConfirm * 0.13 +
+        structureConfirm * 0.13 +
+        signalFreshness * 0.13).clamp(0.3, 0.95);
 
     // 信号对抗验证调整
     List<ValidatedSignal> validatedSignals = [];
@@ -238,16 +238,14 @@ class ConfidenceCalculator {
       }
     }
 
-    // 6. 信号时效性(breakdown)
+    // 6. 信号时效性(breakdown) — P0-6修复：按方向过滤
     double signalFreshness = 0.5;
-    final recentBuySignals = buySignals.where((s) =>
-      s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm
-    ).length;
-    final recentSellSignals = sellSignals.where((s) =>
-      s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm
-    ).length;
-    if (signalCount > 0 && recentBuySignals + recentSellSignals > 0) {
-      signalFreshness = 0.3 + (recentBuySignals + recentSellSignals) / signalCount * 0.7;
+    final isBuyRec = totalScore >= 6;
+    final directionalRecent = (isBuyRec ? buySignals : sellSignals)
+        .where((s) => s.duration == SignalDuration.shortTerm || s.duration == SignalDuration.mediumTerm)
+        .length;
+    if (signalCount > 0 && directionalRecent > 0) {
+      signalFreshness = 0.3 + directionalRecent / signalCount * 0.7;
     }
 
     return {

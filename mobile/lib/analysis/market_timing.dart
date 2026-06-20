@@ -96,5 +96,7 @@ class MarketTiming {
     );
   }
 
-  static double getPositionAdjustment(MarketTimingResult timing) => 0.85 + timing.positionAdvice * 0.3;
+  // P2-5修复：clamp至[0.7, 1.0]避免超过1.0导致评分膨胀
+  static double getPositionAdjustment(MarketTimingResult timing) =>
+      (0.85 + timing.positionAdvice * 0.3).clamp(0.7, 1.0);
 }

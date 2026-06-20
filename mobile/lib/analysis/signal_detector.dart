@@ -149,7 +149,7 @@ class SignalDetector {
         description: 'DIF上穿DEA形成金叉，中线买入信号',
         strength: 85,
         timestamp: last.date,
-        duration: SignalDuration.shortTerm,
+        duration: SignalDuration.mediumTerm,
         confidence: confidence,
         signalCount: 2,
       ));
@@ -161,7 +161,7 @@ class SignalDetector {
         description: 'DIF下穿DEA形成死叉，中线卖出信号',
         strength: 85,
         timestamp: last.date,
-        duration: SignalDuration.shortTerm,
+        duration: SignalDuration.mediumTerm,
         confidence: confidence,
         signalCount: 2,
       ));
@@ -292,15 +292,19 @@ class SignalDetector {
           signalCount: 1,
         ));
       } else if (last.bollLower > 0 && last.close < last.bollLower && prev.close >= prev.bollLower) {
+        // P1-5修复：镜像上轨逻辑，趋势行情中破下轨为看跌延续，震荡行情中为超卖
+        final isTrendingDown = last.adx14 > 25 && last.minusDi14 > last.plusDi14;
         signals.add(SignalItem(
-          type: 'buy',
+          type: isTrendingDown ? 'sell' : 'buy',
           indicator: 'BOLL',
-          signal: '跌破下轨',
-          description: '股价跌破布林带下轨，超卖状态',
-          strength: 70,
+          signal: isTrendingDown ? '趋势跌破下轨' : '跌破下轨',
+          description: isTrendingDown
+              ? '股价跌破布林带下轨且下跌趋势明确(ADX=${last.adx14.toStringAsFixed(1)})，看跌延续'
+              : '股价跌破布林带下轨，超卖状态',
+          strength: isTrendingDown ? 75 : 70,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,
-          confidence: 0.65,
+          confidence: isTrendingDown ? 0.7 : 0.65,
           signalCount: 1,
         ));
       }
@@ -408,8 +412,23 @@ class SignalDetector {
       ));
     }
 
-    // 3. 趋势强度确认（ADX）
-    if (last.adx14 > 25) {
+    // P1-6: MACD零轴下方死叉（强势空头）— 与零轴上方金叉对称
+    if (last.macdDif < last.macdDea && prev.macdDif >= prev.macdDea && last.macdDif < 0) {
+      signals.add(SignalItem(
+        type: 'sell',
+        indicator: 'MACD',
+        signal: 'MACD零轴下方死叉',
+        description: 'MACD在零轴下方形成死叉，空头趋势强劲',
+        strength: 90,
+        timestamp: last.date,
+        duration: SignalDuration.longTerm,
+        confidence: 0.85,
+        signalCount: 2,
+      ));
+    }
+
+    // 3. 趋势强度确认（ADX）— P0-1修复：需要方向确认
+    if (last.adx14 > 25 && last.plusDi14 > last.minusDi14) {
       signals.add(SignalItem(
         type: 'neutral',
         indicator: 'ADX',

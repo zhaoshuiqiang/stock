@@ -56,7 +56,7 @@ void main() {
       expect(result.validatedSignals, isNotNull);
     });
 
-    test('breakdown contains all 5 dimensions', () {
+    test('breakdown contains all 6 dimensions', () {
       final buySignals = makeBuySignals(2);
       final sellSignals = makeSellSignals(1);
 
@@ -70,8 +70,9 @@ void main() {
       expect(bd.containsKey('fundamental_support'), isTrue);
       expect(bd.containsKey('sentiment_confirm'), isTrue);
       expect(bd.containsKey('market_confirm'), isTrue);
+      expect(bd.containsKey('structure_confirm'), isTrue);
       expect(bd.containsKey('signal_freshness'), isTrue);
-      expect(bd.length, equals(5));
+      expect(bd.length, equals(6));
     });
 
     test('default confidence without external data is around 0.5', () {

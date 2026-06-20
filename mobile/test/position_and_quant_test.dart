@@ -27,21 +27,21 @@ void main() {
   // ─── 仓位计算修复验证 ─────────────────────────────────────────
 
   group('PositionManager.calculatePosition 修复验证', () {
-    test('低波动率(atrPct=1%)应返回重仓(100%)', () {
+    test('低波动率(atrPct=1%)应返回重仓(70%)', () {
       // atrPct = atr14/close * 100 = 0.1/10 * 100 = 1%
+      // P2-6修复：maxPosition默认降至0.7
       final kline = makeKline(close: 10.0, atr14: 0.1);
       final pos = PositionManager.calculatePosition(kline);
-      // baseRiskPct=2.5, suggestedPosition = 2.5/1 = 2.5, clamp -> 1.0
-      expect(pos, equals(1.0));
+      // suggestedPosition = 2.5/1 = 2.5, clamp -> 0.7
+      expect(pos, equals(0.7));
     });
 
     test('中等波动率(atrPct=3%)应返回偏大仓位(~83%)', () {
       // atrPct = 0.3/10 * 100 = 3%
       final kline = makeKline(close: 10.0, atr14: 0.3);
       final pos = PositionManager.calculatePosition(kline);
-      // suggestedPosition = 2.5/3 = 0.833
-      expect(pos, closeTo(0.833, 0.01));
-      expect(pos, lessThan(1.0)); // 不再是100%重仓
+      // suggestedPosition = 2.5/3 = 0.833, clamp(0.1, 0.7) -> 0.7
+      expect(pos, equals(0.7));
     });
 
     test('较高波动率(atrPct=5%)应返回半仓(50%)', () {
@@ -68,13 +68,14 @@ void main() {
       expect(pos, closeTo(0.167, 0.01));
     });
 
-    test('典型A股蓝筹股(波动2-3%)仓位应在60-100%之间', () {
+    test('典型A股蓝筹股(波动2-3%)仓位应在60-70%之间', () {
       // 模拟贵州茅台级别：close=1700, atr14=40 -> atrPct=2.35%
+      // P2-6修复：maxPosition=0.7
       final kline = makeKline(close: 1700.0, atr14: 40.0);
       final pos = PositionManager.calculatePosition(kline);
-      // suggestedPosition = 2.5/2.35 = 1.064 -> clamp 1.0
+      // suggestedPosition = 2.5/2.35 = 1.064 -> clamp 0.7
       expect(pos, greaterThanOrEqualTo(0.6));
-      expect(pos, lessThanOrEqualTo(1.0));
+      expect(pos, lessThanOrEqualTo(0.7));
     });
 
     test('典型A股小盘股(波动5-8%)仓位应在25-50%之间', () {
@@ -86,10 +87,10 @@ void main() {
       expect(pos, lessThanOrEqualTo(0.5));
     });
 
-    test('atrPct<=0.5%极低波动应返回maxPosition', () {
+    test('atrPct<=0.5%极低波动应返回maxPosition(0.7)', () {
       final kline = makeKline(close: 10.0, atr14: 0.04); // atrPct=0.4%
       final pos = PositionManager.calculatePosition(kline);
-      expect(pos, equals(1.0));
+      expect(pos, equals(0.7));
     });
 
     test('atrPct>=20%极高波动应返回minPosition', () {
@@ -158,24 +159,23 @@ void main() {
   // ─── 修复前后对比 ─────────────────────────────────────────
 
   group('修复前后对比 - baseRiskPct 10.0 vs 2.5', () {
-    test('典型A股波动3%: 旧参数100%重仓, 新参数83%', () {
+    test('典型A股波动3%: 旧参数70%重仓, 新参数70%', () {
       final kline = makeKline(close: 10.0, atr14: 0.3); // atrPct=3%
       // 新参数(baseRiskPct=2.5)
       final newPos = PositionManager.calculatePosition(kline);
-      expect(newPos, closeTo(0.833, 0.01));
+      // P2-6修复：maxPosition=0.7，2.5/3=0.833 clamp→0.7
+      expect(newPos, equals(0.7));
       // 旧参数(baseRiskPct=10.0)的结果
       final oldPos = PositionManager.calculatePosition(kline, baseRiskPct: 10.0);
-      expect(oldPos, equals(1.0)); // 旧参数下3%波动也是100%重仓
-      // 确认修复有效
-      expect(newPos, lessThan(oldPos));
+      expect(oldPos, equals(0.7)); // maxPosition=0.7
     });
 
-    test('典型A股波动5%: 旧参数100%重仓, 新参数50%', () {
+    test('典型A股波动5%: 新参数50%', () {
       final kline = makeKline(close: 10.0, atr14: 0.5); // atrPct=5%
       final newPos = PositionManager.calculatePosition(kline);
       expect(newPos, closeTo(0.5, 0.01));
       final oldPos = PositionManager.calculatePosition(kline, baseRiskPct: 10.0);
-      expect(oldPos, equals(1.0)); // 旧参数下5%波动也是100%重仓
+      expect(oldPos, equals(0.7)); // 10/5=2.0 clamp→0.7
       expect(newPos, lessThan(oldPos));
     });
   });

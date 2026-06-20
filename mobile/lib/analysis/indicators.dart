@@ -470,8 +470,10 @@ List<HistoryKline> calcDMI(List<HistoryKline> data, {int period = 14}) {
   for (int i = 0; i < data.length; i++) {
     if (i < period) {
       result[i] = result[i].copyWith(plusDi14: 0, minusDi14: 0, dx: 0, adx14: 0);
-    } else if (i < 2 * period - 1) {
+    } else if (i < 2 * period) {
       // 预热期：使用初始平均值，不做递推（避免双重计数）
+      // P1-1修复：原 i < 2*period-1 导致 i=2*period-1 时进入递推，
+      // 而 dxList[2*period-1] 已在种子中，造成双重计数
       result[i] = result[i].copyWith(
         plusDi14: plusDi[i],
         minusDi14: minusDi[i],
@@ -479,7 +481,7 @@ List<HistoryKline> calcDMI(List<HistoryKline> data, {int period = 14}) {
         adx14: adx,
       );
     } else {
-      // 从2*period-1开始Wilder平滑
+      // 从2*period开始Wilder平滑（第一个递推使用dxList[2*period]，不在种子中）
       adx = (adx * (period - 1) + dxList[i]) / period;
       result[i] = result[i].copyWith(
         plusDi14: plusDi[i],

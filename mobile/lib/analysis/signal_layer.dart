@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../models/stock_models.dart';
 import 'signal_detector.dart';
 
@@ -11,20 +12,41 @@ class SignalLayer {
     List<SignalItem> signals;
     try {
       signals = SignalDetector.detectLayeredSignals(data);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('SignalLayer.detectAllSignals: detectLayeredSignals failed: $e');
       signals = [];
     }
 
-    // 合并特有信号（去重）
+    // 合并特有信号（去重：同名信号保留strength更高的版本）
     try {
       final uniqueSignals = detectUniqueSignals(data);
-      final existingNames = signals.map((s) => s.signal).toSet();
+      // P1-2修复：去重时比较strength，保留更强的版本
+      final signalsByName = <String, SignalItem>{};
+      for (final s in signals) {
+        signalsByName[s.signal] = s;
+      }
       for (final s in uniqueSignals) {
-        if (!existingNames.contains(s.signal)) {
-          signals.add(s);
+        final existing = signalsByName[s.signal];
+        if (existing == null || s.strength > existing.strength) {
+          signalsByName[s.signal] = s;
         }
       }
-    } catch (_) {}
+      // 重建列表：保留原始顺序 + 追加新信号
+      final existingSet = signals.map((s) => s.signal).toSet();
+      for (final s in uniqueSignals) {
+        if (!existingSet.contains(s.signal) || signalsByName[s.signal] == s) {
+          if (!existingSet.contains(s.signal)) {
+            signals.add(s);
+          } else {
+            // 替换为更强版本
+            final idx = signals.indexWhere((e) => e.signal == s.signal);
+            if (idx >= 0) signals[idx] = s;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('SignalLayer.detectAllSignals: detectUniqueSignals failed: $e');
+    }
 
     return signals;
   }
@@ -60,6 +82,9 @@ class SignalLayer {
           description: '近3日均量是10日均量的${(avg3Vol / avg10Vol).toStringAsFixed(1)}倍，但涨幅仅${priceChange3d.toStringAsFixed(1)}%，主力可能在出货',
           strength: 75,
           timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.7,
+          signalCount: 1,
         ));
       }
     }
@@ -82,6 +107,9 @@ class SignalLayer {
             description: '近5日涨幅${priceChange5d.toStringAsFixed(1)}%但量能持续萎缩，上涨动力不足',
             strength: 70,
             timestamp: last.date,
+            duration: SignalDuration.shortTerm,
+            confidence: 0.7,
+            signalCount: 1,
           ));
         }
       }
@@ -99,6 +127,9 @@ class SignalLayer {
             description: '前期跌幅${priceChange10d.toStringAsFixed(1)}%后量能萎缩至均量的${(avg3Vol / avg10Vol * 100).toStringAsFixed(0)}%，价格企稳，抛压减弱',
             strength: 65,
             timestamp: last.date,
+            duration: SignalDuration.shortTerm,
+            confidence: 0.65,
+            signalCount: 1,
           ));
         }
       }
@@ -142,6 +173,9 @@ class SignalLayer {
         description: '布林带宽度收窄至${currentBw.toStringAsFixed(1)}%，连续5日递减，即将选择方向突破但方向待确认',
         strength: 60,
         timestamp: last.date,
+        duration: SignalDuration.shortTerm,
+        confidence: 0.6,
+        signalCount: 1,
       ));
 
       final avgVol = data.sublist(data.length - 10).map((d) => d.volume).reduce((a, b) => a + b) / 10;
@@ -153,6 +187,9 @@ class SignalLayer {
           description: '收口后放量突破布林带上轨(${last.bollUpper.toStringAsFixed(2)})，向上突破确认',
           strength: 80,
           timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.8,
+          signalCount: 1,
         ));
       } else if (last.close < last.bollLower) {
         signals.add(SignalItem(
@@ -162,6 +199,9 @@ class SignalLayer {
           description: '收口后跌破布林带下轨(${last.bollLower.toStringAsFixed(2)})，向下突破',
           strength: 80,
           timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.8,
+          signalCount: 1,
         ));
       }
     }

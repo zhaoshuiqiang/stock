@@ -354,6 +354,7 @@ class BacktestEngine {
 
     final tradeReturns = <double>[];
     double? buyPrice;
+    double peakCloseSinceEntry = 0; // P1-7: 持仓期间最高收盘价，用于追踪止损
     double peakEquity = 1.0;
     double currentEquity = 1.0;
     double maxDrawdown = 0;
@@ -382,7 +383,18 @@ class BacktestEngine {
           continue; // 买入失败，跳过此信号
         }
         buyPrice = next.open; // ← T+1 开盘价执行
+        peakCloseSinceEntry = next.open; // P1-7: 初始化持仓最高价
         continue;
+      }
+
+      // P1-8: 持仓时每根K线更新权益回撤（捕捉日内最大回撤）
+      if (buyPrice != null) {
+        if (curr.close > peakCloseSinceEntry) peakCloseSinceEntry = curr.close;
+        // 用当前收盘价计算浮盈权益，更新回撤
+        final unrealizedEquity = currentEquity * (1 + _safeReturnPct(buyPrice, curr.close));
+        if (unrealizedEquity > peakEquity) peakEquity = unrealizedEquity;
+        final floatingDd = (peakEquity - unrealizedEquity) / peakEquity;
+        if (floatingDd > maxDrawdown) maxDrawdown = floatingDd;
       }
 
       // ---- 出场信号（仅持仓时） ----
@@ -407,11 +419,10 @@ class BacktestEngine {
       }
 
       // ---- ATR 止损（持仓时） ----
-      // 注意：止损与信号退出不同——止损是日内触发事件（当前日 low 跌破即触发），
-      // 而非 T 日收盘后才知的信号。因此使用 curr.low 而非 next.open。
-      // 止损价 atrStop 取日内触及的止损线，非次日开盘价。
+      // P1-7修复：追踪止损，锚定持仓期间最高收盘价而非固定buyPrice
+      // ATR扩大时止损上移（趋近peakClose），风险管理正确收紧
       if (buyPrice != null && atrMultiplier > 0 && curr.atr14 > 0) {
-        final atrStop = buyPrice - curr.atr14 * atrMultiplier;
+        final atrStop = peakCloseSinceEntry - curr.atr14 * atrMultiplier;
         if (curr.low <= atrStop) {
           // 跌停日无法止损卖出
           if (config.skipLimitTrade &&
@@ -615,7 +626,7 @@ class BacktestEngine {
   static WalkForwardResult walkForwardBacktest(
     List<HistoryKline> data, {
     int windowSize = 120,   // 每窗口样本内天数
-    int testSize = 30,      // 每窗口样本外天数
+    int testSize = 60,      // 每窗口样本外天数（须≥60以支持megaBacktest最小数据量）
   }) {
     if (data.length < windowSize + testSize) {
       return WalkForwardResult(
@@ -1020,16 +1031,18 @@ class BacktestEngine {
     // 单次遍历计算所有统计量（避免 4 次 where/reduce）
     int winningTrades = 0;
     int losingTrades = 0;
+    int breakevenTrades = 0; // P2-11: 分离平手交易，不计入亏损
     double grossProfit = 0;
     double grossLoss = 0;
     for (final r in tradeReturns) {
       if (r > 0) {
         winningTrades++;
         grossProfit += r;
-      } else {
-        // r == 0 视为亏损（breakeven after cost = loss）
+      } else if (r < 0) {
         losingTrades++;
         grossLoss += r.abs();
+      } else {
+        breakevenTrades++;
       }
     }
     final winRate = tradeReturns.isNotEmpty ? winningTrades / tradeReturns.length : 0.0;

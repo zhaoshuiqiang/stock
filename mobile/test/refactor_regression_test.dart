@@ -177,12 +177,13 @@ void main() {
       expect(result.confidenceScore, greaterThanOrEqualTo(0.2));
       expect(result.confidenceScore, lessThanOrEqualTo(0.95));
       expect(result.confidenceBreakdown, isNotNull);
-      expect(result.confidenceBreakdown!.length, equals(5));
+      expect(result.confidenceBreakdown!.length, equals(6));
       expect(result.confidenceBreakdown!.keys, containsAll([
         'signal_consistency',
         'fundamental_support',
         'sentiment_confirm',
         'market_confirm',
+        'structure_confirm',
         'signal_freshness',
       ]));
       expect(result.reasons, isA<List<String>>());
@@ -270,7 +271,7 @@ void main() {
       expect(result.newsSentiment, isNotNull);
       expect(result.marketContext, isNotNull);
       expect(result.confidenceBreakdown, isNotNull);
-      expect(result.confidenceBreakdown!.length, equals(5));
+      expect(result.confidenceBreakdown!.length, equals(6));
       expect(result.indicators, isNotEmpty);
     });
   });

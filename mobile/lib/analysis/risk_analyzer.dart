@@ -119,7 +119,8 @@ class RiskAnalyzer {
     return riskFactors;
   }
 
-  static bool _isST(String name) => name.contains('ST') || name.contains('*ST');
+  // P2-8修复：与comprehensive_scorer统一ST检测方法（startsWith 而非 contains）
+  static bool _isST(String name) => name.startsWith('ST') || name.startsWith('*ST');
 
   static String _determineLevel(List<String> riskFactors) {
     if (riskFactors.length >= 3 ||

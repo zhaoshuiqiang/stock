@@ -7,7 +7,8 @@ class PositionManager {
   /// 公式: suggestedPosition = clamp(baseRiskPct / atrPct, minPosition, maxPosition)
   /// - atrPct = ATR14 / close × 100（波动率百分比）
   /// - 波动率越高，建议仓位越低
-  static double calculatePosition(HistoryKline kline, {double baseRiskPct = 2.5, double minPosition = 0.1, double maxPosition = 1.0}) {
+  // P2-6修复：maxPosition默认降至0.7，避免单股100%仓位风险
+  static double calculatePosition(HistoryKline kline, {double baseRiskPct = 2.5, double minPosition = 0.1, double maxPosition = 0.7}) {
     if (kline.atr14 <= 0 || kline.close <= 0) return 0.5; // 默认半仓
 
     final atrPct = kline.atr14 / kline.close * 100;

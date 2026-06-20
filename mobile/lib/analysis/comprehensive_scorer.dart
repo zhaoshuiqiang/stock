@@ -84,12 +84,14 @@ class ComprehensiveScorer {
       else recommendation = '强烈卖出';
     }
 
-    double positionAdvice = adjustedScore / 10.0;
+    // ST股票：仓位建议也基于clamp后的totalScore，避免"观望"+"可积极建仓"矛盾
+    final double effectiveScore = isST ? totalScore.toDouble() : adjustedScore;
+    double positionAdvice = effectiveScore / 10.0;
     String positionLabel;
-    if (adjustedScore >= 8) positionLabel = '可积极建仓';
-    else if (adjustedScore >= 6.5) positionLabel = '可适度参与';
-    else if (adjustedScore >= 4.5) positionLabel = '中性仓位';
-    else if (adjustedScore >= 3) positionLabel = '减仓观望';
+    if (effectiveScore >= 8) positionLabel = '可积极建仓';
+    else if (effectiveScore >= 6.5) positionLabel = '可适度参与';
+    else if (effectiveScore >= 4.5) positionLabel = '中性仓位';
+    else if (effectiveScore >= 3) positionLabel = '减仓观望';
     else positionLabel = '不宜参与';
 
     return ComprehensiveScoreResult(totalScore: totalScore, recommendation: recommendation,

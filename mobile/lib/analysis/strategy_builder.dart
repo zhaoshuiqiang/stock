@@ -58,11 +58,11 @@ class StrategyBuilder {
     final last = data.last;
     final prev = data[data.length - 2];
 
-    // 1. KDJ超买卖点
+    // 1. KDJ超卖金叉（P1-11修复：原名称"超买"反了，条件是超卖区K<30）
     if (last.k > last.d && prev.k <= prev.d && prev.k < 30) {
       strategies.add(TradingStrategy(
         id: 'kdj_short_buy',
-        name: 'KDJ超买金叉',
+        name: 'KDJ超卖金叉',
         category: '短线',
         description: 'KDJ在超卖区（K<30）形成金叉，短线反弹信号，适合1-3天操作',
         entryRule: 'K线上穿D线且K值<30，立即入场',
@@ -78,7 +78,7 @@ class StrategyBuilder {
         riskRewardRatio: 2.0,
         compatibleIndicators: ['KDJ', 'RSI'],
         entryPrice: last.close,
-        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        stopLossPrice: _calcATRStopLoss(last, 1.5, 'short'),
         targetPrice: _calcATRTarget(last, 2.0, 'short'),
       ));
     }
@@ -104,7 +104,7 @@ class StrategyBuilder {
         riskRewardRatio: 2.5,
         compatibleIndicators: ['MACD', 'RSI'],
         entryPrice: last.close,
-        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        stopLossPrice: _calcATRStopLoss(last, 1.5, 'short'),
         targetPrice: _calcATRTarget(last, 2.0, 'short'),
       ));
     }
@@ -132,7 +132,7 @@ class StrategyBuilder {
         riskRewardRatio: 2.0,
         compatibleIndicators: ['MA', '量价'],
         entryPrice: last.close,
-        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        stopLossPrice: _calcATRStopLoss(last, 1.5, 'short'),
         targetPrice: _calcATRTarget(last, 2.0, 'short'),
       ));
     }
@@ -157,7 +157,7 @@ class StrategyBuilder {
         riskRewardRatio: 1.8,
         compatibleIndicators: ['RSI'],
         entryPrice: last.close,
-        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        stopLossPrice: _calcATRStopLoss(last, 1.5, 'short'),
         targetPrice: _calcATRTarget(last, 2.0, 'short'),
       ));
     }
@@ -182,7 +182,7 @@ class StrategyBuilder {
         riskRewardRatio: 1.5,
         compatibleIndicators: ['MA'],
         entryPrice: last.close,
-        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        stopLossPrice: _calcATRStopLoss(last, 1.5, 'short'),
         targetPrice: _calcATRTarget(last, 2.0, 'short'),
       ));
     }
@@ -208,7 +208,7 @@ class StrategyBuilder {
         riskRewardRatio: 2.0,
         compatibleIndicators: ['量价', 'MA'],
         entryPrice: last.close,
-        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        stopLossPrice: _calcATRStopLoss(last, 1.5, 'short'),
         targetPrice: _calcATRTarget(last, 2.0, 'short'),
       ));
     }
@@ -325,8 +325,8 @@ class StrategyBuilder {
       ));
     }
 
-    // 5. 趋势强度确认（ADX）
-    if (last.adx14 > 25) {
+    // 5. 趋势强度确认（ADX）— 必须同时确认方向（+DI > -DI）避免在下跌趋势中发出买入信号
+    if (last.adx14 > 25 && last.plusDi14 > last.minusDi14) {
       strategies.add(TradingStrategy(
         id: 'adx_trend_long',
         name: '趋势强度确认',
@@ -415,30 +415,7 @@ class StrategyBuilder {
       ));
     }
 
-    // 2. 放量突破
-    final volBreakout = last.volume > last.volMa5 * 2 && last.close > last.open;
-    if (volBreakout) {
-      strategies.add(TradingStrategy(
-        id: 'volume_breakout_special',
-        name: '放量突破',
-        category: '特殊',
-        description: '成交量放大至均量2倍以上，股价上涨，主力资金介入',
-        entryRule: '量比>2且股价上涨',
-        exitRule: '连续3日缩量或跌破突破日收盘价',
-        stopLossRule: '跌破入场价-1.5xATR',
-        isActive: true,
-        signalStrength: 75,
-        strategyType: 'short',
-        recommendedDuration: 5,
-        maxDrawdown: 0.05,
-        consecutiveLossLimit: 2,
-        minConfidence: 0.65,
-        riskRewardRatio: 2.0,
-        compatibleIndicators: ['量价', 'MA'],
-        entryPrice: last.close,
-        stopLossPrice: _calcATRStopLoss(last, 1.5, 'both'),
-      ));
-    }
+    // P1-10修复：移除与短线#6重复的"放量突破"策略（原特殊版本条件、名称、类型完全相同）
 
     return strategies;
   }
