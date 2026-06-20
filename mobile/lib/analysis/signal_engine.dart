@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../models/stock_models.dart';
 import 'indicators.dart';
 import 'signal_layer.dart';
