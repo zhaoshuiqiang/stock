@@ -1,5 +1,106 @@
 # AGENTS
 
+This file provides guidance to CodeBuddy Code when working with code in this repository.
+
+## Project Overview
+
+Flutter (Dart) A-share stock analysis Android app. Pure client-side rule engine — no backend server, no LLM/API calls. All technical analysis computed locally from K-line data fetched via public stock APIs (EastMoney/Tencent/Sina).
+
+- **Entry point**: `mobile/lib/main.dart`
+- **Version**: `mobile/pubspec.yaml` + `mobile/lib/core/app_version.dart` (currently v2.27.0)
+- **Python env**: `venv/` (akshare for concept data generation)
+
+## Commands
+
+```bash
+# Build release APK
+cd mobile && flutter build apk --release
+# Or use the PowerShell script (auto-names with version):
+powershell -File mobile/build_release.ps1
+
+# Install dependencies
+cd mobile && flutter pub get
+
+# Run tests
+cd mobile && flutter test
+
+# Run a single test file
+cd mobile && flutter test test/signal_engine_test.dart
+
+# Python: generate concept tags data
+python scripts/build_concept_tags.py
+# Output: mobile/assets/concept_tags.json
+```
+
+## Architecture
+
+### Analysis Pipeline (`signal_engine.dart` → `generateAnalysis()`)
+
+```
+API (K-line + Quotes)
+  │
+  ├─ 1. Signal Detection (signal_layer/signal_detector)
+  │     Short/Medium/Long signals across KDJ/RSI/MA/MACD/BOLL/CCI/WR/Gaps/Candlesticks
+  │
+  ├─ 1a. Market Structure (market_structure_analyzer) — NEW v2.27
+  │     5 types: bullTrend/bearTrend/consolidation/accumulation/distribution
+  │
+  ├─ 1b. Percentile Analysis (percentile_analyzer) — NEW v2.27
+  │     PE/PB industry percentiles + RSI + Volume ranking
+  │
+  ├─ 2. Technical Scorer → 3. Realtime Scorer → 4. Confluence Scorer
+  ├─ 4a. Capital Flow Analyzer
+  ├─ 5. Comprehensive Scorer (7-dim weighted fusion, structure=10%)
+  ├─ 6. Reason Generation
+  ├─ 7. Risk Analyzer → 8. Opportunity Identifier → 9. Suggestion Generator
+  ├─ 10. Mega Backtest (6 strategies, walk-forward validation)
+  ├─ 11. Strategy Builder (short/long, structure-aware filtering)
+  ├─ 12. Confidence Calculator (6-dim, adversarial validation)
+  └─ 13. Trade Levels (ATR dynamic stop-loss, tiered take-profit)
+```
+
+### Key Data Flow
+
+- **`AnalysisResult`** is the central output model — aggregates all sub-results
+- **`ExploreResult`** is a flattened summary for batch scan display (DiscoverScreen)
+- **`RecommendationTracker`** records snapshots when score ≥ 6, tracks 5/10/20-day returns
+- **`ConceptTagProvider`** singleton loads `concept_tags.json` at startup
+- **`MarketStructureAnalyzer`** uses existing ADX + MA alignment (no new data needed)
+
+### Directory Map
+
+| Directory | Purpose |
+|-----------|---------|
+| `mobile/lib/analysis/` | All analysis engines (18 files) |
+| `mobile/lib/models/` | Data models — `stock_models.dart` is the single source |
+| `mobile/lib/screens/` | UI pages (17 screens) |
+| `mobile/lib/widgets/` | Reusable UI components |
+| `mobile/lib/api/` | HTTP client + market context + WebSocket |
+| `mobile/lib/storage/` | SQLite (database_service.dart, v8) |
+| `mobile/lib/data/` | Static data providers (concept_tag_provider) |
+| `mobile/lib/validators/` | Data validation pipeline |
+| `mobile/lib/core/` | App version, navigator key, trading session |
+| `scripts/` | Python utilities (build_concept_tags.py) |
+
+### Database (SQLite v8)
+
+Tables: `watchlist`, `alerts`, `archive_records`, `explore_results`, `opportunity_results`, `sector_pick_results`, `home_cache`, `recommendation_tracking` (v8).
+
+Migrations follow `if (oldVersion < N)` pattern in `database_service.dart`.
+
+### Testing
+
+131+ tests across 14 test files in `mobile/test/`. Tests import from `mobile/lib/` directly — no special test setup needed.
+
+### Key Conventions
+
+- **New analysis modules**: Static utility classes (e.g., `MarketStructureAnalyzer.analyze()`)
+- **Model fields**: Always nullable for backward compatibility, defaults in constructors
+- **Error handling**: Defensive `try/catch` with `debugPrint` logging for non-critical paths
+- **Colors**: Defined as `const _k*` at top of screen files; red=up, green=down (A股 convention)
+- **Version bumps**: Update `pubspec.yaml`, `app_version.dart`, and `update_log_screen.dart` together
+- **Plan files**: Stored in `docs/superpowers/plans/` and `docs/superpowers/specs/`
+
 <skills_system priority="1">
 
 ## Available Skills
