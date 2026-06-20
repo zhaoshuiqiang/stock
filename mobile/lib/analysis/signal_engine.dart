@@ -38,36 +38,42 @@ Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
   // ATR动态入场区间
   // 入场低: 最近支撑或价格-1.5倍ATR（取更保守的）
   final rawEntryLow = nearestSupport ?? (price - atr * 1.5);
-  // 入场高: 价格+0.5倍ATR（短线不过分追高）
-  final entryLow = rawEntryLow > price * 0.95 ? rawEntryLow : price * 0.95;
-  final entryHigh = price + atr * 0.5;
+  final entryLow = (rawEntryLow > price * 0.95 ? rawEntryLow : price * 0.95);
 
   // ATR动态止损：2倍ATR或最近20日最低点，取更紧的
+  // 底线: 止损必须低于入场价
   double atrStopLoss = entryLow - atr * 2.0;
   if (data.length >= 20) {
     final recent20Low = data.sublist(data.length - 20).map((d) => d.low).reduce(
         (a, b) => a < b ? a : b);
-    // 近期最低点下方0.5%作为摆动止损
     final swingStop = recent20Low * 0.995;
-    // 取更紧的止损（更高的止损价，更快止损减少回撤）
-    if (swingStop > atrStopLoss) {
+    if (swingStop > atrStopLoss && swingStop < entryLow * 0.98) {
       atrStopLoss = swingStop;
     }
   }
-  // MA60作为长线最后防线
-  if (last.ma60 > 0 && last.ma60 > atrStopLoss) {
+  // MA60长线防线: 仅当MA60在入场价下方时才能作为止损参考
+  if (last.ma60 > 0 && last.ma60 > atrStopLoss && last.ma60 < entryLow) {
     atrStopLoss = last.ma60;
   }
-  final stopLoss = atrStopLoss;
+  final stopLoss = atrStopLoss.clamp(0.0, entryLow * 0.99);
 
-  // 分级止盈目标
-  // TP1: 1:1盈亏比（保守目标，保本）
+  // 分级止盈目标（基于 entryLow → stopLoss 的风险）
   final riskAmount = (entryLow - stopLoss).clamp(entryLow * 0.005, double.infinity);
-  final tp1 = entryLow + riskAmount * 1.5;
-  // TP2: 最近阻力位（中等目标）
-  final tp2 = nearestResistance ?? (entryLow + riskAmount * 2.5);
-  // TP3: 布林上轨或3倍盈亏比（激进目标）
-  final tp3 = last.bollUpper > 0 ? last.bollUpper : (entryLow + riskAmount * 3.5);
+  final tp1 = (entryLow + riskAmount * 1.5).clamp(entryLow * 1.01, double.infinity);
+  final rawTp2 = (nearestResistance != null && nearestResistance > tp1)
+      ? nearestResistance : (entryLow + riskAmount * 2.5);
+  final tp2 = rawTp2.clamp(tp1 * 1.01, double.infinity);
+  final rawTp3 = (last.bollUpper > 0 && last.bollUpper > tp2)
+      ? last.bollUpper : (entryLow + riskAmount * 3.5);
+  final tp3 = rawTp3.clamp(tp2 * 1.01, double.infinity);
+
+  // 入场高: 价格+0.5倍ATR，entryLow < entryHigh < tp1 (不得高于tp1)
+  final rawEntryHigh = price + atr * 0.5;
+  final eHighLower = entryLow * 1.001;
+  final eHighUpper = tp1 * 0.98;
+  final entryHigh = eHighLower < eHighUpper
+      ? rawEntryHigh.clamp(eHighLower, eHighUpper)
+      : entryLow * 1.001; // 极小利润空间时退回最低入场高
   final target = tp2; // 主目标设为TP2
 
   // 追踪止损相关参数（供前端UI展示）
@@ -75,9 +81,15 @@ Map<String, dynamic> calcTradeLevels(List<HistoryKline> data) {
   final trailingStopDistance = atr * 1.5; // 追踪止损距离
 
   final entryMid = (entryLow + entryHigh) / 2;
-  final reward = target - entryMid;
-  final risk = entryMid - stopLoss;
+  final reward = (target - entryMid).clamp(0.0, double.infinity);
+  final risk = (entryMid - stopLoss).clamp(0.0, double.infinity);
   final riskRewardRatio = risk > 0 ? reward / risk : 0.0;
+
+  // ── 保序断言: 止损 < 入场低 < 止盈1 < 止盈2 < 止盈3 ──
+  assert(stopLoss <= entryLow, 'stopLoss=$stopLoss > entryLow=$entryLow');
+  assert(entryLow <= tp1, 'entryLow=$entryLow > tp1=$tp1');
+  assert(tp1 <= tp2, 'tp1=$tp1 > tp2=$tp2');
+  assert(tp2 <= tp3, 'tp2=$tp2 > tp3=$tp3');
 
   final support = nearestSupport ?? 0;
   final support2 = supports.length > 1 ? supports[1] : 0.0;

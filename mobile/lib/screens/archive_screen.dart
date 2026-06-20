@@ -146,13 +146,13 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     final wasSell = record.recommendation.contains('卖出');
     final wasNeutral = record.recommendation.contains('观望');
 
-    if (wasBuy && priceChange < 0) {
+    if (wasBuy && priceChangePct < -2) {
       reliability = '推荐偏差';
       reliabilityColor = const Color(0xFF26a69a);
-    } else if (wasSell && priceChange > 0) {
+    } else if (wasSell && priceChangePct > 2) {
       reliability = '推荐偏差';
       reliabilityColor = const Color(0xFFef5350);
-    } else if (wasNeutral && priceChangePct.abs() > 5) {
+    } else if (wasNeutral && priceChangePct.abs() > 8) {
       reliability = '推荐偏差';
       reliabilityColor = priceChange > 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a);
     } else {
@@ -297,7 +297,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         final wasBuy = record.recommendation.contains('买入');
         final wasSell = record.recommendation.contains('卖出');
         final wasNeutral = record.recommendation.contains('观望');
-        if ((wasBuy && priceChange < 0) || (wasSell && priceChange > 0) || (wasNeutral && priceChangePct.abs() > 5)) {
+        if ((wasBuy && priceChangePct < -2) || (wasSell && priceChangePct > 2) || (wasNeutral && priceChangePct.abs() > 8)) {
           deviationCount++;
         } else if (wasBuy || wasSell || wasNeutral) {
           reasonableCount++;
@@ -479,13 +479,13 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
           Color reliabilityColor = Colors.transparent;
           if (currentPrice > 0) {
             final priceChangePct = record.price > 0 ? (priceChange / record.price * 100) : 0.0;
-            if (wasBuy && priceChange < 0) {
+            if (wasBuy && priceChangePct < -2) {
               reliabilityLabel = '偏差';
               reliabilityColor = const Color(0xFF26a69a);
-            } else if (wasSell && priceChange > 0) {
+            } else if (wasSell && priceChangePct > 2) {
               reliabilityLabel = '偏差';
               reliabilityColor = const Color(0xFFef5350);
-            } else if (wasNeutral && priceChangePct.abs() > 5) {
+            } else if (wasNeutral && priceChangePct.abs() > 8) {
               reliabilityLabel = '偏差';
               reliabilityColor = priceChange > 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a);
             } else if (wasBuy || wasSell || wasNeutral) {

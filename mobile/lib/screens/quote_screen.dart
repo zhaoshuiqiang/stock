@@ -732,26 +732,6 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               ),
               Column(
                 children: [
-                  const Text('PE(动)', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  Text(quote.pe > 0 ? '${quote.pe.toStringAsFixed(1)}' : '亏损',
-                      style: TextStyle(color: Colors.white, fontSize: 13)),
-                ],
-              ),
-              Column(
-                children: [
-                  const Text('市净率', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  Text(quote.pb > 0 ? '${quote.pb.toStringAsFixed(2)}' : '--',
-                      style: TextStyle(color: Colors.white, fontSize: 13)),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              Column(
-                children: [
                   const Text('换手率', style: TextStyle(color: Colors.grey, fontSize: 12)),
                   Text('${quote.turnover.toStringAsFixed(2)}%',
                       style: TextStyle(color: quote.turnover > 10 ? Colors.orange : Colors.white, fontSize: 13)),
@@ -762,20 +742,6 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                   const Text('振幅', style: TextStyle(color: Colors.grey, fontSize: 12)),
                   Text('${quote.amplitude.toStringAsFixed(2)}%',
                       style: TextStyle(color: quote.amplitude > 5 ? Colors.orange : Colors.white, fontSize: 13)),
-                ],
-              ),
-              Column(
-                children: [
-                  const Text('成交量', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  Text(_formatVolume(quote.volume),
-                      style: const TextStyle(color: Colors.white, fontSize: 13)),
-                ],
-              ),
-              Column(
-                children: [
-                  const Text('成交额', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  Text(_formatAmount(quote.amount),
-                      style: const TextStyle(color: Colors.white, fontSize: 13)),
                 ],
               ),
             ],

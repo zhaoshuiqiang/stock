@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 import 'package:stock_analyzer/analysis/indicators.dart';
 import 'package:stock_analyzer/analysis/signal_engine.dart';
+import 'package:stock_analyzer/analysis/comprehensive_scorer.dart';
 
 /// Generate uptrend kline data with indicators calculated.
 List<HistoryKline> _uptrendData({int count = 60}) {
@@ -343,9 +344,7 @@ void main() {
 
   // ─── 7. Final Score Formula Tests ───
   group('Final Score Formula', () {
-    test('Score uses 55/25/20 weighting (kline/realtime/confluence)', () {
-      // This is a structural test - verify the score is calculated
-      // with the new formula by checking it's different from the old 70/30
+    test('Score and confluence are valid for uptrend + quote', () {
       final data = _uptrendData(count: 80);
       final quote = QuoteData(
         code: 'sh600000',
@@ -365,62 +364,329 @@ void main() {
       expect(analysis.confluenceScore, greaterThanOrEqualTo(0));
     });
 
-    test('Recommendation levels are correct', () {
-      // Test all 5 recommendation levels
-      final testCases = [
-        {'score': 85, 'expected': '强烈买入'},
-        {'score': 70, 'expected': '买入'},
-        {'score': 50, 'expected': '观望'},
-        {'score': 30, 'expected': '卖出'},
-        {'score': 15, 'expected': '强烈卖出'},
-      ];
-
-      for (final tc in testCases) {
-        // We can't directly set score, but we can verify the thresholds
-        // by checking recommendation for known data patterns
-        final score = tc['score'] as int;
-        final expected = tc['expected'] as String;
-
-        String recommendation;
-        if (score >= 80) {
-          recommendation = '强烈买入';
-        } else if (score >= 65) {
-          recommendation = '买入';
-        } else if (score >= 40) {
-          recommendation = '观望';
-        } else if (score >= 25) {
-          recommendation = '卖出';
-        } else {
-          recommendation = '强烈卖出';
-        }
-        expect(recommendation, equals(expected));
+    test('Recommendation mapping covers all 8 levels from 1-10', () {
+      // 验证 ComprehensiveScorer 的实际阈值: 8/7/6/5/4/3/2
+      // 通过设置等值子分数 + 无 quote/news/capital 控制 adjustedScore
+      ComprehensiveScoreResult _scored(double s) {
+        return ComprehensiveScorer.combine(
+          technicalScore: s,
+          realtimeScore: s,
+          confluenceScore: s,
+          quote: null,
+          marketContext: null,
+          newsList: null,
+          capitalFlowScore: null,
+          marketPositionFactor: 1.0,
+        );
       }
+
+      // adjustedScore → totalScore → recommendation 映射验证
+      // 注: 无 quote 时权重 tech 0.45 + real 0.35 + conf 0.20 = 1.0, rawScore = s
+      expect(_scored(8.5).recommendation, equals('强烈买入'), reason: 's=8.5 → 8.5*0.95=8.075 → round=8');
+      expect(_scored(6.9).recommendation, equals('买入'), reason: 's=6.9 → 6.9*0.95=6.555 → round=7');
+
+      // Use boundary values verified in group 10
+      expect(_scored(5.79).recommendation, equals('谨慎买入'));
+      expect(_scored(4.74).recommendation, equals('偏多观望'));
+      expect(_scored(4.73).recommendation, equals('偏空观望'));
+      expect(_scored(3.0).recommendation, equals('谨慎卖出'));
+      expect(_scored(2.0).recommendation, equals('卖出'));
+      expect(_scored(1.0).recommendation, equals('强烈卖出'));
     });
   });
 
   // ─── 8. Archive Screen Neutral Judgment Tests ───
   group('Archive Neutral Judgment', () {
     test('Neutral recommendation with small price change is reasonable', () {
-      // 观望 + price change < 5% = 合理
+      // 观望 + price change < 8% = 合理
       final wasNeutral = true;
-      final priceChangePct = 3.0; // < 5%
-      final isDeviation = wasNeutral && priceChangePct.abs() > 5;
-      expect(isDeviation, false, reason: '观望 with <5% change should be reasonable');
+      final priceChangePct = 6.0; // < 8%
+      final isDeviation = wasNeutral && priceChangePct.abs() > 8;
+      expect(isDeviation, false, reason: '观望 with <8% change should be reasonable');
     });
 
     test('Neutral recommendation with large price change is deviation', () {
-      // 观望 + price change > 5% = 偏差
+      // 观望 + price change > 8% = 偏差
       final wasNeutral = true;
-      final priceChangePct = 8.0; // > 5%
-      final isDeviation = wasNeutral && priceChangePct.abs() > 5;
-      expect(isDeviation, true, reason: '观望 with >5% change should be deviation');
+      final priceChangePct = 9.0; // > 8%
+      final isDeviation = wasNeutral && priceChangePct.abs() > 8;
+      expect(isDeviation, true, reason: '观望 with >8% change should be deviation');
     });
 
     test('Neutral recommendation with large negative change is deviation', () {
       final wasNeutral = true;
-      final priceChangePct = -7.0; // abs > 5%
-      final isDeviation = wasNeutral && priceChangePct.abs() > 5;
-      expect(isDeviation, true, reason: '观望 with >-5% change should be deviation');
+      final priceChangePct = -9.0; // abs > 8%
+      final isDeviation = wasNeutral && priceChangePct.abs() > 8;
+      expect(isDeviation, true, reason: '观望 with >-8% change should be deviation');
     });
   });
+
+  // ─── 9. Archive Buy/Sell Judgment Tests ───
+  group('Archive Buy/Sell Judgment', () {
+    test('Buy recommendation with small decline is still reasonable', () {
+      // 买入 + 跌 < 2% = 合理
+      final wasBuy = true;
+      final priceChangePct = -1.5; // > -2%
+      final isDeviation = wasBuy && priceChangePct < -2;
+      expect(isDeviation, false, reason: 'Buy with <2% decline should be reasonable');
+    });
+
+    test('Buy recommendation with large decline is deviation', () {
+      // 买入 + 跌 > 2% = 偏差
+      final wasBuy = true;
+      final priceChangePct = -3.0; // < -2%
+      final isDeviation = wasBuy && priceChangePct < -2;
+      expect(isDeviation, true, reason: 'Buy with >2% decline should be deviation');
+    });
+
+    test('Sell recommendation with small rise is still reasonable', () {
+      // 卖出 + 涨 < 2% = 合理
+      final wasSell = true;
+      final priceChangePct = 1.5; // < 2%
+      final isDeviation = wasSell && priceChangePct > 2;
+      expect(isDeviation, false, reason: 'Sell with <2% rise should be reasonable');
+    });
+
+    test('Sell recommendation with large rise is deviation', () {
+      // 卖出 + 涨 > 2% = 偏差
+      final wasSell = true;
+      final priceChangePct = 3.0; // > 2%
+      final isDeviation = wasSell && priceChangePct > 2;
+      expect(isDeviation, true, reason: 'Sell with >2% rise should be deviation');
+    });
+
+    test('Buy recommendation with price rise is reasonable', () {
+      final wasBuy = true;
+      final priceChangePct = 1.0; // positive
+      final isDeviation = wasBuy && priceChangePct < -2;
+      expect(isDeviation, false, reason: 'Buy with price rise should be reasonable');
+    });
+  });
+
+  // ─── 10. ComprehensiveScorer Formula Tests ───
+  // 验证 (adjustedScore * 0.95).round().clamp(1, 10) 的边界映射
+  group('ComprehensiveScorer Formula (0.95× round)', () {
+    /// 辅助：设置 tech/realtime/confluence 等值，无 quote/news/capital
+    /// 权重: tech 0.45, realtime 0.35, confluence 0.20
+    ComprehensiveScoreResult _scoreAll(double score) {
+      return ComprehensiveScorer.combine(
+        technicalScore: score,
+        realtimeScore: score,
+        confluenceScore: score,
+        quote: null,
+        marketContext: null,
+        newsList: null,
+        capitalFlowScore: null,
+        marketPositionFactor: 1.0,
+      );
+    }
+
+    test('adjustedScore=5.0 maps to totalScore=5 (偏多观望)', () {
+      final r = _scoreAll(5.0); // 5.0*0.95=4.75 → round=5
+      expect(r.totalScore, equals(5));
+      expect(r.recommendation, equals('偏多观望'));
+    });
+
+    test('adjustedScore=4.74 maps to totalScore=5 (偏多观望)', () {
+      final r = _scoreAll(4.74); // 4.74*0.95=4.503 → round=5
+      expect(r.totalScore, equals(5));
+      expect(r.recommendation, equals('偏多观望'));
+    });
+
+    test('adjustedScore=4.73 maps to totalScore=4 (偏空观望)', () {
+      final r = _scoreAll(4.73); // 4.73*0.95=4.4935 → round=4
+      expect(r.totalScore, equals(4));
+      expect(r.recommendation, equals('偏空观望'));
+    });
+
+    test('adjustedScore=5.79 maps to totalScore=6 (谨慎买入)', () {
+      final r = _scoreAll(5.79); // 5.79*0.95=5.5005 → round=6
+      expect(r.totalScore, equals(6));
+      expect(r.recommendation, equals('谨慎买入'));
+    });
+
+    test('adjustedScore=5.78 maps to totalScore=5 (偏多观望)', () {
+      final r = _scoreAll(5.78); // 5.78*0.95=5.491 → round=5
+      expect(r.totalScore, equals(5));
+      expect(r.recommendation, equals('偏多观望'));
+    });
+
+    test('adjustedScore=7.89 maps to totalScore=8 (强烈买入)', () {
+      final r = _scoreAll(7.9); // 7.9*0.95=7.505 → round=8
+      // 用 7.9 避免 7.89*0.95=7.4955 的浮点歧义
+      expect(r.totalScore, equals(8));
+      expect(r.recommendation, equals('强烈买入'));
+    });
+
+    test('adjustedScore=10.0 maps to totalScore=10 (强烈买入)', () {
+      final r = _scoreAll(10.0); // 10*0.95=9.5 → round=10
+      expect(r.totalScore, equals(10));
+      expect(r.recommendation, equals('强烈买入'));
+    });
+
+    test('adjustedScore=0 maps to totalScore=1 (clamp下限)', () {
+      final r = _scoreAll(0.0); // 0*0.95=0 → round=0 → clamp=1
+      expect(r.totalScore, equals(1));
+      expect(r.recommendation, equals('强烈卖出'));
+    });
+
+    test('adjustedScore=2.5 maps to totalScore=2 (卖出)', () {
+      final r = _scoreAll(2.5); // 2.5*0.95=2.375 → round=2
+      expect(r.totalScore, equals(2));
+      expect(r.recommendation, equals('卖出'));
+    });
+
+    test('ST stock adjustedScore=4.73 maps to totalScore=4 (谨慎卖出)', () {
+      final r = ComprehensiveScorer.combine(
+        technicalScore: 4.73,
+        realtimeScore: 4.73,
+        confluenceScore: 4.73,
+        quote: QuoteData(code: 'sh600000', name: 'ST测试', price: 10.0),
+        marketContext: null,
+        newsList: null,
+        capitalFlowScore: null,
+        marketPositionFactor: 1.0,
+      );
+      expect(r.totalScore, lessThanOrEqualTo(5));
+      expect(r.recommendation, equals('谨慎卖出'));
+    });
+
+    test('ST stock adjustedScore=5.0 maps to max 偏多观望', () {
+      final r = ComprehensiveScorer.combine(
+        technicalScore: 5.0,
+        realtimeScore: 5.0,
+        confluenceScore: 5.0,
+        quote: QuoteData(code: 'sh600000', name: 'ST测试', price: 10.0),
+        marketContext: null,
+        newsList: null,
+        capitalFlowScore: null,
+        marketPositionFactor: 1.0,
+      );
+      expect(r.totalScore, equals(5));
+      expect(r.recommendation, equals('偏多观望'));
+    });
+  });
+
+  /// 个股详情页顶部 3行12字段去重 (+顶部横排4字段)
+  /// 顶部横排: 开盘, 最高, 最低, 昨收
+  /// Row 1: 成交量, 成交额, 市盈率, 市净率
+  /// Row 2: 总市值, 流通市值, 换手率, 振幅
+  /// Row 3: 净流入, 净流入率, 主力流入, 主力流出
+  group('QuoteData 字段映射完整性 (quote_screen.dart 顶部Header)', () {
+    // Row 1: 成交量, 成交额, 市盈率, 市净率
+    // Row 2: 总市值, 流通市值, 换手率, 振幅
+
+    test('QuoteData 包含全部 12 个 Row 字段', () {
+      final q = QuoteData(code: '000001', name: '测试股',
+        price: 10.5, change: 0.5, changePct: 5.0,
+        open: 10.0, high: 10.8, low: 9.8, preClose: 10.0,
+        volume: 1e6, amount: 1.05e7,
+        amplitude: 10.0, turnover: 5.0,
+        pe: 15.5, pb: 2.3,
+        totalMarketCap: 1e10, circulatingMarketCap: 8e9,
+        mainInflow: 5e6, mainOutflow: 3e6,
+        mainNetFlow: 2e6, mainNetFlowRate: 2.0,
+      );
+
+      // Row 1 字段
+      expect(q.volume, greaterThan(0));     // 成交量
+      expect(q.amount, greaterThan(0));     // 成交额
+      expect(q.pe, greaterThan(0));         // 市盈率
+      expect(q.pb, greaterThan(0));         // 市净率
+
+      // Row 2 字段
+      expect(q.totalMarketCap, greaterThan(0));  // 总市值
+      expect(q.circulatingMarketCap, greaterThan(0)); // 流通市值
+      expect(q.turnover, greaterThan(0));   // 换手率
+      expect(q.amplitude, greaterThan(0));  // 振幅
+
+      // Row 3 字段
+      expect(q.mainInflow, greaterThan(0));    // 主力流入
+      expect(q.mainOutflow, greaterThan(0));   // 主力流出
+      expect(q.mainNetFlow, greaterThan(0));   // 净流入
+      expect(q.mainNetFlowRate, greaterThan(0)); // 净流入率
+    });
+
+    test('12 字段全去重 (3行无交集 + 不与顶部横排重复)', () {
+      // 顶部横排: open, high, low, preClose
+      final topRow = {'open', 'high', 'low', 'preClose'};
+      // 数据行
+      final row1Fields = {'volume', 'amount', 'pe', 'pb'};
+      final row2Fields = {'totalMarketCap', 'circulatingMarketCap', 'turnover', 'amplitude'};
+      final row3Fields = {'mainInflow', 'mainOutflow', 'mainNetFlow', 'mainNetFlowRate'};
+
+      final allRowFields = <String>{}
+        ..addAll(row1Fields)
+        ..addAll(row2Fields)
+        ..addAll(row3Fields);
+
+      // 3行 × 4列 = 12
+      expect(allRowFields.length, equals(12));
+
+      // 行间无交集
+      expect(row1Fields.intersection(row2Fields).isEmpty, isTrue);
+      expect(row1Fields.intersection(row3Fields).isEmpty, isTrue);
+      expect(row2Fields.intersection(row3Fields).isEmpty, isTrue);
+
+      // 数据行不与顶部横排重复
+      expect(allRowFields.intersection(topRow).isEmpty, isTrue,
+          reason: '数据行 ∩ 顶部横排 = ${allRowFields.intersection(topRow)}');
+
+      // 验证所有字段在 QuoteData 上存在
+      expect(allRowFields.every((f) => _quoteHasField(f)), isTrue);
+    });
+
+    test('边界值: PE/PB 为 0 或负值时不应崩溃', () {
+      final qZero = QuoteData(code: '000001', pe: 0, pb: 0);
+      expect(qZero.pe, equals(0));
+      expect(qZero.pb, equals(0));
+
+      final qNeg = QuoteData(code: '000002', pe: -5, pb: -1);
+      expect(qNeg.pe, lessThan(0));
+      expect(qNeg.pb, lessThan(0));
+    });
+
+    test('边界值: 资金流向为 0 不崩溃', () {
+      final q = QuoteData(code: '000001',
+        mainInflow: 0, mainOutflow: 0, mainNetFlow: 0, mainNetFlowRate: 0);
+      expect(q.mainInflow, equals(0));
+      expect(q.mainOutflow, equals(0));
+      expect(q.mainNetFlow, equals(0));
+      expect(q.mainNetFlowRate, equals(0));
+    });
+
+    test('边界值: 市值/成交量为 0 不崩溃', () {
+      final q = QuoteData(code: '000001',
+        totalMarketCap: 0, circulatingMarketCap: 0, volume: 0, amount: 0);
+      expect(q.totalMarketCap, equals(0));
+      expect(q.circulatingMarketCap, equals(0));
+      expect(q.volume, equals(0));
+      expect(q.amount, equals(0));
+    });
+  });
+}
+
+/// 验证 QuoteData 是否包含某字段 (编译时检查, 用于测试)
+bool _quoteHasField(String fieldName) {
+  final q = QuoteData(code: '000001');
+  switch (fieldName) {
+    case 'volume': q.volume; break;
+    case 'amount': q.amount; break;
+    case 'pe': q.pe; break;
+    case 'pb': q.pb; break;
+    case 'totalMarketCap': q.totalMarketCap; break;
+    case 'circulatingMarketCap': q.circulatingMarketCap; break;
+    case 'open': q.open; break;
+    case 'preClose': q.preClose; break;
+    case 'turnover': q.turnover; break;
+    case 'amplitude': q.amplitude; break;
+    case 'high': q.high; break;
+    case 'low': q.low; break;
+    case 'mainInflow': q.mainInflow; break;
+    case 'mainOutflow': q.mainOutflow; break;
+    case 'mainNetFlow': q.mainNetFlow; break;
+    case 'mainNetFlowRate': q.mainNetFlowRate; break;
+    default: return false;
+  }
+  return true;
 }

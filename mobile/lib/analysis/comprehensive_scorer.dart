@@ -61,9 +61,9 @@ class ComprehensiveScorer {
     final isST = quote != null && isSTStock(quote.name);
     final int totalScore;
     if (isST) {
-      totalScore = (adjustedScore * 0.9 + 1).floor().clamp(1, 5);
+      totalScore = (adjustedScore * 0.95).round().clamp(1, 5);
     } else {
-      totalScore = (adjustedScore * 0.9 + 1).floor().clamp(1, 10);
+      totalScore = (adjustedScore * 0.95).round().clamp(1, 10);
     }
 
     String recommendation;
