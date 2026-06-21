@@ -108,14 +108,14 @@ const kBearTrendStrategies = <String>[
 
 const kConsolidationStrategies = [
   'RSI超卖反弹',
-  'KDJ超买金叉',
+  'KDJ超卖金叉',
   '缩量回调',
   '缩量止跌',
 ];
 
 const kAccumulationStrategies = [
   'MACD底背离短线',
-  'KDJ超买金叉',
+  'KDJ超卖金叉',
   'RSI超卖反弹',
   '缩量止跌',
   '均线多头排列',
@@ -125,7 +125,7 @@ const kAccumulationStrategies = [
 const kDistributionStrategies = [
   '缩量回调',
   '缩量止跌',
-  'KDJ超买金叉',
+  'KDJ超卖金叉',
 ];
 
 /// 根据市场结构判定哪些策略应禁用

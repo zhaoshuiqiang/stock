@@ -977,16 +977,23 @@ Map<String, dynamic> detectTrendSignals(List<HistoryKline> data) {
     }
   }
 
-if (last.macdHist != 0 && data.length >= 3) {
-    double maxHigh20 = data[data.length - 3].high;
-    double maxMacd20 = data[data.length - 3].macdHist;
-    for (int i = data.length - 20; i < data.length - 3; i++) {
-      if (i >= 0) {
-        if (data[i].high > maxHigh20) maxHigh20 = data[i].high;
-        if (data[i].macdHist > maxMacd20) maxMacd20 = data[i].macdHist;
+  // MACD顶背离检测：找过去20天的前一个价格高点，比较两个高点的价格与MACD
+  // 真正的顶背离：价格创新高，但MACD没有创新高（两个高点之间的趋势比较）
+  if (last.macdHist != 0 && data.length >= 20) {
+    // 找过去20天（不含最近3天）的最高价位置作为前一个高点
+    int prevPeakIndex = -1;
+    double prevPeakHigh = -double.infinity;
+    final int searchStart = data.length - 20 < 0 ? 0 : data.length - 20;
+    for (int i = searchStart; i < data.length - 3; i++) {
+      if (data[i].high > prevPeakHigh) {
+        prevPeakHigh = data[i].high;
+        prevPeakIndex = i;
       }
     }
-    if (last.high >= maxHigh20 && last.macdHist < maxMacd20) {
+    // 当前价格创新高（超过前一个高点），但MACD低于前一个高点 → 顶背离
+    if (prevPeakIndex >= 0 &&
+        last.high > prevPeakHigh &&
+        last.macdHist < data[prevPeakIndex].macdHist) {
       result['top'].add('MACD顶背离');
     }
   }

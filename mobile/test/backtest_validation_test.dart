@@ -1208,13 +1208,20 @@ void main() {
           reason: '应有卖出信号可映射到回测');
 
       // Step 3: 手动计算预期调整
+      // P1-1修复：根据推荐方向采用不同的反馈逻辑
+      // - 买入推荐（totalScore > 5）：买入信号用 adj，卖出信号用 2.0 - adj（反向）
+      // - 卖出推荐（totalScore <= 5）：卖出信号用 adj，买入信号用 2.0 - adj（反向）
+      final isBuyRecommendation = analysis.score > 5;
+      final alignedSignals = isBuyRecommendation ? buyWithBacktest : sellWithBacktest;
+      final oppositeSignals = isBuyRecommendation ? sellWithBacktest : buyWithBacktest;
+
       final adjustments = <double>[];
-      for (final s in buyWithBacktest) {
+      for (final s in alignedSignals) {
         final key = mapSignalToBacktestKey(s.signal)!;
         adjustments.add(
           BacktestEngine.getStrategyConfidenceAdjustment(key, backtestResults));
       }
-      for (final s in sellWithBacktest) {
+      for (final s in oppositeSignals) {
         final key = mapSignalToBacktestKey(s.signal)!;
         final adj = BacktestEngine.getStrategyConfidenceAdjustment(key, backtestResults);
         adjustments.add(2.0 - adj); // 反向
@@ -1247,7 +1254,7 @@ void main() {
 
       // Step 6: 细节可追溯性
       print('═══════════════════════════════════════');
-      print('双向回测反馈完整验证');
+      print('双向回测反馈完整验证 (推荐方向: ${isBuyRecommendation ? "买入" : "卖出"})');
       print('───────────────────────────────────────');
       print('baseConfidence (纯5维): ${baseConfidence.toStringAsFixed(4)}');
       print('反馈调整系数 avgAdj: ${avgAdj.toStringAsFixed(4)}');
@@ -1255,15 +1262,15 @@ void main() {
       print('期望置信度: ${expectedConfidence.toStringAsFixed(4)}');
       print('实际置信度: ${analysis.confidenceScore.toStringAsFixed(4)}');
       print('───────────────────────────────────────');
-      for (final s in buyWithBacktest) {
+      for (final s in alignedSignals) {
         final key = mapSignalToBacktestKey(s.signal)!;
         final adj = BacktestEngine.getStrategyConfidenceAdjustment(key, backtestResults);
-        print('买入: ${s.signal} → $key  adj=$adj');
+        print('同向: ${s.signal} → $key  adj=$adj');
       }
-      for (final s in sellWithBacktest) {
+      for (final s in oppositeSignals) {
         final key = mapSignalToBacktestKey(s.signal)!;
         final adj = BacktestEngine.getStrategyConfidenceAdjustment(key, backtestResults);
-        print('卖出: ${s.signal} → $key  adj=$adj → 反向=${(2.0 - adj).toStringAsFixed(4)}');
+        print('反向: ${s.signal} → $key  adj=$adj → 反向=${(2.0 - adj).toStringAsFixed(4)}');
       }
       print('═══════════════════════════════════════');
 

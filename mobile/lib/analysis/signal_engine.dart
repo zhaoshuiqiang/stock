@@ -176,6 +176,9 @@ String? mapSignalToBacktestKey(String signalName) {
     'MACD底背离': 'MACD交叉',
     'MA5上穿MA10': 'MA金叉',
     'MA10上穿MA20': 'MA金叉',
+    // 注意：'KDJ金叉' 信号涵盖所有金叉，但回测 'KDJ超卖' 仅测试 K<30 的金叉。
+    // 样本不完全匹配，回测反馈可能高估普通金叉的可靠性。
+    // 保留映射因 KDJ 超卖金叉回测表现对 KDJ 金叉类信号仍有参考价值。
     'KDJ金叉': 'KDJ超卖',
     'RSI超卖回升': 'RSI超卖',
     '跌破下轨': '布林支撑',
@@ -186,7 +189,8 @@ String? mapSignalToBacktestKey(String signalName) {
     'MACD顶背离': 'MACD交叉',
     'MA5下穿MA10': 'MA金叉',
     'MA10下穿MA20': 'MA金叉',
-    'KDJ死叉': 'KDJ超卖',
+    // 'KDJ死叉' 不映射：回测 'KDJ超卖' 是买入策略（K<30 金叉买入），
+    // 与 KDJ 死叉卖出信号（K>50 死叉）样本不匹配，映射会引入噪声。
     'RSI超买回落': 'RSI超卖',
     '均线空头排列': '均线多头',
 
@@ -353,22 +357,29 @@ AnalysisResult generateAnalysis(
   double confidenceScore = confResult.confidenceScore;
   if (backtestResults.isNotEmpty) {
     final adjustments = <double>[];
-    // 买入信号：回测表现好 → 提升置信度
-    for (final signal in buySignals) {
+    // 根据推荐方向采用不同的反馈逻辑：
+    // - 买入推荐（totalScore > 5）：买入信号可靠→提升置信度，卖出信号可靠→降低置信度（反向确认）
+    // - 卖出推荐（totalScore <= 5）：卖出信号可靠→提升置信度，买入信号可靠→降低置信度（反向确认）
+    final isBuyRecommendation = totalScore > 5;
+    // 与推荐方向一致的信号：回测可靠→提升置信度
+    final alignedSignals = isBuyRecommendation ? buySignals : sellSignals;
+    // 与推荐方向相反的信号：回测可靠→降低置信度（反向确认）
+    final oppositeSignals = isBuyRecommendation ? sellSignals : buySignals;
+
+    for (final signal in alignedSignals) {
       final strategyName = mapSignalToBacktestKey(signal.signal);
       if (strategyName != null) {
         final adj = BacktestEngine.getStrategyConfidenceAdjustment(
           strategyName, backtestResults);
-        adjustments.add(adj);
+        adjustments.add(adj); // adj 高 → 提升置信度
       }
     }
-    // 卖出信号：回测表现好 → 降低置信度（反向确认）
-    for (final signal in sellSignals) {
+    for (final signal in oppositeSignals) {
       final strategyName = mapSignalToBacktestKey(signal.signal);
       if (strategyName != null) {
         final adj = BacktestEngine.getStrategyConfidenceAdjustment(
           strategyName, backtestResults);
-        // 卖出信号可靠性高 → 买入置信度应降低
+        // 反向信号可靠性高 → 降低置信度
         adjustments.add(2.0 - adj); // adj 1.0 → 1.0, adj 1.3 → 0.7, adj 0.7 → 1.3
       }
     }

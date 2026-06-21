@@ -651,25 +651,30 @@ class BacktestEngine {
 
       final isResults = megaBacktest(isData);
       if (isResults.isEmpty) continue;
-      final isBest = _bestResult(isResults);
+      // IS：找出样本内表现最佳的策略（totalSignals≥3）
+      String? isBestStrategyName;
+      double isBestReturn = -double.infinity;
+      for (final entry in isResults.entries) {
+        if (entry.value.totalSignals >= 3 && entry.value.totalReturn > isBestReturn) {
+          isBestReturn = entry.value.totalReturn;
+          isBestStrategyName = entry.key;
+        }
+      }
+      if (isBestStrategyName == null) continue;
 
       final oosResults = megaBacktest(oosData);
       if (oosResults.isEmpty) continue;
-      // 样本外收益不依赖特定策略，取所有策略均值
-      double oosAvg = 0;
-      int oosCount = 0;
-      for (final r in oosResults.values) {
-        if (r.totalSignals > 0) {
-          oosAvg += r.totalReturn;
-          oosCount++;
-        }
-      }
-      if (oosCount > 0) oosAvg /= oosCount;
+      // OOS：评估同一个策略在样本外的表现（与 IS 对称比较）
+      // 若该策略在 OOS 无信号，记为 0（策略不适用）
+      final oosSameStrategy = oosResults[isBestStrategyName];
+      final oosReturn = (oosSameStrategy != null && oosSameStrategy.totalSignals > 0)
+          ? oosSameStrategy.totalReturn
+          : 0.0;
 
-      totalIsReturn += isBest.totalReturn;
-      totalOosReturn += oosAvg;
-      windowReturns.add(oosAvg);
-      if (oosAvg > 0) passedWindows++;
+      totalIsReturn += isBestReturn;
+      totalOosReturn += oosReturn;
+      windowReturns.add(oosReturn);
+      if (oosReturn > 0) passedWindows++;
     }
 
     if (windowCount == 0) {
@@ -712,21 +717,6 @@ class BacktestEngine {
       isOverfit: isOverfit,
       verdict: verdict,
     );
-  }
-
-  static BacktestResult _bestResult(Map<String, BacktestResult> results) {
-    if (results.isEmpty) return _emptyResult();
-    BacktestResult? best;
-    double bestScore = -double.infinity;
-    for (final r in results.values) {
-      if (r.totalSignals < 3) continue;
-      final score = r.totalReturn;
-      if (score > bestScore) {
-        bestScore = score;
-        best = r;
-      }
-    }
-    return best ?? (results.isNotEmpty ? results.values.first : _emptyResult());
   }
 
   static double _calcStdDev(List<double> values) {

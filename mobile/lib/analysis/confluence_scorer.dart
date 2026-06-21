@@ -2,7 +2,9 @@ import '../models/stock_models.dart';
 
 /// 跨指标共振评分结果
 class ConfluenceResult {
-  /// 共振评分 (0-10)
+  /// 共振评分 (1-9)
+  /// 5.0 为中性，多头指标加分（每指标+0.8，上限+4），空头指标减分（每指标-0.8，下限-4）
+  /// 实际范围 [1.0, 9.0]：5.0 ± 4.0
   final double score;
 
   /// 多头指标数量

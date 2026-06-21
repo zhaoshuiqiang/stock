@@ -28,7 +28,7 @@ class ConfidenceCalculator {
     final buyCount = buySignals.length;
     final sellCount = sellSignals.length;
 
-    // 1. 信号一致性(30%): 买卖信号比例偏离度，且方向与推荐对齐时加分
+    // 1. 信号一致性(35%): 买卖信号比例偏离度，且方向与推荐对齐时加分
     double signalConsistency = 0.5;
     final signalCount = buyCount + sellCount;
     if (signalCount > 0) {
@@ -42,7 +42,7 @@ class ConfidenceCalculator {
           : 0.3 + (1 - concentration) * 0.4;
     }
 
-    // 2. 基本面支撑(10%): 缩减权重，短线交易PE/PB参考价值有限
+    // 2. 基本面支撑(13%): 缩减权重，短线交易PE/PB参考价值有限
     double fundamentalSupport = 0.5;
     if (fundamentalScore != null) {
       if (totalScore >= 7 && fundamentalScore.totalScore >= 6) {
@@ -56,7 +56,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 3. 情绪面确认(20%): 新闻情绪与推荐方向一致时加分
+    // 3. 情绪面确认(13%): 新闻情绪与推荐方向一致时加分
     double sentimentConfirm = 0.5;
     if (newsSentiment != null) {
       if (totalScore >= 7 && newsSentiment.score > 2) {
@@ -70,7 +70,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 4. 市场环境(10%): 大盘趋势确认
+    // 4. 市场环境(13%): 大盘趋势确认
     double marketConfirm = 0.5;
     if (marketContext != null) {
       if (totalScore >= 7 && marketContext.avgChangePct > 0.5) {
@@ -84,7 +84,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 5. 市场结构确认(10%): 分裂自原marketConfirm(20%→10%)，结构趋势与信号方向一致时加分
+    // 5. 市场结构确认(13%): 分裂自原marketConfirm，结构趋势与信号方向一致时加分
     double structureConfirm = 0.5;
     if (marketStructure != null) {
       final isBullish = marketStructure.structure == MarketStructure.bullTrend ||
@@ -163,7 +163,7 @@ class ConfidenceCalculator {
     final sellCount = sellSignals.length;
     final signalCount = buyCount + sellCount;
 
-    // 1. 信号一致性(30%): 与calculate方法保持一致
+    // 1. 信号一致性(35%): 与calculate方法保持一致
     double signalConsistency = 0.5;
     if (signalCount > 0) {
       final dominantDirection = buyCount >= sellCount ? 'buy' : 'sell';
@@ -176,7 +176,7 @@ class ConfidenceCalculator {
           : 0.3 + (1 - concentration) * 0.4;
     }
 
-    // 2. 基本面支撑(10%): 缩减权重，短线交易PE/PB参考价值有限
+    // 2. 基本面支撑(13%): 缩减权重，短线交易PE/PB参考价值有限
     double fundamentalSupport = 0.5;
     if (fundamentalScore != null) {
       if (totalScore >= 7 && fundamentalScore.totalScore >= 6) {
@@ -190,7 +190,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 3. 情绪面确认(20%)
+    // 3. 情绪面确认(13%)
     double sentimentConfirm = 0.5;
     if (newsSentiment != null) {
       if (totalScore >= 7 && newsSentiment.score > 2) {
@@ -204,7 +204,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 4. 市场环境(20%): 大盘趋势权重提升，短线需顺势操作
+    // 4. 市场环境(13%): 大盘趋势权重，短线需顺势操作
     double marketConfirm = 0.5;
     if (marketContext != null) {
       if (totalScore >= 7 && marketContext.avgChangePct > 0.5) {
