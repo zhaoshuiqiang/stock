@@ -284,6 +284,24 @@ class AlertsScreenState extends State<AlertsScreen> {
     }
   }
 
+  String _formatIndicatorType(String type) {
+    switch (type) {
+      case 'rsi': return 'RSI';
+      case 'macd': return 'MACD';
+      case 'kdj': return 'KDJ';
+      case 'volume': return '成交量';
+      case 'volume_ratio': return '量比';
+      case 'turnover': return '换手率';
+      case 'amplitude': return '振幅';
+      case 'cci': return 'CCI';
+      case 'wr': return 'WR';
+      case 'boll': return '布林带';
+      case 'atr': return 'ATR';
+      case 'ma_cross': return '均线交叉';
+      default: return type.toUpperCase();
+    }
+  }
+
   /// 计算当前价格与触发阈值的距离描述
   String _distanceToThreshold(AlertRule alert, QuoteData? quote) {
     if (quote == null || quote.price <= 0) return '';
@@ -500,25 +518,30 @@ class AlertsScreenState extends State<AlertsScreen> {
 
   // ─── 筛选排序栏 ───────────────────────────────────────────────────
   Widget _buildFilterSortBar() {
+    const filterItems = ['全部', '已启用', '已禁用'];
+    const sortItems = ['时间', '名称', '类型'];
+    const sortToValue = {'时间': 'time', '名称': 'name', '类型': 'type'};
+
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
       child: Row(
         children: [
           // 筛选下拉框
-          _buildDropdown(
+          _buildCleanDropdown(
             value: _filterType,
-            items: const ['全部', '已启用', '已禁用'],
+            items: filterItems,
             label: '筛选',
             onChanged: (v) => setState(() => _filterType = v),
           ),
           const SizedBox(width: 6),
           // 排序下拉框
-          _buildDropdown(
-            value: _sortBy,
-            items: const ['time', 'name', 'type'],
-            labels: const ['时间', '名称', '类型'],
+          _buildCleanDropdown(
+            value: _sortBy == 'time' ? '时间' : _sortBy == 'name' ? '名称' : '类型',
+            items: sortItems,
             label: '排序',
-            onChanged: (v) => setState(() => _sortBy = v),
+            onChanged: (display) {
+              setState(() => _sortBy = sortToValue[display] ?? 'time');
+            },
           ),
           // 升降序切换
           GestureDetector(
@@ -545,19 +568,12 @@ class AlertsScreenState extends State<AlertsScreen> {
     );
   }
 
-  Widget _buildDropdown({
+  Widget _buildCleanDropdown({
     required String value,
     required List<String> items,
-    List<String>? labels,
     required String label,
     required ValueChanged<String> onChanged,
   }) {
-    final displayLabels = labels ?? items;
-    final displayToValue = <String, String>{};
-    for (var i = 0; i < items.length; i++) {
-      displayToValue[displayLabels[i]] = items[i];
-    }
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
@@ -571,10 +587,13 @@ class AlertsScreenState extends State<AlertsScreen> {
           iconEnabledColor: _kTextSecondary,
           dropdownColor: const Color(0xFF21262D),
           style: const TextStyle(color: _kTextPrimary, fontSize: 12),
-          items: displayLabels.map((display) => DropdownMenuItem(
-            value: displayToValue[display],
-            child: Text(value == items[0] && items[0] == '全部' ? label : display,
-                style: const TextStyle(fontSize: 12)),
+          selectedItemBuilder: (_) => items.map((item) => Text(
+            item,
+            style: const TextStyle(color: _kTextPrimary, fontSize: 12),
+          )).toList(),
+          items: items.map((item) => DropdownMenuItem(
+            value: item,
+            child: Text(item, style: const TextStyle(fontSize: 12)),
           )).toList(),
           onChanged: (v) { if (v != null) onChanged(v); },
         ),
@@ -764,7 +783,7 @@ class AlertsScreenState extends State<AlertsScreen> {
               if (alert.conditionType == 'indicator' && alert.indicatorType.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(
-                  '指标: ${alert.indicatorType.toUpperCase()}',
+                  '指标: ${_formatIndicatorType(alert.indicatorType)}',
                   style: const TextStyle(color: _kTextSecondary, fontSize: 11),
                 ),
               ],
