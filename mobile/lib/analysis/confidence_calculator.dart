@@ -10,7 +10,7 @@ class ConfidenceCalcResult {
   ConfidenceCalcResult({required this.confidenceScore, required this.validatedSignals});
 }
 
-/// 置信度计算器：5维置信度 + 对抗验证调整
+/// 置信度计算器：6维置信度 + 对抗验证调整
 class ConfidenceCalculator {
   /// 计算综合置信度（0.2-0.95），同时返回对抗验证结果
   static ConfidenceCalcResult calculate({
@@ -45,11 +45,11 @@ class ConfidenceCalculator {
     // 2. 基本面支撑(13%): 缩减权重，短线交易PE/PB参考价值有限
     double fundamentalSupport = 0.5;
     if (fundamentalScore != null) {
-      if (totalScore >= 7 && fundamentalScore.totalScore >= 6) {
+      if (totalScore >= 6 && fundamentalScore.totalScore >= 6) {
         fundamentalSupport = (0.7 + (fundamentalScore.totalScore - 6) * 0.1).clamp(0.0, 1.0);
       } else if (totalScore <= 4 && fundamentalScore.totalScore <= 4) {
         fundamentalSupport = (0.7 + (4 - fundamentalScore.totalScore) * 0.1).clamp(0.0, 1.0);
-      } else if (totalScore >= 7 && fundamentalScore.totalScore < 4) {
+      } else if (totalScore >= 6 && fundamentalScore.totalScore < 4) {
         fundamentalSupport = 0.3; // 技术面看多但基本面差，降低置信度
       } else if (totalScore <= 4 && fundamentalScore.totalScore > 6) {
         fundamentalSupport = 0.3; // 技术面看空但基本面好，降低置信度
@@ -59,11 +59,11 @@ class ConfidenceCalculator {
     // 3. 情绪面确认(13%): 新闻情绪与推荐方向一致时加分
     double sentimentConfirm = 0.5;
     if (newsSentiment != null) {
-      if (totalScore >= 7 && newsSentiment.score > 2) {
+      if (totalScore >= 6 && newsSentiment.score > 2) {
         sentimentConfirm = 0.7 + (newsSentiment.score - 2) * 0.03;
       } else if (totalScore <= 4 && newsSentiment.score < -2) {
         sentimentConfirm = 0.7 + (-2 - newsSentiment.score) * 0.03;
-      } else if (totalScore >= 7 && newsSentiment.score < -2) {
+      } else if (totalScore >= 6 && newsSentiment.score < -2) {
         sentimentConfirm = 0.3; // 技术面看多但新闻利空
       } else if (totalScore <= 4 && newsSentiment.score > 2) {
         sentimentConfirm = 0.3; // 技术面看空但新闻利好
@@ -73,11 +73,11 @@ class ConfidenceCalculator {
     // 4. 市场环境(13%): 大盘趋势确认
     double marketConfirm = 0.5;
     if (marketContext != null) {
-      if (totalScore >= 7 && marketContext.avgChangePct > 0.5) {
+      if (totalScore >= 6 && marketContext.avgChangePct > 0.5) {
         marketConfirm = 0.7;
       } else if (totalScore <= 4 && marketContext.avgChangePct < -0.5) {
         marketConfirm = 0.7;
-      } else if (totalScore >= 7 && marketContext.avgChangePct < -1) {
+      } else if (totalScore >= 6 && marketContext.avgChangePct < -1) {
         marketConfirm = 0.3;
       } else if (totalScore <= 4 && marketContext.avgChangePct > 1) {
         marketConfirm = 0.3;
@@ -91,14 +91,15 @@ class ConfidenceCalculator {
                          marketStructure.structure == MarketStructure.accumulation;
       final isBearish = marketStructure.structure == MarketStructure.bearTrend ||
                         marketStructure.structure == MarketStructure.distribution;
-      if (totalScore >= 7 && isBullish) {
-        structureConfirm = 0.80;
+      final structureConfidence = marketStructure.confidence.clamp(0.3, 1.0);
+      if (totalScore >= 6 && isBullish) {
+        structureConfirm = 0.3 + structureConfidence * 0.7;
       } else if (totalScore <= 4 && isBearish) {
-        structureConfirm = 0.80;
-      } else if (totalScore >= 7 && isBearish) {
-        structureConfirm = 0.25;
+        structureConfirm = 0.3 + structureConfidence * 0.7;
+      } else if (totalScore >= 6 && isBearish) {
+        structureConfirm = 1.0 - (0.3 + structureConfidence * 0.7);
       } else if (totalScore <= 4 && isBullish) {
-        structureConfirm = 0.25;
+        structureConfirm = 1.0 - (0.3 + structureConfidence * 0.7);
       } else {
         structureConfirm = 0.5;
       }
@@ -179,11 +180,11 @@ class ConfidenceCalculator {
     // 2. 基本面支撑(13%): 缩减权重，短线交易PE/PB参考价值有限
     double fundamentalSupport = 0.5;
     if (fundamentalScore != null) {
-      if (totalScore >= 7 && fundamentalScore.totalScore >= 6) {
+      if (totalScore >= 6 && fundamentalScore.totalScore >= 6) {
         fundamentalSupport = (0.7 + (fundamentalScore.totalScore - 6) * 0.1).clamp(0.0, 1.0);
       } else if (totalScore <= 4 && fundamentalScore.totalScore <= 4) {
         fundamentalSupport = (0.7 + (4 - fundamentalScore.totalScore) * 0.1).clamp(0.0, 1.0);
-      } else if (totalScore >= 7 && fundamentalScore.totalScore < 4) {
+      } else if (totalScore >= 6 && fundamentalScore.totalScore < 4) {
         fundamentalSupport = 0.3;
       } else if (totalScore <= 4 && fundamentalScore.totalScore > 6) {
         fundamentalSupport = 0.3;
@@ -193,11 +194,11 @@ class ConfidenceCalculator {
     // 3. 情绪面确认(13%)
     double sentimentConfirm = 0.5;
     if (newsSentiment != null) {
-      if (totalScore >= 7 && newsSentiment.score > 2) {
+      if (totalScore >= 6 && newsSentiment.score > 2) {
         sentimentConfirm = 0.7 + (newsSentiment.score - 2) * 0.03;
       } else if (totalScore <= 4 && newsSentiment.score < -2) {
         sentimentConfirm = 0.7 + (-2 - newsSentiment.score) * 0.03;
-      } else if (totalScore >= 7 && newsSentiment.score < -2) {
+      } else if (totalScore >= 6 && newsSentiment.score < -2) {
         sentimentConfirm = 0.3;
       } else if (totalScore <= 4 && newsSentiment.score > 2) {
         sentimentConfirm = 0.3;
@@ -207,11 +208,11 @@ class ConfidenceCalculator {
     // 4. 市场环境(13%): 大盘趋势权重，短线需顺势操作
     double marketConfirm = 0.5;
     if (marketContext != null) {
-      if (totalScore >= 7 && marketContext.avgChangePct > 0.5) {
+      if (totalScore >= 6 && marketContext.avgChangePct > 0.5) {
         marketConfirm = 0.7;
       } else if (totalScore <= 4 && marketContext.avgChangePct < -0.5) {
         marketConfirm = 0.7;
-      } else if (totalScore >= 7 && marketContext.avgChangePct < -1) {
+      } else if (totalScore >= 6 && marketContext.avgChangePct < -1) {
         marketConfirm = 0.3;
       } else if (totalScore <= 4 && marketContext.avgChangePct > 1) {
         marketConfirm = 0.3;
@@ -225,14 +226,15 @@ class ConfidenceCalculator {
                          marketStructure.structure == MarketStructure.accumulation;
       final isBearish = marketStructure.structure == MarketStructure.bearTrend ||
                         marketStructure.structure == MarketStructure.distribution;
-      if (totalScore >= 7 && isBullish) {
-        structureConfirm = 0.80;
+      final structureConfidence = marketStructure.confidence.clamp(0.3, 1.0);
+      if (totalScore >= 6 && isBullish) {
+        structureConfirm = 0.3 + structureConfidence * 0.7;
       } else if (totalScore <= 4 && isBearish) {
-        structureConfirm = 0.80;
-      } else if (totalScore >= 7 && isBearish) {
-        structureConfirm = 0.25;
+        structureConfirm = 0.3 + structureConfidence * 0.7;
+      } else if (totalScore >= 6 && isBearish) {
+        structureConfirm = 1.0 - (0.3 + structureConfidence * 0.7);
       } else if (totalScore <= 4 && isBullish) {
-        structureConfirm = 0.25;
+        structureConfirm = 1.0 - (0.3 + structureConfidence * 0.7);
       } else {
         structureConfirm = 0.5;
       }

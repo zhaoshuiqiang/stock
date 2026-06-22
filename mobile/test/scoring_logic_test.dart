@@ -151,7 +151,7 @@ void main() {
 
       // Confluence score should be populated
       expect(analysis.confluenceScore, greaterThanOrEqualTo(0));
-      expect(analysis.confluenceScore, lessThanOrEqualTo(8));
+      expect(analysis.confluenceScore, lessThanOrEqualTo(10));
 
       // Confluence details should have 7 dimensions
       expect(analysis.confluenceDetails, isNotNull);

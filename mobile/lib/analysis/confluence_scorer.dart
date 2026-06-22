@@ -2,9 +2,9 @@ import '../models/stock_models.dart';
 
 /// 跨指标共振评分结果
 class ConfluenceResult {
-  /// 共振评分 (1-9)
-  /// 5.0 为中性，多头指标加分（每指标+0.8，上限+4），空头指标减分（每指标-0.8，下限-4）
-  /// 实际范围 [1.0, 9.0]：5.0 ± 4.0
+  /// 共振评分 (0-10)
+  /// 5.0 为中性，多头指标加权加分（上限+5），空头指标加权减分（下限-5）
+  /// 各指标权重不同：MA/MACD=1.5, VOL=1.2, BOLL=1.0, KDJ/RSI=0.8, WR/CCI=0.6, GAP=0.4, DIVER=0.5
   final double score;
 
   /// 多头指标数量
@@ -81,12 +81,19 @@ class ConfluenceScorer {
       bearIndicators.add('DIVER');
     }
 
-    // 跨指标共振：不同指标数量越多，共振越强
+    // 跨指标共振：加权计算，高可靠性指标权重更大
     final bullDistinct = bullIndicators.toSet().length;
     final bearDistinct = bearIndicators.toSet().length;
-    // 共振加分：每多一个不同指标偏多+0.8，最高+4；偏空同理
-    final bullConfluence = (bullDistinct * 0.8).clamp(0.0, 4.0);
-    final bearConfluence = (bearDistinct * 0.8).clamp(0.0, 4.0);
+    double weightedBullConfluence = 0;
+    for (final indicator in bullIndicators.toSet()) {
+      weightedBullConfluence += _indicatorWeight(indicator);
+    }
+    double weightedBearConfluence = 0;
+    for (final indicator in bearIndicators.toSet()) {
+      weightedBearConfluence += _indicatorWeight(indicator);
+    }
+    final bullConfluence = weightedBullConfluence.clamp(0.0, 5.0);
+    final bearConfluence = weightedBearConfluence.clamp(0.0, 5.0);
     final confluenceScore =
         (5.0 + bullConfluence - bearConfluence).clamp(0.0, 10.0);
 
@@ -114,5 +121,22 @@ class ConfluenceScorer {
       bearCount: bearDistinct,
       details: confluenceDetails,
     );
+  }
+
+  /// 指标权重：基于历史回测可靠性和信号频率
+  static double _indicatorWeight(String name) {
+    switch (name) {
+      case 'MA': return 1.5;     // 趋势类最高可靠性，有回测数据支撑
+      case 'MACD': return 1.5;   // 核心动量指标，有回测数据支撑
+      case 'VOL': return 1.2;    // 量价确认重要但需结合上下文
+      case 'BOLL': return 1.0;   // 中轨参考价值适中
+      case 'KDJ': return 0.8;    // 短线有效但噪声较大
+      case 'RSI': return 0.8;    // 超买超卖可靠，中位区噪声较大
+      case 'WR': return 0.6;     // 辅助指标，波动较大
+      case 'CCI': return 0.6;    // 辅助指标，使用频率较低
+      case 'GAP': return 0.4;    // 缺口罕见且统计显著性有限
+      case 'DIVER': return 0.5;  // 背离信号极罕见，权重适中
+      default: return 0.8;
+    }
   }
 }

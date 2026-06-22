@@ -103,7 +103,11 @@ const kBullTrendStrategies = [
 ];
 
 const kBearTrendStrategies = <String>[
-  // 熊市中只保留防守型策略，其余全部禁用
+  // 熊市中保留防守/超卖反弹型策略，捕捉阶段性反弹机会
+  'RSI超卖反弹',       // 熊市超卖反弹
+  'KDJ超卖金叉',       // 超卖区金叉反弹
+  '缩量止跌',          // 卖方力量衰竭
+  'MACD底背离短线',    // 底部背离信号，熊市中最佳信号
 ];
 
 const kConsolidationStrategies = [

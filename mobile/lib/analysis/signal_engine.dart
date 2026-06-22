@@ -294,8 +294,7 @@ AnalysisResult generateAnalysis(
   final totalScore = compResult.totalScore;
   final recommendation = compResult.recommendation;
 
-  // 6. 推荐理由
-  final reasons = _generateReasons(buySignals, sellSignals, last, quote);
+  // 6. 推荐理由（见下方步骤13，全部上下文就绪后生成）
 
   // 7. 风险分析
   final riskResult = RiskAnalyzer.analyze(data, last, quote);
@@ -303,16 +302,7 @@ AnalysisResult generateAnalysis(
   // 8. 机会识别
   final opportunities = OpportunityIdentifier.identify(buySignals);
 
-  // 9. 操作建议
-  final suggestions = SuggestionGenerator.generate(
-    recommendation: recommendation,
-    data: data,
-    last: last,
-    quote: quote,
-    buySignals: buySignals,
-    sellSignals: sellSignals,
-    totalScore: totalScore,
-  );
+  // 9. 操作建议（见下方，全部上下文就绪后生成）
 
   // 10. 全策略回测 + 反馈闭环
   Map<String, BacktestResult> backtestResults = {};
@@ -399,7 +389,32 @@ AnalysisResult generateAnalysis(
     marketStructure: marketStructure,
   );
 
-  // 13. 详细推荐理由
+  // 13. 详细推荐理由（增强版：含市场结构/策略/回测/置信度上下文）
+  final reasons = _generateReasons(
+    buySignals, sellSignals, last, quote,
+    totalScore: totalScore,
+    marketStructure: marketStructure,
+    backtestResults: backtestResults,
+    activeStrategies: [
+      ...shortTermStrategies,
+      ...longTermStrategies,
+    ],
+    confidenceScore: confidenceScore,
+  );
+
+  // 操作建议（动态仓位：基于ATR波动率、置信度、市场结构）
+  final suggestions = SuggestionGenerator.generate(
+    recommendation: recommendation,
+    data: data,
+    last: last,
+    quote: quote,
+    buySignals: buySignals,
+    sellSignals: sellSignals,
+    totalScore: totalScore,
+    confidenceScore: confidenceScore,
+    marketStructure: marketStructure,
+  );
+
   final detailedReasons = <RecommendationReason>[];
   for (final signal in signals.take(5)) {
     if (signal.confidence != null) {
@@ -456,8 +471,13 @@ List<String> _generateReasons(
   List<SignalItem> buySignals,
   List<SignalItem> sellSignals,
   HistoryKline last,
-  QuoteData? quote,
-) {
+  QuoteData? quote, {
+  int? totalScore,
+  MarketStructureResult? marketStructure,
+  Map<String, BacktestResult>? backtestResults,
+  List<TradingStrategy>? activeStrategies,
+  double confidenceScore = 0.5,
+}) {
   final reasons = <String>[];
   final buyCount = buySignals.length;
   final sellCount = sellSignals.length;
@@ -477,6 +497,57 @@ List<String> _generateReasons(
     if (quote.mainNetFlow > 0 && quote.mainNetFlowRate > 3) reasons.add('主力资金净流入${quote.mainNetFlowRate.toStringAsFixed(1)}%');
     if (quote.mainNetFlow < 0 && quote.mainNetFlowRate < -3) reasons.add('主力资金净流出${quote.mainNetFlowRate.abs().toStringAsFixed(1)}%');
     if (quote.turnover > 10) reasons.add('换手率${quote.turnover.toStringAsFixed(1)}%，交投过热');
+  }
+
+  // --- 增强理由：市场结构上下文 ---
+  if (marketStructure != null) {
+    final conf = (marketStructure.confidence * 100).toStringAsFixed(0);
+    switch (marketStructure.structure) {
+      case MarketStructure.bullTrend:
+        reasons.add('当前处于牛市结构(置信度$conf%)，顺势做多');
+        break;
+      case MarketStructure.bearTrend:
+        reasons.add('当前处于熊市结构(置信度$conf%)，以防御策略为主，严格控制仓位');
+        break;
+      case MarketStructure.consolidation:
+        reasons.add('当前震荡盘整，适合低买高卖波段操作');
+        break;
+      case MarketStructure.accumulation:
+        reasons.add('当前处于吸筹结构，底部区域逢低布局');
+        break;
+      case MarketStructure.distribution:
+        reasons.add('当前处于派发结构，防范高位回落风险');
+    }
+  }
+
+  // --- 增强理由：策略指引 ---
+  if (activeStrategies != null) {
+    final active = activeStrategies.where((s) => s.isActive).toList();
+    final incompatible = activeStrategies.where((s) => !s.isActive).toList();
+    if (active.isNotEmpty) {
+      final strongest = active.reduce((a, b) => a.signalStrength > b.signalStrength ? a : b);
+      reasons.add('适用${active.length}/${activeStrategies.length}条策略(${incompatible.length}条被市场结构禁用)，最强: ${strongest.name}');
+    }
+  }
+
+  // --- 增强理由：回测表现 ---
+  if (backtestResults != null && backtestResults.isNotEmpty) {
+    final totalPf = backtestResults.values.fold<double>(0, (sum, r) => sum + r.profitFactor);
+    final avgPf = totalPf / backtestResults.length;
+    if (avgPf > 1.3) {
+      reasons.add('历史回测策略组合盈亏比${avgPf.toStringAsFixed(2)}，策略集合表现较好');
+    } else if (avgPf < 1.0) {
+      reasons.add('历史回测策略组合盈亏比${avgPf.toStringAsFixed(2)}，过往表现一般，需谨慎');
+    }
+  }
+
+  // --- 增强理由：置信度提示 ---
+  if (totalScore != null && totalScore >= 6) {
+    if (confidenceScore > 0.8) {
+      reasons.add('多维度确认信号可靠性较高(置信度${(confidenceScore * 100).toStringAsFixed(0)}%)');
+    } else if (confidenceScore < 0.5) {
+      reasons.add('综合置信度偏低(${(confidenceScore * 100).toStringAsFixed(0)}%)，建议轻仓或观望');
+    }
   }
 
   return reasons;

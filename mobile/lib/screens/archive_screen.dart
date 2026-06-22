@@ -26,6 +26,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   String _sortBy = 'time'; // 'time', 'score', 'change'
   bool _sortAscending = false;
   String _filterType = '全部'; // '全部', '买入', '卖出', '观望'
+  String _filterReliability = '全部'; // '全部', '合理', '偏差'
 
   @override
   void initState() {
@@ -61,6 +62,24 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       items = items.where((r) => r.recommendation.contains('卖出')).toList();
     } else if (_filterType == '观望') {
       items = items.where((r) => r.recommendation.contains('观望')).toList();
+    }
+
+    // 可靠性筛选
+    if (_filterReliability == '合理' || _filterReliability == '偏差') {
+      items = items.where((r) {
+        final currentQuote = _currentQuotes[r.code];
+        final currentPrice = currentQuote?.price ?? 0;
+        if (currentPrice <= 0) return false;
+        final priceChange = currentPrice - r.price;
+        final priceChangePct = r.price > 0 ? (priceChange / r.price * 100) : 0.0;
+        final wasBuy = r.recommendation.contains('买入');
+        final wasSell = r.recommendation.contains('卖出');
+        final wasNeutral = r.recommendation.contains('观望');
+        final isDeviation = (wasBuy && priceChangePct < -2) ||
+            (wasSell && priceChangePct > 2) ||
+            (wasNeutral && priceChangePct.abs() > 8);
+        return _filterReliability == '偏差' ? isDeviation : !isDeviation;
+      }).toList();
     }
 
     // 排序
@@ -285,10 +304,12 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       );
     }
 
-    // 统计合理/偏差条数
+    final filteredArchives = _getFilteredAndSortedArchives();
+
+    // 统计合理/偏差条数（基于筛选后的结果）
     int reasonableCount = 0;
     int deviationCount = 0;
-    for (final record in _archives) {
+    for (final record in filteredArchives) {
       final currentQuote = _currentQuotes[record.code];
       final currentPrice = currentQuote?.price ?? 0;
       if (currentPrice > 0) {
@@ -306,7 +327,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     }
     final total = reasonableCount + deviationCount;
     final winRate = total > 0 ? (reasonableCount / total * 100) : 0.0;
-    final filteredArchives = _getFilteredAndSortedArchives();
+    final isFiltered = _filterReliability != '全部' || _filterType != '全部';
 
     return RefreshIndicator(
       onRefresh: _loadArchives,
@@ -328,7 +349,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('推荐胜率', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                        Text(isFiltered ? '筛选胜率' : '推荐胜率', style: TextStyle(color: isFiltered ? const Color(0xFF58A6FF) : Colors.white54, fontSize: 12)),
                         const SizedBox(height: 4),
                         Text(
                           '${winRate.toStringAsFixed(1)}%',
@@ -397,42 +418,17 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
               margin: const EdgeInsets.fromLTRB(8, 4, 8, 4),
               child: Row(
                 children: [
-                  // 筛选 Chips
-                  Expanded(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: ['全部', '买入', '卖出', '观望'].map((f) {
-                          final isSelected = _filterType == f;
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: GestureDetector(
-                              onTap: () => setState(() => _filterType = f),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: isSelected ? const Color(0xFF58A6FF).withOpacity(0.15) : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                    color: isSelected ? const Color(0xFF58A6FF) : const Color(0xFF30363D),
-                                  ),
-                                ),
-                                child: Text(
-                                  f,
-                                  style: TextStyle(
-                                    color: isSelected ? const Color(0xFF58A6FF) : const Color(0xFF8B949E),
-                                    fontSize: 12,
-                                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
+                  // 推荐类型下拉框
+                  _buildFilterDropdown(
+                    value: _filterType,
+                    items: const ['全部', '买入', '卖出', '观望'],
+                    label: '类型',
+                    onChanged: (v) => setState(() => _filterType = v),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
+                  // 状态下拉框
+                  _buildReliabilityDropdown(),
+                  const Spacer(),
                   // 排序下拉框
                   DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
@@ -441,7 +437,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                       iconEnabledColor: const Color(0xFF8B949E),
                       dropdownColor: const Color(0xFF21262D),
                       style: const TextStyle(color: Color(0xFFF0F6FC), fontSize: 12),
-                      items: [
+                      items: const [
                         DropdownMenuItem(value: 'time', child: Text('时间')),
                         DropdownMenuItem(value: 'score', child: Text('评分')),
                         DropdownMenuItem(value: 'change', child: Text('涨幅')),
@@ -621,6 +617,98 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         ),
       ],
     ),
+    );
+  }
+
+  Widget _buildFilterDropdown({
+    required String value,
+    required List<String> items,
+    required String label,
+    required ValueChanged<String> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFF30363D)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          isDense: true,
+          iconEnabledColor: const Color(0xFF8B949E),
+          dropdownColor: const Color(0xFF21262D),
+          style: const TextStyle(color: Color(0xFFF0F6FC), fontSize: 12),
+          items: items.map((item) => DropdownMenuItem(
+            value: item,
+            child: Text(item == '全部' && label == '类型' ? label : item,
+              style: const TextStyle(fontSize: 12)),
+          )).toList(),
+          onChanged: (v) { if (v != null) onChanged(v); },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReliabilityDropdown() {
+    final options = ['全部', '合理', '偏差'];
+    final chipColor = _filterReliability == '合理' ? Colors.orange
+        : _filterReliability == '偏差' ? const Color(0xFF26a69a)
+        : const Color(0xFF8B949E);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: _filterReliability == '全部' ? const Color(0xFF30363D)
+              : chipColor.withOpacity(0.5),
+        ),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _filterReliability,
+          isDense: true,
+          iconEnabledColor: const Color(0xFF8B949E),
+          dropdownColor: const Color(0xFF21262D),
+          style: TextStyle(color: chipColor, fontSize: 12),
+          selectedItemBuilder: (context) => options.map((f) => Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (f != '全部')
+                Container(
+                  width: 6, height: 6,
+                  margin: const EdgeInsets.only(right: 4),
+                  decoration: BoxDecoration(
+                    color: f == '合理' ? Colors.orange : const Color(0xFF26a69a),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              Text(f == '全部' ? '状态' : f,
+                style: TextStyle(color: chipColor, fontSize: 12)),
+            ],
+          )).toList(),
+          items: options.map((f) {
+            final color = f == '合理' ? Colors.orange : f == '偏差' ? const Color(0xFF26a69a) : Colors.white70;
+            return DropdownMenuItem(
+              value: f,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (f != '全部')
+                    Container(
+                      width: 6, height: 6,
+                      margin: const EdgeInsets.only(right: 6),
+                      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                    ),
+                  Text(f == '全部' ? '全部' : f,
+                    style: TextStyle(color: color, fontSize: 12)),
+                ],
+              ),
+            );
+          }).toList(),
+          onChanged: (v) { if (v != null) setState(() => _filterReliability = v); },
+        ),
+      ),
     );
   }
 

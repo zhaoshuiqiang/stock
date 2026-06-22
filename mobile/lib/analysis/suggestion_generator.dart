@@ -1,7 +1,25 @@
 import '../models/stock_models.dart';
 import 'position_manager.dart';
+import 'market_structure_analyzer.dart';
 
 class SuggestionGenerator {
+  /// 分层仓位系数：基于ATR波动率、置信度、市场结构动态计算
+  static double _tieredPosition(
+    double suggestedPosition,
+    double tierMultiplier,
+    double confidenceScore,
+    MarketStructureResult? marketStructure,
+  ) {
+    var result = suggestedPosition * tierMultiplier;
+    // 置信度调节：置信度越高仓位越接近满额，最低折半
+    result *= confidenceScore.clamp(0.5, 1.0);
+    // 熊市结构额外减半
+    if (marketStructure != null && marketStructure.structure == MarketStructure.bearTrend) {
+      result *= 0.5;
+    }
+    return (result * 100).clamp(3.0, 40.0);
+  }
+
   static List<String> generate({
     required String recommendation,
     required List<HistoryKline> data,
@@ -10,6 +28,8 @@ class SuggestionGenerator {
     required List<SignalItem> buySignals,
     required List<SignalItem> sellSignals,
     required int totalScore,
+    double confidenceScore = 0.5,
+    MarketStructureResult? marketStructure,
   }) {
     final suggestions = <String>[];
     double recentLow = last.low;
@@ -19,25 +39,32 @@ class SuggestionGenerator {
     }
     final stopLossRef = last.ma20 > 0 ? last.ma20 : recentLow;
 
+    // 动态仓位：基于ATR波动率计算基础仓位，然后按推荐等级分层
+    final suggestedPosition = PositionManager.calculatePosition(last);
+
     if (recommendation == '强烈买入') {
+      final tierPct = _tieredPosition(suggestedPosition, 0.45, confidenceScore, marketStructure);
       suggestions.add('多项技术指标强烈共振偏多，但需结合基本面和大盘环境综合判断');
-      suggestions.add('可考虑分批建仓，首批仓位控制在30%以内，确认趋势后逐步加仓');
+      suggestions.add('可考虑分批建仓，首批仓位控制在${tierPct.toStringAsFixed(0)}%以内，确认趋势后逐步加仓');
       suggestions.add('建议止损位设在${stopLossRef.toStringAsFixed(2)}附近（MA20/近期低点下方）');
     } else if (recommendation == '买入') {
       if (buySignals.length >= 3 && totalScore >= 8) {
+        final tierPct = _tieredPosition(suggestedPosition, 0.30, confidenceScore, marketStructure);
         suggestions.add('多项技术指标共振偏多，但需结合基本面和大盘环境综合判断');
-        suggestions.add('可考虑分批建仓，首批仓位控制在20%以内，确认趋势后逐步加仓');
+        suggestions.add('可考虑分批建仓，首批仓位控制在${tierPct.toStringAsFixed(0)}%以内，确认趋势后逐步加仓');
       } else {
+        final tierPct = _tieredPosition(suggestedPosition, 0.15, confidenceScore, marketStructure);
         suggestions.add('技术面偏多，可轻仓关注，但不宜追高');
-        suggestions.add('建议先试探性建仓10%，确认支撑有效后再考虑加仓');
+        suggestions.add('建议先试探性建仓${tierPct.toStringAsFixed(0)}%，确认支撑有效后再考虑加仓');
       }
       suggestions.add('建议止损位设在${stopLossRef.toStringAsFixed(2)}附近（MA20/近期低点下方）');
       if (quote != null && quote.pe > 0 && quote.pe < 15) {
         suggestions.add('动态市盈率${quote.pe.toStringAsFixed(1)}倍，估值较低，具有一定安全边际');
       }
     } else if (recommendation == '谨慎买入') {
+      final tierPct = _tieredPosition(suggestedPosition, 0.15, confidenceScore, marketStructure);
       suggestions.add('技术面偏多但不确定性较大，建议谨慎操作');
-      suggestions.add('可试探性轻仓买入，仓位控制在10%以内，确认趋势后再加仓');
+      suggestions.add('可试探性轻仓买入，仓位控制在${tierPct.toStringAsFixed(0)}%以内，确认趋势后再加仓');
       suggestions.add('建议止损位设在${stopLossRef.toStringAsFixed(2)}附近（MA20/近期低点下方）');
     } else if (recommendation == '偏多观望') {
       suggestions.add('技术面略偏多，但信号不够强烈，建议轻仓观察');
@@ -77,11 +104,15 @@ class SuggestionGenerator {
       }
     }
 
-    // 仓位建议
+    // 仓位建议（基于ATR波动率）
     try {
-      final positionManager = PositionManager.calculatePosition(last);
-      suggestions.add(PositionManager.getPositionAdvice(positionManager));
+      suggestions.add(PositionManager.getPositionAdvice(suggestedPosition));
     } catch (_) {}
+
+    // 熊市结构额外警告
+    if (marketStructure != null && marketStructure.structure == MarketStructure.bearTrend) {
+      suggestions.add('熊市结构确认，建议减半仓位操作，严格止损');
+    }
 
     return suggestions;
   }
