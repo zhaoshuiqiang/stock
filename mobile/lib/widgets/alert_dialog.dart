@@ -34,8 +34,10 @@ const _kPresets = [
 
 class AlertCreateDialog extends StatefulWidget {
   final AlertRule? rule;
+  final String? initialCode;
+  final String? initialName;
 
-  const AlertCreateDialog({super.key, this.rule});
+  const AlertCreateDialog({super.key, this.rule, this.initialCode, this.initialName});
 
   @override
   State<AlertCreateDialog> createState() => _AlertCreateDialogState();
@@ -63,6 +65,9 @@ class _AlertCreateDialogState extends State<AlertCreateDialog> {
       _indicatorType = widget.rule!.indicatorType.isNotEmpty
           ? widget.rule!.indicatorType
           : 'rsi';
+    } else {
+      if (widget.initialCode != null) _codeController.text = widget.initialCode!;
+      if (widget.initialName != null) _nameController.text = widget.initialName!;
     }
   }
 

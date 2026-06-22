@@ -6,6 +6,7 @@ import '../models/stock_models.dart';
 import '../storage/database_service.dart';
 import '../analysis/sector_pick_engine.dart';
 import '../widgets/stock_card.dart';
+import '../widgets/alert_dialog.dart';
 import 'quote_screen.dart';
 import 'alerts_screen.dart';
 
@@ -419,7 +420,16 @@ class WatchlistScreenState extends State<WatchlistScreen>
     try {
       final alerts = await _dbService.getAlerts();
       if (mounted) {
-        setState(() { _alertCodes = alerts.map((a) => a.code).toSet(); });
+        setState(() {
+          _alertCodes = alerts.map((a) {
+            // 标准化：去除可能的sh/sz前缀，统一为原始代码
+            var code = a.code;
+            if (code.startsWith('sh') || code.startsWith('sz')) {
+              code = code.substring(2);
+            }
+            return code;
+          }).toSet();
+        });
       }
     } catch (_) {}
   }
@@ -982,7 +992,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
             ),
             onPressed: () => _alertCodes.contains(item.code)
                 ? Navigator.push(context, MaterialPageRoute(builder: (_) => const AlertsScreen()))
-                : _addAlert(codeWithPrefix, item.name),
+                : _addAlert(item.code, item.name),
             tooltip: _alertCodes.contains(item.code) ? '查看预警' : '添加预警',
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -1029,7 +1039,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   style: TextStyle(color: _textPrimary, fontSize: 15)),
               onTap: () {
                 Navigator.pop(context);
-                _addAlert(codeWithPrefix, item.name);
+                _addAlert(item.code, item.name);
               },
             ),
             ListTile(
@@ -1375,98 +1385,19 @@ class WatchlistScreenState extends State<WatchlistScreen>
   void _addAlert(String code, String name) {
     showDialog(
       context: context,
-      builder: (context) {
-        final TextEditingController priceController = TextEditingController();
-        String conditionType = 'price_above';
-        return AlertDialog(
-          backgroundColor: _cardColor,
-          title: Text('添加预警: $name',
-              style: const TextStyle(color: _textPrimary)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<String>(
-                value: conditionType,
-                items: const [
-                  DropdownMenuItem(
-                      value: 'price_above', child: Text('价格高于')),
-                  DropdownMenuItem(
-                      value: 'price_below', child: Text('价格低于')),
-                  DropdownMenuItem(
-                      value: 'change_above', child: Text('涨幅超过')),
-                  DropdownMenuItem(
-                      value: 'change_below', child: Text('跌幅超过')),
-                ],
-                onChanged: (value) => conditionType = value!,
-                dropdownColor: _darkSurface,
-                style: const TextStyle(color: _textPrimary),
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: _darkSurface,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: _borderColor),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: _borderColor),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: priceController,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: '预警值',
-                  labelStyle: const TextStyle(color: _textSecondary),
-                  filled: true,
-                  fillColor: _darkSurface,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: _borderColor),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: _borderColor),
-                  ),
-                ),
-                style: const TextStyle(color: _textPrimary),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消',
-                  style: TextStyle(color: _textSecondary)),
-            ),
-            TextButton(
-              onPressed: () async {
-                final threshold = double.tryParse(priceController.text);
-                if (threshold != null) {
-                  await _dbService.addAlert(AlertRule(
-                    code: code,
-                    name: name,
-                    conditionType: conditionType,
-                    thresholdValue: threshold,
-                    enabled: true,
-                  ));
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('预警已添加')),
-                  );
-                  _loadAlerts();
-                }
-              },
-              child:
-                  const Text('确认', style: TextStyle(color: _accentColor)),
-            ),
-          ],
-        );
-      },
-    );
+      builder: (_) => AlertCreateDialog(initialCode: code, initialName: name),
+    ).then((result) {
+      if (result != null) {
+        _dbService.addAlert(result as AlertRule).then((_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('预警已添加')),
+            );
+            _loadAlerts();
+          }
+        });
+      }
+    });
   }
 
   void _searchAndAddStock(String keyword) async {

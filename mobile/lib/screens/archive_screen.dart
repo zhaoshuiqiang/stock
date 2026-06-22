@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../api/api_client.dart';
@@ -52,6 +53,33 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     _refreshCurrentPrices();
   }
 
+  /// 判断留档推荐是否偏差（时间自适应阈值）
+  /// 
+  /// 基准阈值 ±2%（5天），按 sqrt(天数/5) 缩放：
+  ///   1天→0.9%, 5天→2.0%, 20天→4.0%, 60天→6.9%
+  /// 观望推荐的基准阈值为 ±8%，同样按时间缩放
+  static bool _isDeviation(ArchiveRecord record, double currentPrice) {
+    if (currentPrice <= 0 || record.price <= 0) return false;
+
+    final priceChangePct = (currentPrice - record.price) / record.price * 100;
+    final daysSince = DateTime.now().difference(record.archivedAt).inDays.clamp(0, 365);
+    // 时间缩放：以5天为基准，波动率符合随机游走 √(N/5)
+    final timeScale = max(daysSince, 1) / 5.0;
+    final timeFactor = sqrt(timeScale);
+    // 基准阈值 ±2%（买入/卖出）, ±8%（观望），按时间缩放并设置上下限
+    final threshold = (2.0 * timeFactor).clamp(1.0, 12.0);
+    final neutralThreshold = (8.0 * timeFactor).clamp(4.0, 24.0);
+
+    final wasBuy = record.recommendation.contains('买入');
+    final wasSell = record.recommendation.contains('卖出');
+    final wasNeutral = record.recommendation.contains('观望');
+
+    if (wasBuy && priceChangePct < -threshold) return true;
+    if (wasSell && priceChangePct > threshold) return true;
+    if (wasNeutral && priceChangePct.abs() > neutralThreshold) return true;
+    return false;
+  }
+
   List<ArchiveRecord> _getFilteredAndSortedArchives() {
     var items = _archives.toList();
 
@@ -69,15 +97,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       items = items.where((r) {
         final currentQuote = _currentQuotes[r.code];
         final currentPrice = currentQuote?.price ?? 0;
-        if (currentPrice <= 0) return false;
-        final priceChange = currentPrice - r.price;
-        final priceChangePct = r.price > 0 ? (priceChange / r.price * 100) : 0.0;
-        final wasBuy = r.recommendation.contains('买入');
-        final wasSell = r.recommendation.contains('卖出');
-        final wasNeutral = r.recommendation.contains('观望');
-        final isDeviation = (wasBuy && priceChangePct < -2) ||
-            (wasSell && priceChangePct > 2) ||
-            (wasNeutral && priceChangePct.abs() > 8);
+        final isDeviation = _isDeviation(r, currentPrice);
         return _filterReliability == '偏差' ? isDeviation : !isDeviation;
       }).toList();
     }
@@ -161,19 +181,19 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
 
     String reliability;
     Color reliabilityColor;
-    final wasBuy = record.recommendation.contains('买入');
-    final wasSell = record.recommendation.contains('卖出');
-    final wasNeutral = record.recommendation.contains('观望');
+    final isDev = _isDeviation(record, currentPrice);
 
-    if (wasBuy && priceChangePct < -2) {
+    if (isDev) {
+      final wasBuy = record.recommendation.contains('买入');
+      final wasSell = record.recommendation.contains('卖出');
       reliability = '推荐偏差';
-      reliabilityColor = const Color(0xFF26a69a);
-    } else if (wasSell && priceChangePct > 2) {
-      reliability = '推荐偏差';
-      reliabilityColor = const Color(0xFFef5350);
-    } else if (wasNeutral && priceChangePct.abs() > 8) {
-      reliability = '推荐偏差';
-      reliabilityColor = priceChange > 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a);
+      if (wasSell) {
+        reliabilityColor = const Color(0xFFef5350);
+      } else if (wasBuy) {
+        reliabilityColor = const Color(0xFF26a69a);
+      } else {
+        reliabilityColor = priceChange > 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a);
+      }
     } else {
       reliability = '推荐合理';
       reliabilityColor = Colors.orange;
@@ -313,14 +333,11 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       final currentQuote = _currentQuotes[record.code];
       final currentPrice = currentQuote?.price ?? 0;
       if (currentPrice > 0) {
-        final priceChange = currentPrice - record.price;
-        final priceChangePct = record.price > 0 ? (priceChange / record.price * 100) : 0.0;
-        final wasBuy = record.recommendation.contains('买入');
-        final wasSell = record.recommendation.contains('卖出');
-        final wasNeutral = record.recommendation.contains('观望');
-        if ((wasBuy && priceChangePct < -2) || (wasSell && priceChangePct > 2) || (wasNeutral && priceChangePct.abs() > 8)) {
+        if (_isDeviation(record, currentPrice)) {
           deviationCount++;
-        } else if (wasBuy || wasSell || wasNeutral) {
+        } else if (record.recommendation.contains('买入') ||
+                   record.recommendation.contains('卖出') ||
+                   record.recommendation.contains('观望')) {
           reasonableCount++;
         }
       }
@@ -468,23 +485,22 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
           final currentChangePct = currentQuote?.changePct ?? 0;
           final priceChange = currentPrice > 0 ? currentPrice - record.price : 0.0;
 
-          final wasBuy = record.recommendation.contains('买入');
-          final wasSell = record.recommendation.contains('卖出');
-          final wasNeutral = record.recommendation.contains('观望');
           String reliabilityLabel = '';
           Color reliabilityColor = Colors.transparent;
           if (currentPrice > 0) {
-            final priceChangePct = record.price > 0 ? (priceChange / record.price * 100) : 0.0;
-            if (wasBuy && priceChangePct < -2) {
+            final isDev = _isDeviation(record, currentPrice);
+            if (isDev) {
               reliabilityLabel = '偏差';
-              reliabilityColor = const Color(0xFF26a69a);
-            } else if (wasSell && priceChangePct > 2) {
-              reliabilityLabel = '偏差';
-              reliabilityColor = const Color(0xFFef5350);
-            } else if (wasNeutral && priceChangePct.abs() > 8) {
-              reliabilityLabel = '偏差';
-              reliabilityColor = priceChange > 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a);
-            } else if (wasBuy || wasSell || wasNeutral) {
+              if (record.recommendation.contains('卖出')) {
+                reliabilityColor = const Color(0xFFef5350);
+              } else if (record.recommendation.contains('买入')) {
+                reliabilityColor = const Color(0xFF26a69a);
+              } else {
+                reliabilityColor = priceChange > 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a);
+              }
+            } else if (record.recommendation.contains('买入') ||
+                       record.recommendation.contains('卖出') ||
+                       record.recommendation.contains('观望')) {
               reliabilityLabel = '合理';
               reliabilityColor = Colors.orange;
             }
