@@ -1381,6 +1381,30 @@ class ApiClient {
       if (cached != null) return cached as Map<String, Map<int, double>>;
     }
 
+    // 优先尝试东方财富，失败则降级到新浪
+    final result = await _getTimeshareFromEastMoney(code);
+    if (result != null) {
+      final now = DateTime.now();
+      final isWeekday = now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
+      final totalMin = now.hour * 60 + now.minute;
+      final isTradingHour = isWeekday && totalMin >= (9 * 60 + 30) && totalMin <= 15 * 60;
+      _setCached(cacheKey, result, duration: isTradingHour ? const Duration(seconds: 5) : const Duration(seconds: 10));
+      return result;
+    }
+
+    print('getTimeshareData: 东方财富分时接口失败，降级使用新浪5分钟K线');
+    final fallback = await _getTimeshareFromSina(code);
+    if (fallback != null) {
+      _setCached(cacheKey, fallback, duration: const Duration(seconds: 60));
+      return fallback;
+    }
+
+    print('getTimeshareData: 新浪分时降级也失败，分时数据不可用');
+    return null;
+  }
+
+  /// 东方财富分时数据（主接口）
+  Future<Map<String, Map<int, double>>?> _getTimeshareFromEastMoney(String code) async {
     String secid;
     if (code.startsWith('sh')) {
       secid = '1.${code.substring(2)}';
@@ -1397,21 +1421,39 @@ class ApiClient {
       '&fields2=f51,f52,f53,f54,f55,f56,f57,f58'
       '&iscr=0'
     );
-    final response = await _httpGet(url, headers: {
-      'User-Agent': 'Mozilla/5.0',
-      'Referer': 'https://quote.eastmoney.com/',
-    });
-    if (response != null) {
-      final body = response.body;
-      final data = json.decode(body) as Map<String, dynamic>;
+
+    try {
+      final response = await _httpGet(url, headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
+        'Referer': 'https://quote.eastmoney.com/',
+      });
+      if (response == null) {
+        print('getTimeshareData: EastMoney HTTP请求返回null (重试耗尽)');
+        return null;
+      }
+
+      final data = json.decode(response.body) as Map<String, dynamic>;
       final rc = data['rc'];
-      if (rc == null || rc != 0) return null;
+      if (rc == null) {
+        print('getTimeshareData: EastMoney响应缺少rc字段, body=${response.body.substring(0, response.body.length.clamp(0, 200))}');
+        return null;
+      }
+      if (rc != 0) {
+        print('getTimeshareData: EastMoney返回错误rc=$rc');
+        return null;
+      }
 
       final trendsData = data['data'] as Map<String, dynamic>?;
-      if (trendsData == null) return null;
+      if (trendsData == null) {
+        print('getTimeshareData: EastMoney响应缺少data字段');
+        return null;
+      }
 
       final trends = trendsData['trends'] as List?;
-      if (trends == null || trends.isEmpty) return null;
+      if (trends == null || trends.isEmpty) {
+        print('getTimeshareData: EastMoney trends为空(可能非交易日)');
+        return null;
+      }
 
       final preClose = _parseDouble(trendsData['preClose']);
       final priceMap = <int, double>{};
@@ -1419,17 +1461,14 @@ class ApiClient {
       final amountMap = <int, double>{};
 
       for (final item in trends) {
-        // 格式: "2024-01-01 09:30,10.50,12345,150000.00,10.48"
-        // 字段: 时间,价格,成交量(手),成交额(元),均价
         final parts = (item as String).split(',');
         if (parts.length < 5) continue;
 
         final timeStr = parts[0];
         final price = _parseDouble(parts[1]);
-        final volume = _parseDouble(parts[2]); // 每分钟成交量(手)
-        final amount = _parseDouble(parts[3]); // 每分钟成交额(元)
+        final volume = _parseDouble(parts[2]);
+        final amount = _parseDouble(parts[3]);
 
-        // 解析时间获取分钟偏移量
         final timePart = timeStr.split(' ').last;
         final timeParts = timePart.split(':');
         if (timeParts.length < 2) continue;
@@ -1437,10 +1476,8 @@ class ApiClient {
         final minute = int.tryParse(timeParts[1]) ?? 0;
         final totalMinutes = hour * 60 + minute;
 
-        // 上午盘 9:30~11:30 -> offset 0~120
         const morningStart = 9 * 60 + 30;
         const morningEnd = 11 * 60 + 30;
-        // 下午盘 13:00~15:00 -> offset 120~240
         const afternoonStart = 13 * 60;
 
         int offset;
@@ -1457,21 +1494,119 @@ class ApiClient {
         amountMap[offset] = amount;
       }
 
-      final result = {
+      return {
         'prices': priceMap,
         'volumes': volumeMap,
         'amounts': amountMap,
         'preClose': {0: preClose},
       };
-      // 交易时段(9:30-15:00工作日)缩短缓存至5秒，其他时段10秒
-      final now = DateTime.now();
-      final isWeekday = now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
-      final totalMin = now.hour * 60 + now.minute;
-      final isTradingHour = isWeekday && totalMin >= (9 * 60 + 30) && totalMin <= 15 * 60;
-      _setCached(cacheKey, result, duration: isTradingHour ? const Duration(seconds: 5) : const Duration(seconds: 10));
-      return result;
+    } on FormatException catch (e) {
+      print('getTimeshareData: EastMoney响应JSON解析失败 $e');
+      return null;
+    } catch (e) {
+      print('getTimeshareData: EastMoney请求异常 $e');
+      return null;
     }
-    return null;
+  }
+
+  /// 新浪5分钟K线降级（盘后和主接口失败时使用）
+  Future<Map<String, Map<int, double>>?> _getTimeshareFromSina(String code) async {
+    // 新浪K线API symbol格式: sh600519 或 sz000001
+    final sinaCode = code.toLowerCase();
+
+    final url = Uri.parse(
+      'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData'
+      '?symbol=$sinaCode&scale=5&ma=no&datalen=240'
+    );
+
+    try {
+      final response = await _httpGet(url, headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
+        'Referer': 'https://finance.sina.com.cn/',
+      });
+      if (response == null) {
+        print('getTimeshareData: Sina HTTP请求返回null');
+        return null;
+      }
+
+      final body = response.body.trim();
+      if (body.isEmpty) {
+        print('getTimeshareData: Sina返回空响应');
+        return null;
+      }
+
+      // 新浪返回格式: [{day, open, high, low, close, volume}]
+      final list = json.decode(body) as List<dynamic>;
+      if (list.isEmpty) {
+        print('getTimeshareData: Sina返回空数据数组');
+        return null;
+      }
+
+      final priceMap = <int, double>{};
+      final volumeMap = <int, double>{};
+      final amountMap = <int, double>{};
+      double preClose = 0;
+
+      for (int i = 0; i < list.length; i++) {
+        final item = list[i] as Map<String, dynamic>;
+        final day = item['day'] as String? ?? '';
+        final close = _parseDouble(item['close']);
+        final volume = _parseDouble(item['volume']);
+
+        // 从5分钟K线的时间计算偏移量
+        final timePart = day.split(' ').last;
+        final timeParts = timePart.split(':');
+        if (timeParts.length < 2) continue;
+        final hour = int.tryParse(timeParts[0]) ?? 0;
+        final minute = int.tryParse(timeParts[1]) ?? 0;
+        final totalMinutes = hour * 60 + minute;
+
+        const morningStart = 9 * 60 + 30;
+        const morningEnd = 11 * 60 + 30;
+        const afternoonStart = 13 * 60;
+
+        if (totalMinutes < morningStart) {
+          // 集合竞价等盘前数据，跳过
+          // 首个有效bar的close作为preClose参考
+          continue;
+        }
+
+        int offset;
+        if (totalMinutes >= morningStart && totalMinutes <= morningEnd) {
+          offset = totalMinutes - morningStart;
+        } else if (totalMinutes >= afternoonStart) {
+          offset = 120 + (totalMinutes - afternoonStart);
+        } else {
+          continue;
+        }
+
+        priceMap[offset] = close;
+        // 新浪5min K线返回手数，转换为手
+        volumeMap[offset] = volume;
+        // 新浪没有成交额，用 close*volume 估算
+        amountMap[offset] = close * volume * 100;
+      }
+
+      // 计算昨收（取第一条有效数据的open近似昨收）
+      if (list.isNotEmpty) {
+        final firstItem = list[0] as Map<String, dynamic>;
+        final open = _parseDouble(firstItem['open']);
+        if (open > 0) preClose = open;
+      }
+
+      return {
+        'prices': priceMap,
+        'volumes': volumeMap,
+        'amounts': amountMap,
+        'preClose': {0: preClose},
+      };
+    } on FormatException catch (e) {
+      print('getTimeshareData: Sina响应JSON解析失败 $e');
+      return null;
+    } catch (e) {
+      print('getTimeshareData: Sina请求异常 $e');
+      return null;
+    }
   }
 
   void dispose() {
