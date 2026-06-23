@@ -185,9 +185,9 @@ class OpportunityEngine {
 
       _emit(OpportunityProgress(status: OpportunityStatus.analyzing, totalCount: totalCount, completedCount: 0));
 
-      // 3. 分批分析，并发10（优化：kline days=60）
+      // 3. 分批分析，并发10（与发现页一致使用120天K线）
       const batchSize = 10;
-      const klineDays = 60;
+      const klineDays = 120;
       final results = <OpportunityResult?>[];
       int completedCount = 0;
 
