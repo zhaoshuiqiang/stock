@@ -665,12 +665,21 @@ class MarketContext {
   }
 
   /// 获取市场调节系数（大盘上涨时，个股评分适当提高；大盘下跌时，评分降低）
+  /// 极端普涨日（市场宽度 > 3:1 且涨幅 > 1%）：中性化，避免追涨式推荐
   double getMarketAdjustmentFactor() {
-    if (avgChangePct > 1.5) return 1.08;      // 强势上涨：+8%
-    if (avgChangePct > 0.5) return 1.04;      // 上涨：+4%
-    if (avgChangePct > -0.5) return 1.00;     // 震荡：+0%
-    if (avgChangePct > -1.5) return 0.96;     // 下跌：-4%
-    return 0.92;                              // 强势下跌：-8%
+    final total = upCount + downCount;
+    final breadth = total > 0 ? upCount / total : 0.5;
+
+    // 极端普涨日：涨跌比 > 3:1 且平均涨幅 > 1%，中性化
+    if (breadth > 0.75 && avgChangePct > 1.0) {
+      return 1.0;
+    }
+
+    if (avgChangePct > 1.5) return 1.04;    // 强势上涨：+4%（原+8%）
+    if (avgChangePct > 0.5) return 1.02;    // 上涨：+2%（原+4%）
+    if (avgChangePct > -0.5) return 1.00;   // 震荡：0%
+    if (avgChangePct > -1.5) return 0.96;   // 下跌：-4%
+    return 0.92;                             // 强势下跌：-8%
   }
 
   Map<String, dynamic> toJson() {
