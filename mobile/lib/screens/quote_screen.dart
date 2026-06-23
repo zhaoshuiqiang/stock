@@ -486,12 +486,6 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
       if (!mounted) return;
 
-      // 判断是否在交易时段
-      final now = DateTime.now();
-      final isWeekday = now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
-      final totalMin = now.hour * 60 + now.minute;
-      final isTradingHour = isWeekday && totalMin >= (9 * 60 + 30) && totalMin <= 15 * 60;
-
       setState(() {
         _quote = quote;
         _klines = calculated;
@@ -518,8 +512,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           }
           // VWAP累计计算完成
           _timeshareLoadFailed = false;
-        } else if (isTradingHour) {
-          // 交易时段分时数据加载失败，设置降级标志
+        } else {
+          // 分时数据加载失败，设置降级标志（不限交易时段）
           _timeshareLoadFailed = true;
         }
       });
