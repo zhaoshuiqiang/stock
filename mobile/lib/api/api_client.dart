@@ -1529,14 +1529,23 @@ class ApiClient {
         return null;
       }
 
-      final body = response.body.trim();
-      if (body.isEmpty) {
-        print('getTimeshareData: Sina返回空响应');
+      final bodyStr = response.body.trim();
+      if (bodyStr.isEmpty || bodyStr == 'null') {
+        print('getTimeshareData: Sina返回空/无效响应');
+        return null;
+      }
+      if (!bodyStr.startsWith('[')) {
+        print('getTimeshareData: Sina返回非数组响应(前100字符): ${bodyStr.substring(0, bodyStr.length.clamp(0, 100))}');
         return null;
       }
 
       // 新浪返回格式: [{day, open, high, low, close, volume}]
-      final list = json.decode(body) as List<dynamic>;
+      final decoded = json.decode(bodyStr);
+      if (decoded is! List<dynamic>) {
+        print('getTimeshareData: Sina响应不是数组, type=${decoded.runtimeType}');
+        return null;
+      }
+      final list = decoded;
       if (list.isEmpty) {
         print('getTimeshareData: Sina返回空数据数组');
         return null;
