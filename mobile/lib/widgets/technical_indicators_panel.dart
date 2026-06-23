@@ -38,6 +38,9 @@ class TechnicalIndicatorsPanel extends StatelessWidget {
           _buildSectionTitle(context, '斐波那契回撤'),
           _buildFibonacciCard(fibonacci),
           const SizedBox(height: 16),
+          _buildSectionTitle(context, '技术指标数值'),
+          _buildIndicatorValuesCard(),
+          const SizedBox(height: 16),
           _buildSectionTitle(context, '技术分析建议'),
           _buildTradingAdvice(supportResistance, fibonacci),
         ],
@@ -200,7 +203,141 @@ class TechnicalIndicatorsPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildTradingAdvice(Map<String, dynamic> sr, Map<String, dynamic> fib) {
+  Widget _buildIndicatorValuesCard() {
+    if (klines.isEmpty) return _buildEmptyCard('暂无指标数据');
+    final last = klines.last;
+
+    return Card(
+      color: Colors.grey[900],
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── 均线组 ──
+            _buildIndicatorGroup('均线系统', [
+              _indicatorItem('MA5', last.ma5 > 0 ? last.ma5.toStringAsFixed(2) : '-', '5日均线'),
+              _indicatorItem('MA10', last.ma10 > 0 ? last.ma10.toStringAsFixed(2) : '-', '10日均线'),
+              _indicatorItem('MA20', last.ma20 > 0 ? last.ma20.toStringAsFixed(2) : '-', '20日均线'),
+              _indicatorItem('MA60', last.ma60 > 0 ? last.ma60.toStringAsFixed(2) : '-', '60日均线'),
+            ], _getMAInterpretation(last)),
+
+            const Divider(color: Colors.white12, height: 20),
+            // ── MACD组 ──
+            _buildIndicatorGroup('MACD', [
+              _indicatorItem('DIF', last.macdDif.toStringAsFixed(4), '快线-慢线'),
+              _indicatorItem('DEA', last.macdDea.toStringAsFixed(4), 'DIF的均线'),
+              _indicatorItem('MACD柱', last.macdHist.toStringAsFixed(4), '(DIF-DEA)×2'),
+            ], _getMACDInterpretation(last)),
+
+            const Divider(color: Colors.white12, height: 20),
+            // ── KDJ组 ──
+            _buildIndicatorGroup('KDJ', [
+              _indicatorItem('K', last.k.toStringAsFixed(2), '快速线(>80超买, <20超卖)'),
+              _indicatorItem('D', last.d.toStringAsFixed(2), '慢速线'),
+              _indicatorItem('J', last.j.toStringAsFixed(2), '敏感线(>100超买, <0超卖)'),
+            ], _getKDJInterpretation(last)),
+
+            const Divider(color: Colors.white12, height: 20),
+            // ── RSI组 ──
+            _buildIndicatorGroup('RSI (相对强弱)', [
+              _indicatorItem('RSI6', last.rsi6 > 0 ? last.rsi6.toStringAsFixed(2) : '-', '6日RSI'),
+              _indicatorItem('RSI12', last.rsi12 > 0 ? last.rsi12.toStringAsFixed(2) : '-', '12日RSI'),
+            ], _getRSIInterpretation(last)),
+
+            const Divider(color: Colors.white12, height: 20),
+            // ── 综合指标 ──
+            _buildIndicatorGroup('其他综合指标', [
+              _indicatorItem('BOLL上轨', last.bollUpper > 0 ? last.bollUpper.toStringAsFixed(2) : '-', '压力参考'),
+              _indicatorItem('BOLL中轨', last.bollMid > 0 ? last.bollMid.toStringAsFixed(2) : '-', '20日均线'),
+              _indicatorItem('BOLL下轨', last.bollLower > 0 ? last.bollLower.toStringAsFixed(2) : '-', '支撑参考'),
+              _indicatorItem('ATR14', last.atr14 > 0 ? last.atr14.toStringAsFixed(2) : '-' ,
+                  '平均真实波幅(${last.atr14 > 0 && last.close > 0 ? (last.atr14 / last.close * 100).toStringAsFixed(1) : '-'}%)'),
+              _indicatorItem('ADX14', last.adx14 > 0 ? last.adx14.toStringAsFixed(1) : '-',
+                  '趋势强度(${last.adx14 > 25 ? '强趋势' : last.adx14 > 20 ? '趋势中' : '盘整'})'),
+              _indicatorItem('BIAS6', last.bias6.toStringAsFixed(2),
+                  '乖离率(${last.bias6 > 3 ? '超买' : last.bias6 < -3 ? '超卖' : '正常'})'),
+              _indicatorItem('WR14', last.wr14 > 0 ? last.wr14.toStringAsFixed(1) : '-',
+                  '威廉指标(${last.wr14 < 20 ? '超买' : last.wr14 > 80 ? '超卖' : '正常'})'),
+              _indicatorItem('CCI14', last.cci14 > 0 ? last.cci14.toStringAsFixed(1) : '-',
+                  '(${last.cci14 > 100 ? '超买区' : last.cci14 < -100 ? '超卖区' : '正常区'})'),
+            ]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIndicatorGroup(String title, List<Widget> items, [String? interpretation]) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+        const SizedBox(height: 8),
+        ...items,
+        if (interpretation != null) ...[
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(4)),
+            child: Text(interpretation, style: const TextStyle(color: Colors.amber, fontSize: 11)),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _indicatorItem(String name, String value, String hint) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: Row(
+        children: [
+          SizedBox(width: 60, child: Text(name, style: const TextStyle(color: Colors.grey, fontSize: 12))),
+          SizedBox(width: 70, child: Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12))),
+          Expanded(child: Text(hint, style: const TextStyle(color: Colors.white38, fontSize: 11), overflow: TextOverflow.ellipsis)),
+        ],
+      ),
+    );
+  }
+
+  String _getMAInterpretation(HistoryKline last) {
+    if (last.ma5 <= 0) return '';
+    if (last.ma5 > last.ma10 && last.ma10 > last.ma20) {
+      final tail = last.ma60 > 0 && last.ma20 > last.ma60 ? '>MA60，多头强势' : '';
+      return 'MA5>MA10>MA20$tail，上升趋势';
+    }
+    if (last.ma5 < last.ma10 && last.ma10 < last.ma20) {
+      return 'MA5<MA10<MA20，下降趋势';
+    }
+    if (last.close > last.ma20) return '价格在MA20上方，偏多';
+    return '价格在MA20下方，偏空';
+  }
+
+  String _getMACDInterpretation(HistoryKline last) {
+    if (last.macdDif > last.macdDea && last.macdDif > 0) return '零轴上方金叉，多头强势';
+    if (last.macdDif > last.macdDea) return '金叉区域，短期偏多';
+    if (last.macdDif < last.macdDea && last.macdDif < 0) return '零轴下方死叉，空头强势';
+    if (last.macdDif < last.macdDea) return '死叉区域，短期偏空';
+    return '';
+  }
+
+  String _getKDJInterpretation(HistoryKline last) {
+    final parts = <String>[];
+    if (last.k > last.d) parts.add('K>D，多头');
+    else parts.add('K<D，空头');
+    if (last.j > 100) parts.add('J超买');
+    else if (last.j < 0) parts.add('J超卖');
+    if (last.k > 80) parts.add('K超买');
+    else if (last.k < 20) parts.add('K超卖');
+    return parts.isNotEmpty ? parts.join('，') : '';
+  }
+
+  String _getRSIInterpretation(HistoryKline last) {
+    if (last.rsi6 > 70) return 'RSI6>70，超买区域，注意回调风险';
+    if (last.rsi6 < 30) return 'RSI6<30，超卖区域，注意反弹机会';
+    if (last.rsi6 > 50) return 'RSI6>50，中性偏强';
+    return 'RSI6<50，中性偏弱';
+  }(Map<String, dynamic> sr, Map<String, dynamic> fib) {
     final advices = <String>[];
     
     // 基于支撑压力位的建议

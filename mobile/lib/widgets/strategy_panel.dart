@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/stock_models.dart';
 import '../analysis/strategy_engine.dart';
 import '../analysis/market_structure_analyzer.dart';
+import '../screens/strategy_reference_screen.dart';
 
 class StrategyPanel extends StatelessWidget {
   final List<HistoryKline> klines;
@@ -40,7 +41,17 @@ class StrategyPanel extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('战法共振', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('战法共振', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 4),
+                  GestureDetector(
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StrategyReferenceScreen())),
+                    child: const Icon(Icons.help_outline, color: Colors.white38, size: 16),
+                  ),
+                ],
+              ),
               Row(
                 children: [
                   Text('$buyCount看多', style: const TextStyle(color: Color(0xFFef5350), fontSize: 13, fontWeight: FontWeight.bold)),
