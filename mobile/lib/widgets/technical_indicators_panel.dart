@@ -257,10 +257,10 @@ class TechnicalIndicatorsPanel extends StatelessWidget {
                   '趋势强度(${last.adx14 > 25 ? '强趋势' : last.adx14 > 20 ? '趋势中' : '盘整'})'),
               _indicatorItem('BIAS6', last.bias6.toStringAsFixed(2),
                   '乖离率(${last.bias6 > 3 ? '超买' : last.bias6 < -3 ? '超卖' : '正常'})'),
-              _indicatorItem('WR14', last.wr14 > 0 ? last.wr14.toStringAsFixed(1) : '-',
-                  '威廉指标(${last.wr14 < 20 ? '超买' : last.wr14 > 80 ? '超卖' : '正常'})'),
-              _indicatorItem('CCI14', last.cci14 > 0 ? last.cci14.toStringAsFixed(1) : '-',
-                  '(${last.cci14 > 100 ? '超买区' : last.cci14 < -100 ? '超卖区' : '正常区'})'),
+              _indicatorItem('WR14', (last.wr14 ?? 0) > 0 ? last.wr14!.toStringAsFixed(1) : '-',
+                  '威廉指标(${(last.wr14 ?? 50) < 20 ? '超买' : (last.wr14 ?? 50) > 80 ? '超卖' : '正常'})'),
+              _indicatorItem('CCI14', (last.cci14 ?? 0) > 0 ? last.cci14!.toStringAsFixed(1) : '-',
+                  '(${(last.cci14 ?? 0) > 100 ? '超买区' : (last.cci14 ?? 0) < -100 ? '超卖区' : '正常区'})'),
             ]),
           ],
         ),
@@ -337,7 +337,9 @@ class TechnicalIndicatorsPanel extends StatelessWidget {
     if (last.rsi6 < 30) return 'RSI6<30，超卖区域，注意反弹机会';
     if (last.rsi6 > 50) return 'RSI6>50，中性偏强';
     return 'RSI6<50，中性偏弱';
-  }(Map<String, dynamic> sr, Map<String, dynamic> fib) {
+  }
+
+  Widget _buildTradingAdvice(Map<String, dynamic> sr, Map<String, dynamic> fib) {
     final advices = <String>[];
     
     // 基于支撑压力位的建议
