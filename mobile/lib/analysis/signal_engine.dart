@@ -290,7 +290,7 @@ AnalysisResult generateAnalysis(
     newsList: newsList,
     marketStructure: marketStructure,
     currentChangePct: quote?.changePct,
-    bias6Abs: last.bias6.abs(),
+    bias6: last.bias6,
   );
 
   final totalScore = compResult.totalScore;

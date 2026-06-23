@@ -665,13 +665,13 @@ class MarketContext {
   }
 
   /// 获取市场调节系数（大盘上涨时，个股评分适当提高；大盘下跌时，评分降低）
-  /// 极端普涨日（市场宽度 > 3:1 且涨幅 > 1%）：中性化，避免追涨式推荐
+  /// 极端普涨日（市场宽度 >= 3:1 且涨幅 > 1%）：中性化，避免追涨式推荐
   double getMarketAdjustmentFactor() {
     final total = upCount + downCount;
     final breadth = total > 0 ? upCount / total : 0.5;
 
-    // 极端普涨日：涨跌比 > 3:1 且平均涨幅 > 1%，中性化
-    if (breadth > 0.75 && avgChangePct > 1.0) {
+    // 极端普涨日：涨跌比 >= 3:1 且平均涨幅 > 1%，中性化
+    if (breadth >= 0.75 && avgChangePct > 1.0) {
       return 1.0;
     }
 

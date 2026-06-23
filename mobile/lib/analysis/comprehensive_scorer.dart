@@ -26,7 +26,7 @@ class ComprehensiveScorer {
     required QuoteData? quote, required MarketContext? marketContext, required List<dynamic>? newsList,
     MarketStructureResult? marketStructure,
     double? currentChangePct,
-    double? bias6Abs,
+    double? bias6,
   }) {
     FundamentalScore? fundamentalScore;
     double fundamentalScoreValue = 5.0;
@@ -73,12 +73,14 @@ class ComprehensiveScorer {
     }
 
     // 乖离率惩罚：价格偏离均线越远，均值回归风险越大
+    // 非对称处理：正乖离(超买)→严格惩罚，负乖离(超卖)→温和惩罚(反弹机会)
     double biasPenalty = 1.0;
-    final bias = bias6Abs;
-    if (bias != null) {
-      if (bias > 8) biasPenalty = 0.88;
-      else if (bias > 5) biasPenalty = 0.93;
-      else if (bias > 3) biasPenalty = 0.97;
+    if (bias6 != null) {
+      final biasAbs = bias6.abs();
+      final isOversold = bias6 < 0; // 负乖离=价格在均线下方=超卖
+      if (biasAbs > 8) biasPenalty = isOversold ? 0.94 : 0.88;
+      else if (biasAbs > 5) biasPenalty = isOversold ? 0.97 : 0.93;
+      else if (biasAbs > 3) biasPenalty = isOversold ? 0.99 : 0.97;
     }
 
     final adjustedScore = (rawScore * combinedAdjustment * chasePenalty * biasPenalty).clamp(0.0, 10.0);
