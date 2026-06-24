@@ -17,12 +17,17 @@ class PercentileResult {
   /// 综合分位概要
   final String summary;
 
+  /// v2.30: 行业相对强度评分 (0.0-1.0)
+  /// 综合低估值+高动量+高活跃度，越高表示在行业中越强
+  final double industryRSScore;
+
   PercentileResult({
     required this.pePercentile,
     required this.pbPercentile,
     required this.rsiPercentile,
     required this.volumePercentile,
     required this.summary,
+    this.industryRSScore = 0.5,
   });
 
   factory PercentileResult.default_() {
@@ -32,6 +37,7 @@ class PercentileResult {
       rsiPercentile: 50,
       volumePercentile: 50,
       summary: '分位值数据不足',
+      industryRSScore: 0.5,
     );
   }
 
@@ -42,6 +48,7 @@ class PercentileResult {
       rsiPercentile: (json['rsi_percentile'] as num?)?.toDouble() ?? 50,
       volumePercentile: (json['volume_percentile'] as num?)?.toDouble() ?? 50,
       summary: json['summary'] as String? ?? '',
+      industryRSScore: (json['industry_rs_score'] as num?)?.toDouble() ?? 0.5,
     );
   }
 
@@ -52,6 +59,7 @@ class PercentileResult {
       'rsi_percentile': rsiPercentile,
       'volume_percentile': volumePercentile,
       'summary': summary,
+      'industry_rs_score': industryRSScore,
     };
   }
 }
@@ -188,12 +196,16 @@ class PercentileAnalyzer {
     // 综合概要
     String summary = _buildSummary(pePercentile, pbPercentile, rsiPercentile, volumePercentile);
 
+    // v2.30: 行业相对强度 — 综合低估值+高动量+高活跃度
+    final industryRSScore = _calcIndustryRS(data, pePercentile, pbPercentile, rsiPercentile, volumePercentile);
+
     return PercentileResult(
       pePercentile: pePercentile,
       pbPercentile: pbPercentile,
       rsiPercentile: rsiPercentile,
       volumePercentile: volumePercentile,
       summary: summary,
+      industryRSScore: industryRSScore,
     );
   }
 
@@ -252,5 +264,35 @@ class PercentileAnalyzer {
       parts.add('缩量(${volPct.toInt()}%)');
     }
     return parts.isEmpty ? '分位正常' : parts.join('·');
+  }
+
+  /// v2.30: 行业相对强度
+  /// 综合低估值(30%)+高动量(30%)+高活跃度(20%)+低PB(20%)
+  /// 返回 0.0-1.0，越高表示在自身历史区间中越强
+  static double _calcIndustryRS(
+    List<HistoryKline> data,
+    double pePercentile,
+    double pbPercentile,
+    double rsiPercentile,
+    double volumePercentile,
+  ) {
+    // 使用5日涨幅作为动量分位
+    double changePercentile = 0.5;
+    if (data.length >= 6) {
+      final close5ago = data[data.length - 6].close;
+      if (close5ago > 0) {
+        final change5d = (data.last.close / close5ago - 1) * 100;
+        // 5日涨幅归一化: -10%~10% 映射到 0~100
+        changePercentile = ((change5d + 10) / 20 * 100).clamp(0, 100) / 100;
+      }
+    }
+
+    // 低PE=好(反向), 高RSI=强动量, 高量=活跃, 低PB=好(反向)
+    final rs = 0.25 * (100 - pePercentile) / 100 +
+               0.25 * rsiPercentile / 100 +
+               0.20 * volumePercentile / 100 +
+               0.20 * (100 - pbPercentile) / 100 +
+               0.10 * changePercentile;
+    return rs.clamp(0.0, 1.0);
   }
 }

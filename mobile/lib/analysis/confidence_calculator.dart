@@ -1,6 +1,7 @@
 import '../models/stock_models.dart';
 import 'signal_validator.dart';
 import 'market_structure_analyzer.dart';
+import 'backtest_engine.dart';
 
 /// 置信度计算结果
 class ConfidenceCalcResult {
@@ -10,7 +11,7 @@ class ConfidenceCalcResult {
   ConfidenceCalcResult({required this.confidenceScore, required this.validatedSignals});
 }
 
-/// 置信度计算器：6维置信度 + 对抗验证调整
+/// 置信度计算器：7维置信度 + 对抗验证调整
 class ConfidenceCalculator {
   /// 计算综合置信度（0.2-0.95），同时返回对抗验证结果
   static ConfidenceCalcResult calculate({
@@ -24,6 +25,7 @@ class ConfidenceCalculator {
     NewsSentiment? newsSentiment,
     MarketContext? marketContext,
     MarketStructureResult? marketStructure,
+    Map<String, BacktestResult>? backtestResults,
   }) {
     final buyCount = buySignals.length;
     final sellCount = sellSignals.length;
@@ -105,7 +107,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 6. 信号时效性(13%): 短中期信号权重高于长期（短线交易核心维度）
+    // 6. 信号时效性(12%): 短中期信号权重高于长期（短线交易核心维度）
     // P0-6修复：按推荐方向过滤，买入推荐只计近期买入信号，卖出推荐只计近期卖出信号
     double signalFreshness = 0.5;
     final isBuyRecommendation = totalScore >= 6;
@@ -116,13 +118,27 @@ class ConfidenceCalculator {
       signalFreshness = 0.3 + directionalRecentSignals / signalCount * 0.7;
     }
 
+    // 7. 回测胜率(8%): 历史回测平均胜率映射到0-1置信度
+    double backtestWinRate = 0.5;
+    if (backtestResults != null && backtestResults.isNotEmpty) {
+      final winRates = backtestResults.values
+          .where((r) => r.totalSignals > 0 && r.winRate > 0)
+          .map((r) => r.winRate)
+          .toList();
+      if (winRates.isNotEmpty) {
+        final avgWinRate = winRates.reduce((a, b) => a + b) / winRates.length;
+        backtestWinRate = (0.3 + avgWinRate * 0.7).clamp(0.0, 1.0);
+      }
+    }
+
     // P0-5修复：权重归一化至1.0（原总和仅0.80，系统性低估强信号）
-    var confidenceScore = (signalConsistency * 0.35 +
-        fundamentalSupport * 0.13 +
-        sentimentConfirm * 0.13 +
-        marketConfirm * 0.13 +
-        structureConfirm * 0.13 +
-        signalFreshness * 0.13).clamp(0.3, 0.95);
+    var confidenceScore = (signalConsistency * 0.32 +
+        fundamentalSupport * 0.12 +
+        sentimentConfirm * 0.12 +
+        marketConfirm * 0.12 +
+        structureConfirm * 0.12 +
+        signalFreshness * 0.12 +
+        backtestWinRate * 0.08).clamp(0.3, 0.95);
 
     // 信号对抗验证调整
     List<ValidatedSignal> validatedSignals = [];
@@ -159,12 +175,13 @@ class ConfidenceCalculator {
     NewsSentiment? newsSentiment,
     MarketContext? marketContext,
     MarketStructureResult? marketStructure,
+    Map<String, BacktestResult>? backtestResults,
   }) {
     final buyCount = buySignals.length;
     final sellCount = sellSignals.length;
     final signalCount = buyCount + sellCount;
 
-    // 1. 信号一致性(35%): 与calculate方法保持一致
+    // 1. 信号一致性(32%): 与calculate方法保持一致
     double signalConsistency = 0.5;
     if (signalCount > 0) {
       final dominantDirection = buyCount >= sellCount ? 'buy' : 'sell';
@@ -177,7 +194,7 @@ class ConfidenceCalculator {
           : 0.3 + (1 - concentration) * 0.4;
     }
 
-    // 2. 基本面支撑(13%): 缩减权重，短线交易PE/PB参考价值有限
+    // 2. 基本面支撑(12%): 缩减权重，短线交易PE/PB参考价值有限
     double fundamentalSupport = 0.5;
     if (fundamentalScore != null) {
       if (totalScore >= 6 && fundamentalScore.totalScore >= 6) {
@@ -191,7 +208,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 3. 情绪面确认(13%)
+    // 3. 情绪面确认(12%)
     double sentimentConfirm = 0.5;
     if (newsSentiment != null) {
       if (totalScore >= 6 && newsSentiment.score > 2) {
@@ -205,7 +222,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 4. 市场环境(13%): 大盘趋势权重，短线需顺势操作
+    // 4. 市场环境(12%): 大盘趋势权重，短线需顺势操作
     double marketConfirm = 0.5;
     if (marketContext != null) {
       if (totalScore >= 6 && marketContext.avgChangePct > 0.5) {
@@ -219,7 +236,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 5. 结构确认(breakdown)
+    // 5. 结构确认(12%)
     double structureConfirm = 0.5;
     if (marketStructure != null) {
       final isBullish = marketStructure.structure == MarketStructure.bullTrend ||
@@ -240,7 +257,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 6. 信号时效性(breakdown) — P0-6修复：按方向过滤
+    // 6. 信号时效性(12%) — P0-6修复：按方向过滤
     double signalFreshness = 0.5;
     final isBuyRec = totalScore >= 6;
     final directionalRecent = (isBuyRec ? buySignals : sellSignals)
@@ -250,6 +267,19 @@ class ConfidenceCalculator {
       signalFreshness = 0.3 + directionalRecent / signalCount * 0.7;
     }
 
+    // 7. 回测胜率(8%): 历史回测平均胜率映射到0-1置信度
+    double backtestWinRate = 0.5;
+    if (backtestResults != null && backtestResults.isNotEmpty) {
+      final winRates = backtestResults.values
+          .where((r) => r.totalSignals > 0 && r.winRate > 0)
+          .map((r) => r.winRate)
+          .toList();
+      if (winRates.isNotEmpty) {
+        final avgWinRate = winRates.reduce((a, b) => a + b) / winRates.length;
+        backtestWinRate = (0.3 + avgWinRate * 0.7).clamp(0.0, 1.0);
+      }
+    }
+
     return {
       'signal_consistency': signalConsistency,
       'fundamental_support': fundamentalSupport,
@@ -257,6 +287,7 @@ class ConfidenceCalculator {
       'market_confirm': marketConfirm,
       'structure_confirm': structureConfirm,
       'signal_freshness': signalFreshness,
+      'historical_winrate': backtestWinRate,
     };
   }
 }

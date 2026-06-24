@@ -20,6 +20,7 @@ class ComprehensiveScorer {
   static bool isSTStock(String name) => name.startsWith('ST') || name.startsWith('*ST');
 
   /// 7维度加权：技术22%+资金13%+实时12%+共振12%+情绪8%+基本面23%+结构10%
+  /// v2.30: 新增 data/industryRSScore/adxValue/isBullAlign 参数用于动量保护和行业RS
   static ComprehensiveScoreResult combine({
     required double technicalScore, required double realtimeScore, required double confluenceScore,
     double? capitalFlowScore, double? marketPositionFactor,
@@ -27,6 +28,10 @@ class ComprehensiveScorer {
     MarketStructureResult? marketStructure,
     double? currentChangePct,
     double? bias6,
+    List<HistoryKline>? data,
+    double? industryRSScore,
+    double? adxValue,
+    bool? isBullAlign,
   }) {
     FundamentalScore? fundamentalScore;
     double fundamentalScoreValue = 5.0;
@@ -55,32 +60,58 @@ class ComprehensiveScorer {
     else if (!hasSent) { techW=0.24; capW=0.14; realW=0.13; confW=0.13; fundW=0.25; structW=0.11; sentW=0; }
     else if (!hasCapital) { techW=0.25; realW=0.14; confW=0.14; sentW=0.09; fundW=0.27; structW=0.11; capW=0; }
 
-    final rawScore = (technicalScore*techW + capitalScoreValue*capW + sentimentScoreValue*sentW + realtimeScore*realW + confluenceScore*confW + fundamentalScoreValue*fundW + structureScoreValue*structW).clamp(0.0, 10.0);
+    // v2.30: 熊市基本面权重提升 — 下跌市中低估值防守价值更大
+    if (marketContext != null && marketContext.avgChangePct < -0.5 && fundW > 0) {
+      final originalFundW = fundW; // 保存原始权重用于正确比例缩放
+      fundW *= 1.3;
+      // 从其他维度按比例扣除以保持总和为 1.0
+      final scaleFactor = (1.0 - fundW) / (1.0 - originalFundW);
+      techW *= scaleFactor; capW *= scaleFactor; realW *= scaleFactor;
+      confW *= scaleFactor; sentW *= scaleFactor; structW *= scaleFactor;
+    }
+
+    var rawScore = (technicalScore*techW + capitalScoreValue*capW + sentimentScoreValue*sentW + realtimeScore*realW + confluenceScore*confW + fundamentalScoreValue*fundW + structureScoreValue*structW).clamp(0.0, 10.0);
+
+    // v2.30: 行业RS折扣 — 行业内排名靠后的"强信号"是补涨陷阱
+    if (industryRSScore != null && industryRSScore < 0.30) {
+      rawScore *= 0.90;
+    }
 
     final positionFactor = marketPositionFactor ?? 1.0;
     double marketAdjustment = 1.0;
     if (marketContext != null) marketAdjustment = marketContext.getMarketAdjustmentFactor();
     final combinedAdjustment = marketAdjustment * 0.4 + positionFactor * 0.6;
 
+    // v2.30: 动量保护因子 — ADX>30且多头排列时降低惩罚，避免压制牛股
+    final effectiveAdx = adxValue ?? (marketStructure?.adxValue ?? 25);
+    final effectiveBullAlign = isBullAlign ?? (marketStructure?.maAlignment == '多头');
+    final momentumFactor = _momentumProtectionFactor(data, effectiveAdx, effectiveBullAlign);
+
     // 追高惩罚：当日涨幅越高，后续回撤风险越大
+    // v2.30: 动量保护 + 连涨天数判断（突破首日减轻惩罚）
     double chasePenalty = 1.0;
     final cp = currentChangePct ?? quote?.changePct;
     if (cp != null && quote != null && quote.price > 0) {
-      if (cp > 8) chasePenalty = 0.82;
-      else if (cp > 5) chasePenalty = 0.88;
-      else if (cp > 3) chasePenalty = 0.94;
+      final consecutiveRise = _consecutiveRiseDays(data);
+      if (cp > 8) chasePenalty = consecutiveRise >= 3 ? 0.82 : 0.90;
+      else if (cp > 5) chasePenalty = consecutiveRise >= 3 ? 0.88 : 0.94;
+      else if (cp > 3) chasePenalty = consecutiveRise >= 2 ? 0.94 : 0.97;
       else if (cp > 1.5) chasePenalty = 0.97;
+      // v2.30: 动量保护 — 强势趋势中惩罚减半
+      chasePenalty = 1.0 - (1.0 - chasePenalty) * momentumFactor;
     }
 
     // 乖离率惩罚：价格偏离均线越远，均值回归风险越大
-    // 非对称处理：正乖离(超买)→严格惩罚，负乖离(超卖)→温和惩罚(反弹机会)
+    // v2.30: 动量保护 — 强势趋势中惩罚减半
     double biasPenalty = 1.0;
     if (bias6 != null) {
       final biasAbs = bias6.abs();
-      final isOversold = bias6 < 0; // 负乖离=价格在均线下方=超卖
+      final isOversold = bias6 < 0;
       if (biasAbs > 8) biasPenalty = isOversold ? 0.94 : 0.88;
       else if (biasAbs > 5) biasPenalty = isOversold ? 0.97 : 0.93;
       else if (biasAbs > 3) biasPenalty = isOversold ? 0.99 : 0.97;
+      // v2.30: 动量保护
+      biasPenalty = 1.0 - (1.0 - biasPenalty) * momentumFactor;
     }
 
     final adjustedScore = (rawScore * combinedAdjustment * chasePenalty * biasPenalty).clamp(0.0, 10.0);
@@ -108,7 +139,6 @@ class ComprehensiveScorer {
       else recommendation = '强烈卖出';
     }
 
-    // ST股票：仓位建议也基于clamp后的totalScore，避免"观望"+"可积极建仓"矛盾
     final double effectiveScore = isST ? totalScore.toDouble() : adjustedScore;
     double positionAdvice = effectiveScore / 10.0;
     String positionLabel;
@@ -121,5 +151,37 @@ class ComprehensiveScorer {
     return ComprehensiveScoreResult(totalScore: totalScore, recommendation: recommendation,
       fundamentalScore: fundamentalScore, newsSentiment: newsSentiment,
       positionAdvice: positionAdvice, positionLabel: positionLabel);
+  }
+
+  /// v2.30: 动量保护因子
+  /// 当 ADX > 30 且均线多头排列时，趋势动量强劲，惩罚应减半
+  static double _momentumProtectionFactor(List<HistoryKline>? data, double adx, bool isBullAlign) {
+    if (adx > 30 && isBullAlign) {
+      // 额外检查：确认是放量突破确认的趋势，而非缩量虚涨
+      if (data != null && data.length >= 3) {
+        final last = data.last;
+        final prev = data[data.length - 2];
+        final volIncreasing = last.volume > prev.volume;
+        final priceMomentum = last.close > prev.close;
+        if (volIncreasing && priceMomentum) return 0.5; // 放量上涨 = 真正动量
+        return 0.7; // 多头排列但无量，部分保护
+      }
+      return 0.5;
+    }
+    return 1.0; // 无动量保护
+  }
+
+  /// v2.30: 计算连涨天数（用于判断是否追高）
+  static int _consecutiveRiseDays(List<HistoryKline>? data) {
+    if (data == null || data.length < 2) return 0;
+    int count = 0;
+    for (int i = data.length - 1; i >= 0; i--) {
+      if (data[i].close > data[i].open && data[i].changePct > 0) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    return count;
   }
 }

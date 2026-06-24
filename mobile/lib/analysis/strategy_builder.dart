@@ -59,7 +59,9 @@ class StrategyBuilder {
     final prev = data[data.length - 2];
 
     // 1. KDJ超卖金叉（P1-11修复：原名称"超买"反了，条件是超卖区K<30）
-    if (last.k > last.d && prev.k <= prev.d && prev.k < 30) {
+    // v2.30: 增加中期趋势过滤 — 上升趋势或震荡市有效，下跌趋势中为陷阱
+    final kdjMidTrendOk = last.ma10 > last.ma20 || (last.adx14 > 0 && last.adx14 < 20);
+    if (last.k > last.d && prev.k <= prev.d && prev.k < 30 && kdjMidTrendOk) {
       strategies.add(TradingStrategy(
         id: 'kdj_short_buy',
         name: 'KDJ超卖金叉',
@@ -84,8 +86,10 @@ class StrategyBuilder {
     }
 
     // 2. MACD底背离短线
+    // v2.30: 增加+DI趋势确认（近10日至少有+DI>-DI的天数）
+    final diRising = _checkDiRecentTrend(data, 10, 0.5); // 近10日至少50%天数+DI>-DI
     final bottomDivergence = signals.any((s) => s.signal.contains('底背离'));
-    if (bottomDivergence && last.macdDif > last.macdDea) {
+    if (bottomDivergence && last.macdDif > last.macdDea && diRising) {
       strategies.add(TradingStrategy(
         id: 'macd_short_divergence',
         name: 'MACD底背离短线',
@@ -110,9 +114,11 @@ class StrategyBuilder {
     }
 
     // 3. 缩量回调
+    // v2.30-review: 确保数据充足，避免 sublist RangeError
     final isUptrend = last.ma20 > 0 && last.close > last.ma20;
-    final avgVol5 = data.sublist(data.length - 5).map((d) => d.volume).reduce((a, b) => a + b) / 5;
-    final shrinkPullback = isUptrend && avgVol5 < last.volMa5 * 0.7 && last.close < prev.close;
+    final shrinkPullback = data.length >= 5 && isUptrend &&
+        data.sublist(data.length - 5).map((d) => d.volume).reduce((a, b) => a + b) / 5 < last.volMa5 * 0.7 &&
+        last.close < prev.close;
     if (shrinkPullback) {
       strategies.add(TradingStrategy(
         id: 'shrink_pullback_short',
@@ -138,7 +144,8 @@ class StrategyBuilder {
     }
 
     // 4. RSI超卖反弹
-    if (prev.rsi6 <= 30 && last.rsi6 > 30) {
+    // v2.30: 增加短期趋势过滤 — 股价在MA20上方时超卖反弹更可靠
+    if (prev.rsi6 <= 30 && last.rsi6 > 30 && last.close > last.ma20) {
       strategies.add(TradingStrategy(
         id: 'rsi_oversold_short',
         name: 'RSI超卖反弹',
@@ -163,7 +170,9 @@ class StrategyBuilder {
     }
 
     // 5. 均线突破
-    if (last.close > last.ma5 && prev.close <= prev.ma5) {
+    // v2.30: 增加中期趋势过滤 — MA20 > MA60 时突破更可靠
+    final midTrendOk = last.ma60 <= 0 || last.ma20 > last.ma60;
+    if (last.close > last.ma5 && prev.close <= prev.ma5 && midTrendOk) {
       strategies.add(TradingStrategy(
         id: 'ma_breakout_short',
         name: '均线突破',
@@ -188,7 +197,9 @@ class StrategyBuilder {
     }
 
     // 6. 放量突破
-    final volBreakout = last.volume > last.volMa5 * 2 && last.close > last.open;
+    // v2.30: 排除ADX<20缩量区（震荡市中放量常是假突破）
+    final volBreakout = last.volume > last.volMa5 * 2 && last.close > last.open &&
+        (last.adx14 <= 0 || last.adx14 >= 20);
     if (volBreakout) {
       strategies.add(TradingStrategy(
         id: 'volume_breakout_short',
@@ -415,6 +426,69 @@ class StrategyBuilder {
       ));
     }
 
+    // v2.30: 防守/卖出策略
+
+    // 2. MA20破位防守
+    final prev = data[data.length - 2];
+    if (last.ma20 > 0 && prev.ma20 > 0 &&
+        last.close < last.ma20 && prev.close >= prev.ma20) {
+      strategies.add(TradingStrategy(
+        id: 'ma20_break_defense',
+        name: 'MA20破位防守',
+        category: '防守',
+        description: '股价跌破MA20，趋势可能转弱，建议减仓至30%防守',
+        entryRule: '收盘价跌破MA20时减仓防守',
+        exitRule: '股价重新站回MA20',
+        stopLossRule: '跌破入场价-1.5xATR',
+        isActive: true,
+        signalStrength: 70,
+        strategyType: 'short',
+        recommendedDuration: 5,
+        maxDrawdown: 0.05,
+        consecutiveLossLimit: 2,
+        minConfidence: 0.6,
+        riskRewardRatio: 1.5,
+        compatibleIndicators: ['MA'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 1.5, 'short'),
+      ));
+    }
+
+    // 3. 高位放量滞涨止盈
+    double change20d = 0;
+    if (data.length >= 21) {
+      final close20ago = data[data.length - 21].close;
+      if (close20ago > 0) change20d = (last.close / close20ago - 1) * 100;
+    }
+    final volSurge = last.volume > last.volMa5 * 2;
+    final stallRise = last.changePct < 1;
+    if (change20d > 20 && volSurge && stallRise) {
+      strategies.add(TradingStrategy(
+        id: 'high_volume_stall',
+        name: '高位放量滞涨止盈',
+        category: '防守',
+        description: '大幅上涨后放量滞涨，主力派发信号，建议止盈',
+        entryRule: '近20日涨>20%+放量但涨幅<1%',
+        exitRule: '放量跌破MA10',
+        stopLossRule: '跌破入场价-1.5xATR',
+        isActive: true,
+        signalStrength: 75,
+        strategyType: 'short',
+        recommendedDuration: 3,
+        maxDrawdown: 0.05,
+        consecutiveLossLimit: 2,
+        minConfidence: 0.65,
+        riskRewardRatio: 1.5,
+        compatibleIndicators: ['量价', 'MA'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 1.5, 'short'),
+      ));
+    }
+
+    // 4. 熊市清仓（大盘确认+个股破MA60）
+    // 注意：此策略需要大盘数据，在没有大盘数据时不触发
+    // 实际触发逻辑在 signal_engine.dart 中根据 marketContext 补充
+
     // P1-10修复：移除与短线#6重复的"放量突破"策略（原特殊版本条件、名称、类型完全相同）
 
     return strategies;
@@ -557,6 +631,60 @@ class StrategyBuilder {
         maxDrawdown: 0.05, consecutiveLossLimit: 2, minConfidence: 0.60,
         riskRewardRatio: 1.8, compatibleIndicators: ['量价', 'MACD'],
       ),
+      // ── v2.30: 防守/卖出策略（4个）──
+      TradingStrategy(
+        id: 'ma20_break_defense', name: 'MA20破位防守', category: '防守',
+        description: '股价跌破MA20，趋势可能转弱，建议减仓防守',
+        entryRule: '收盘价跌破MA20，减仓至30%', exitRule: '股价站回MA20上方',
+        stopLossRule: '跌破入场价-1.5xATR',
+        isActive: false, signalStrength: 70, type: 'sell',
+        strategyType: 'short', recommendedDuration: 5,
+        maxDrawdown: 0.05, consecutiveLossLimit: 2, minConfidence: 0.60,
+        riskRewardRatio: 1.5, compatibleIndicators: ['MA'],
+      ),
+      TradingStrategy(
+        id: 'high_volume_stall', name: '高位放量滞涨止盈', category: '防守',
+        description: '大幅上涨后放量但涨幅收窄，主力派发信号，建议止盈',
+        entryRule: '近20日涨幅>20%且当日放量(>2xMA5)但涨幅<1%', exitRule: '放量跌破MA10',
+        stopLossRule: '跌破入场价-1.5xATR',
+        isActive: false, signalStrength: 75, type: 'sell',
+        strategyType: 'short', recommendedDuration: 3,
+        maxDrawdown: 0.05, consecutiveLossLimit: 2, minConfidence: 0.65,
+        riskRewardRatio: 1.5, compatibleIndicators: ['量价', 'MA'],
+      ),
+      TradingStrategy(
+        id: 'sector_weakness_rotate', name: '板块转弱调仓', category: '防守',
+        description: '行业板块转弱，个股跟随下行风险大，建议调仓',
+        entryRule: '行业指数走弱+个股RSI<45', exitRule: '行业企稳或个股RSI回升',
+        stopLossRule: '跌破入场价-2xATR',
+        isActive: false, signalStrength: 60, type: 'sell',
+        strategyType: 'long', recommendedDuration: 10,
+        maxDrawdown: 0.08, consecutiveLossLimit: 3, minConfidence: 0.55,
+        riskRewardRatio: 1.5, compatibleIndicators: ['RSI', 'MA'],
+      ),
+      TradingStrategy(
+        id: 'bear_market_clear', name: '熊市清仓', category: '防守',
+        description: '大盘持续走弱且个股破MA60，系统风险，建议清仓观望',
+        entryRule: '大盘日均跌>2%+个股破MA60', exitRule: '大盘企稳+个股站回MA60',
+        stopLossRule: '跌破入场价-2xATR',
+        isActive: false, signalStrength: 85, type: 'sell',
+        strategyType: 'long', recommendedDuration: 20,
+        maxDrawdown: 0.10, consecutiveLossLimit: 2, minConfidence: 0.70,
+        riskRewardRatio: 2.0, compatibleIndicators: ['MA', '市场'],
+      ),
     ];
+  }
+
+  /// v2.30: 检查近期+DI趋势 — 近lookback日内至少ratio比例天数+DI>-DI
+  static bool _checkDiRecentTrend(List<HistoryKline> data, int lookback, double ratio) {
+    if (data.length < lookback + 1) return true; // 数据不足，不限制
+    int diUpDays = 0;
+    final start = data.length - lookback;
+    for (int i = start; i < data.length; i++) {
+      if (data[i].plusDi14 > 0 && data[i].plusDi14 > data[i].minusDi14) {
+        diUpDays++;
+      }
+    }
+    return diUpDays / lookback >= ratio;
   }
 }

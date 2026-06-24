@@ -207,6 +207,9 @@ class MarketStructureAnalyzer {
     String description;
     double structureScore;
 
+    // v2.30: ADX方向检测 — 上升中的ADX趋势更可靠，下降中的ADX趋势可能反转
+    final adxRising = _isAdxRising(data);
+
     if (adx > 25) {
       // 趋势明确
       if (isBullAlign) {
@@ -214,11 +217,22 @@ class MarketStructureAnalyzer {
         confidence = 0.85;
         description = '牛市结构 - 均线多头排列+ADX趋势明确';
         structureScore = 8.0;
+        // v2.30: ADX下降中趋势减弱
+        if (!adxRising) {
+          confidence -= 0.15;
+          structureScore -= 1.5;
+          description += '(ADX回落)';
+        }
       } else if (isBearAlign) {
         structure = MarketStructure.bearTrend;
         confidence = 0.85;
         description = '熊市结构 - 均线空头排列+ADX趋势明确';
         structureScore = 2.0;
+        if (!adxRising) {
+          confidence -= 0.15;
+          structureScore -= 1.0;
+          description += '(ADX回落)';
+        }
       } else {
         // MA混合但ADX高 → 可能是顶部分配或趋势末期
         structure = MarketStructure.distribution;
@@ -239,16 +253,28 @@ class MarketStructureAnalyzer {
         confidence = 0.60;
         description = '底部积累 - 价格在均线附近+成交量萎缩';
         structureScore = 7.0;
+        if (adxRising) {
+          confidence += 0.10;
+          description += '(ADX回升)';
+        }
       } else if (isBullAlign) {
         structure = MarketStructure.bullTrend;
         confidence = 0.55;
         description = '牛市结构初期 - 均线多头但ADX尚在形成';
         structureScore = 6.5;
+        if (adxRising) {
+          confidence += 0.10;
+          description += '(ADX回升)';
+        }
       } else if (isBearAlign) {
         structure = MarketStructure.bearTrend;
         confidence = 0.55;
         description = '熊市趋势初期 - 均线空头但ADX尚在形成';
         structureScore = 3.0;
+        if (adxRising) {
+          confidence += 0.10;
+          description += '(ADX回升)';
+        }
       } else {
         structure = MarketStructure.consolidation;
         confidence = 0.50;
@@ -297,5 +323,15 @@ class MarketStructureAnalyzer {
       case MarketStructure.distribution:
         return '顶部分配';
     }
+  }
+
+  /// v2.30: 检查ADX是否在上升（比较最近3根vs前3根）
+  static bool _isAdxRising(List<HistoryKline> data) {
+    if (data.length < 6) return false;
+    final recent = data.sublist(data.length - 3).map((k) => k.adx14).toList();
+    final earlier = data.sublist(data.length - 6, data.length - 3).map((k) => k.adx14).toList();
+    final recentAvg = recent.fold(0.0, (a, b) => a + b) / 3;
+    final earlierAvg = earlier.fold(0.0, (a, b) => a + b) / 3;
+    return recentAvg > earlierAvg;
   }
 }

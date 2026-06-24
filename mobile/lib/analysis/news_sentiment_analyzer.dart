@@ -31,14 +31,27 @@ class NewsSentimentAnalyzer {
     '业绩预降': 3, '业绩亏损': 3, '商誉减值': 2,
     '机构卖出': 2, '外资减持': 2,
     '停牌': 1, '被查': 3, '立案': 3,
+    // v2.30: 新增预期偏差关键词
+    '低于预期': 2, '不及预期': 2, '弱于预期': 2,
   };
 
   // 否定词列表：出现这些词且紧邻关键词时，该关键词应反转
-  // 仅使用多字否定词，避免单字词误匹配（如"不断"中的"不"）
   static const List<String> _negationWords = [
     '未及', '不及', '低于', '差于', '没有', '未能', '不再', '不会',
     '并非', '并非是', '不是', '无望', '难以',
   ];
+
+  // v2.30: 上下文修饰词 — 关键词后面的语境词可反转/弱化/强化情感
+  static const Map<String, String> _contextModifiers = {
+    '出尽': '反转',
+    '完毕': '反转',
+    '完成': '反转',
+    '结束': '反转',
+    '低于预期': '弱化',
+    '不及预期': '弱化',
+    '弱于预期': '弱化',
+    '超预期': '强化',
+  };
 
   /// 分析新闻列表的情绪
   /// newsList: 新闻列表，每条需包含 'title' 字段
@@ -86,7 +99,6 @@ class NewsSentimentAnalyzer {
       }
     }
 
-    // 归一化到 [-10, +10]，使用有效新闻数而非总新闻数
     final normalizedScore = effectiveCount > 0
         ? (totalScore / effectiveCount * 2).clamp(-10.0, 10.0)
         : 0.0;
@@ -100,7 +112,7 @@ class NewsSentimentAnalyzer {
     );
   }
 
-  /// 分析单条新闻标题
+  /// 分析单条新闻标题 (v2.30: 增加上下文语境检测)
   static _TitleAnalysisResult _analyzeTitle(String title) {
     double positiveScore = 0;
     double negativeScore = 0;
@@ -109,15 +121,24 @@ class NewsSentimentAnalyzer {
     for (final entry in _positiveKeywords.entries) {
       final idx = title.indexOf(entry.key);
       if (idx >= 0) {
-        // 检查关键词前面2个字符内是否有否定词紧邻
         final isNegated = _isNegatedBefore(title, idx);
+        final contextMod = _getContextModifier(title, idx, entry.key.length);
         if (isNegated) {
-          negativeScore += entry.value;
+          negativeScore += entry.value.toDouble();
           if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _negativeKeywords)) {
             matchedKeyword = '未${entry.key}';
           }
+        } else if (contextMod == '反转') {
+          negativeScore += entry.value.toDouble() * 0.5;
+          if (matchedKeyword.isEmpty) matchedKeyword = '${entry.key}(语境反转)';
+        } else if (contextMod == '弱化') {
+          positiveScore += entry.value * 0.5;
+          if (matchedKeyword.isEmpty) matchedKeyword = '${entry.key}(弱化)';
+        } else if (contextMod == '强化') {
+          positiveScore += entry.value * 1.5;
+          if (matchedKeyword.isEmpty) matchedKeyword = '${entry.key}(超预期)';
         } else {
-          positiveScore += entry.value;
+          positiveScore += entry.value.toDouble();
           if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _positiveKeywords)) {
             matchedKeyword = entry.key;
           }
@@ -128,15 +149,24 @@ class NewsSentimentAnalyzer {
     for (final entry in _negativeKeywords.entries) {
       final idx = title.indexOf(entry.key);
       if (idx >= 0) {
-        // 检查关键词前面2个字符内是否有否定词紧邻
         final isNegated = _isNegatedBefore(title, idx);
+        final contextMod = _getContextModifier(title, idx, entry.key.length);
         if (isNegated) {
-          positiveScore += entry.value;
+          positiveScore += entry.value.toDouble();
           if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _positiveKeywords)) {
             matchedKeyword = '未${entry.key}';
           }
+        } else if (contextMod == '反转') {
+          positiveScore += entry.value.toDouble() * 0.5;
+          if (matchedKeyword.isEmpty) matchedKeyword = '${entry.key}(语境反转)';
+        } else if (contextMod == '弱化') {
+          negativeScore += entry.value * 0.5;
+          if (matchedKeyword.isEmpty) matchedKeyword = '${entry.key}(弱化)';
+        } else if (contextMod == '强化') {
+          negativeScore += entry.value * 1.5;
+          if (matchedKeyword.isEmpty) matchedKeyword = '${entry.key}(强化)';
         } else {
-          negativeScore += entry.value;
+          negativeScore += entry.value.toDouble();
           if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _negativeKeywords)) {
             matchedKeyword = entry.key;
           }
@@ -153,9 +183,7 @@ class NewsSentimentAnalyzer {
   }
 
   /// 检查关键词位置前面是否有否定词紧邻（前4个字符范围内）
-  /// 避免全局匹配导致误反转，如"不断突破新高"中的"不"不应反转"突破"
   static bool _isNegatedBefore(String title, int keywordIndex) {
-    // 取关键词前面的文本（最多取4个字符用于匹配多字否定词）
     final prefixStart = keywordIndex > 4 ? keywordIndex - 4 : 0;
     final prefix = title.substring(prefixStart, keywordIndex);
     for (final negWord in _negationWords) {
@@ -164,6 +192,21 @@ class NewsSentimentAnalyzer {
       }
     }
     return false;
+  }
+
+  /// v2.30: 检查关键词后面的语境修饰词
+  /// 返回 null 表示无修饰，'反转'/'弱化'/'强化' 表示修饰类型
+  static String? _getContextModifier(String title, int keywordIndex, int keywordLen) {
+    final afterStart = keywordIndex + keywordLen;
+    final afterEnd = (afterStart + 6).clamp(0, title.length);
+    if (afterStart >= title.length) return null;
+    final afterText = title.substring(afterStart, afterEnd);
+    for (final entry in _contextModifiers.entries) {
+      if (afterText.startsWith(entry.key)) {
+        return entry.value;
+      }
+    }
+    return null;
   }
 }
 

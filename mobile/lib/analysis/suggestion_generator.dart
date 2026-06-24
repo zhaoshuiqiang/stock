@@ -4,6 +4,7 @@ import 'market_structure_analyzer.dart';
 
 class SuggestionGenerator {
   /// 分层仓位系数：基于ATR波动率、置信度、市场结构动态计算
+  /// v2.30: 置信度越高仓位越接近满额，最低折半 → 0.5+confidenceScore 范围[0.5,1.5]
   static double _tieredPosition(
     double suggestedPosition,
     double tierMultiplier,
@@ -11,8 +12,8 @@ class SuggestionGenerator {
     MarketStructureResult? marketStructure,
   ) {
     var result = suggestedPosition * tierMultiplier;
-    // 置信度调节：置信度越高仓位越接近满额，最低折半
-    result *= confidenceScore.clamp(0.5, 1.0);
+    // v2.30: 置信度动态调节 — 高置信度放大仓位，低置信度收缩
+    result *= (0.5 + confidenceScore).clamp(0.5, 1.5);
     // 熊市结构额外减半
     if (marketStructure != null && marketStructure.structure == MarketStructure.bearTrend) {
       result *= 0.5;

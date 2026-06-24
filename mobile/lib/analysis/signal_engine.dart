@@ -17,6 +17,8 @@ import 'sr_quality.dart';
 import 'capital_flow_analyzer.dart';
 import 'market_structure_analyzer.dart';
 import 'percentile_analyzer.dart';
+import 'recommendation_tracker.dart';
+import 'pattern_recognizer.dart';
 
 /// 向后兼容：检测特有信号（量价背离、布林收口）
 List<SignalItem> detectSignals(List<HistoryKline> data) {
@@ -254,6 +256,24 @@ AnalysisResult generateAnalysis(
   final signals = SignalLayer.detectAllSignals(data);
   final indicators = getIndicatorSummary(data);
 
+  // v2.30: 经典形态识别（双底/头肩底/三角突破）
+  if (data.length >= 30) {
+    try {
+      final patternSignals = PatternRecognizer.detectAll(data);
+      for (final p in patternSignals) {
+        signals.add(SignalItem(
+          type: p.direction == 'bullish' ? 'buy' : 'sell',
+          indicator: '形态',
+          signal: p.patternName,
+          description: p.description,
+          strength: (p.confidence * 3).round().clamp(1, 3),
+          duration: SignalDuration.mediumTerm,
+          confidence: p.confidence,
+        ));
+      }
+    } catch (_) {}
+  }
+
   // 1a. 市场结构分析 (Phase 1)
   final marketStructure = MarketStructureAnalyzer.analyze(data);
 
@@ -279,7 +299,7 @@ AnalysisResult generateAnalysis(
     capitalFlowScore = flowResult.score;
   } catch (_) {}
 
-  // 5. 综合评分
+  // 5. 综合评分 (v2.30: 传递 data/adx/isBullAlign 用于动量保护和行业RS)
   final compResult = ComprehensiveScorer.combine(
     technicalScore: techResult.totalScore,
     realtimeScore: realtimeScore,
@@ -291,6 +311,10 @@ AnalysisResult generateAnalysis(
     marketStructure: marketStructure,
     currentChangePct: quote?.changePct,
     bias6: last.bias6,
+    data: data,
+    adxValue: marketStructure.adxValue,
+    isBullAlign: marketStructure.maAlignment == '多头',
+    industryRSScore: percentile.industryRSScore,
   );
 
   final totalScore = compResult.totalScore;
@@ -332,7 +356,7 @@ AnalysisResult generateAnalysis(
     }
   } catch (e) { debugPrint('SignalEngine.structureFilter: $e'); }
 
-  // 12. 置信度计算（内部已包含对抗验证）
+  // 12. 置信度计算（内部已包含对抗验证 + v2.30: 回测胜率维度）
   final confResult = ConfidenceCalculator.calculate(
     buySignals: buySignals,
     sellSignals: sellSignals,
@@ -344,6 +368,7 @@ AnalysisResult generateAnalysis(
     newsSentiment: compResult.newsSentiment,
     marketContext: marketContext,
     marketStructure: marketStructure,
+    backtestResults: backtestResults,
   );
   // 回测反馈闭环：根据策略历史表现调整置信度
   double confidenceScore = confResult.confidenceScore;
@@ -361,16 +386,20 @@ AnalysisResult generateAnalysis(
     for (final signal in alignedSignals) {
       final strategyName = mapSignalToBacktestKey(signal.signal);
       if (strategyName != null) {
-        final adj = BacktestEngine.getStrategyConfidenceAdjustment(
+        var adj = BacktestEngine.getStrategyConfidenceAdjustment(
           strategyName, backtestResults);
+        // v2.30: KDJ金叉在高K区(k>=50)时回测样本不匹配，稀释调整
+        adj = _diluteKdjAdjustment(signal.signal, last.k, adj);
         adjustments.add(adj); // adj 高 → 提升置信度
       }
     }
     for (final signal in oppositeSignals) {
       final strategyName = mapSignalToBacktestKey(signal.signal);
       if (strategyName != null) {
-        final adj = BacktestEngine.getStrategyConfidenceAdjustment(
+        var adj = BacktestEngine.getStrategyConfidenceAdjustment(
           strategyName, backtestResults);
+        // v2.30: KDJ死叉同理稀释
+        adj = _diluteKdjAdjustment(signal.signal, last.k, adj);
         // 反向信号可靠性高 → 降低置信度
         adjustments.add(2.0 - adj); // adj 1.0 → 1.0, adj 1.3 → 0.7, adj 0.7 → 1.3
       }
@@ -438,6 +467,23 @@ AnalysisResult generateAnalysis(
   }
 
   final tradeLevels = calcTradeLevels(data);
+
+  // v2.30: 推荐追踪 — 覆盖率扩大到个股分析流（原仅在ExploreEngine调用）
+  if (totalScore >= 6 && quote != null) {
+    final trackResult = AnalysisResult(
+      quote: quote,
+      signals: signals,
+      score: totalScore,
+      recommendation: recommendation,
+      riskLevel: riskResult.riskLevel,
+      confidenceScore: confidenceScore,
+      shortTermStrategies: shortTermStrategies,
+      longTermStrategies: longTermStrategies,
+      marketStructure: marketStructure,
+    );
+    // 异步fire-and-forget，不阻塞主分析流程
+    RecommendationTracker().track(trackResult).catchError((_) {});
+  }
 
   return AnalysisResult(
     signals: signals,
@@ -553,4 +599,14 @@ List<String> _generateReasons(
   }
 
   return reasons;
+}
+
+/// v2.30: KDJ回测调整稀释
+/// KDJ金叉/死叉在高K区(k>=50)时回测样本不匹配(回测仅覆盖K<30的超卖金叉)
+/// 将调整向中性值1.0收缩50%，降低误判
+double _diluteKdjAdjustment(String signalName, double kValue, double rawAdj) {
+  if (signalName.startsWith('KDJ') && kValue >= 50) {
+    return 1.0 + (rawAdj - 1.0) * 0.5;
+  }
+  return rawAdj;
 }

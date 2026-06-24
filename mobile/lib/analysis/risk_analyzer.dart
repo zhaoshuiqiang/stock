@@ -123,13 +123,48 @@ class RiskAnalyzer {
   static bool _isST(String name) => name.startsWith('ST') || name.startsWith('*ST');
 
   static String _determineLevel(List<String> riskFactors) {
-    if (riskFactors.length >= 3 ||
-        riskFactors.any((f) => f.contains('超买') || f.contains('过热'))) {
+    // v2.30: 加权风险评级 — 趋势/量价风险权重高于超买超卖
+    double weightedSum = 0;
+    for (final factor in riskFactors) {
+      weightedSum += _getRiskWeight(factor);
+    }
+    if (weightedSum >= 3.0 || riskFactors.any((f) => f.contains('超买'))) {
       return '高';
-    } else if (riskFactors.isNotEmpty) {
+    } else if (weightedSum >= 1.5) {
       return '中等';
+    } else if (riskFactors.isNotEmpty) {
+      return '低';
     } else {
       return '低';
     }
+  }
+
+  /// v2.30: 风险因子权重
+  /// 趋势/量价风险 > 超买超卖/估值风险
+  static double _getRiskWeight(String factor) {
+    // 趋势类风险: 1.5x — 趋势破位是最致命的风险
+    if (factor.contains('下穿') || factor.contains('低于MA20') ||
+        factor.contains('趋势转弱') || factor.contains('空头')) return 1.5;
+    // 量价类风险: 1.2x — 放量下跌等有资金确认的风险
+    if (factor.contains('放量下跌') || factor.contains('OBV') ||
+        factor.contains('上涨缩量') || factor.contains('量价背离')) return 1.2;
+    // 波动率风险: 1.0x
+    if (factor.contains('振幅') || factor.contains('ATR')) return 1.0;
+    // 短期涨跌幅: 1.0x
+    if (factor.contains('近5日') || factor.contains('近20日')) return 1.0;
+    // 超买超卖类: 0.7x — 可能继续也可能回归
+    if (factor.contains('超买') || factor.contains('超卖') ||
+        factor.contains('上轨') || factor.contains('下轨') ||
+        factor.contains('J=')) return 0.7;
+    // 估值类: 0.8x
+    if (factor.contains('市盈率') || factor.contains('PE')) return 0.8;
+    // 换手率: 0.9x
+    if (factor.contains('换手率')) return 0.9;
+    // 涨跌幅/追高: 0.9x
+    if (factor.contains('涨幅') || factor.contains('跌幅')) return 0.9;
+    // ST: 1.0x
+    if (factor.contains('ST')) return 1.0;
+    // 默认: 1.0x
+    return 1.0;
   }
 }

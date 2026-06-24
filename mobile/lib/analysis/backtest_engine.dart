@@ -227,6 +227,10 @@ class BacktestResult {
   final List<double> tradeReturns;
   /// 新增：校验元数据
   final BacktestValidationMeta? validationMeta;
+  /// Sharpe 比率（年化，基于逐笔交易收益率）
+  final double? sharpeRatio;
+  /// Calmar 比率（年化收益率 / 最大回撤）
+  final double? calmarRatio;
 
   BacktestResult({
     required this.totalSignals,
@@ -240,6 +244,8 @@ class BacktestResult {
     required this.totalReturn,
     required this.tradeReturns,
     this.validationMeta,
+    this.sharpeRatio,
+    this.calmarRatio,
   });
 
   factory BacktestResult.fromJson(Map<String, dynamic> json) {
@@ -254,6 +260,8 @@ class BacktestResult {
       maxDrawdown: (json['max_drawdown'] as num?)?.toDouble() ?? 0,
       totalReturn: (json['total_return'] as num?)?.toDouble() ?? 0,
       tradeReturns: (json['trade_returns'] as List<dynamic>?)?.map((e) => (e as num).toDouble()).toList() ?? [],
+      sharpeRatio: (json['sharpe_ratio'] as num?)?.toDouble(),
+      calmarRatio: (json['calmar_ratio'] as num?)?.toDouble(),
     );
   }
 
@@ -269,6 +277,8 @@ class BacktestResult {
       'max_drawdown': maxDrawdown,
       'total_return': totalReturn,
       'trade_returns': tradeReturns,
+      if (sharpeRatio != null) 'sharpe_ratio': sharpeRatio,
+      if (calmarRatio != null) 'calmar_ratio': calmarRatio,
     };
   }
 }
@@ -458,6 +468,9 @@ class BacktestEngine {
 
     final result = _buildResult(tradeReturns, currentEquity, maxDrawdown);
 
+    // 计算风险指标（Sharpe / Calmar）
+    final (sharpe, _, calmar) = _calculateRiskMetrics(tradeReturns);
+
     // 附加校验元数据
     final warnings = <String>[];
     if (!KlineValidator.checkForwardAdjusted(calcData)) {
@@ -475,6 +488,8 @@ class BacktestEngine {
       maxDrawdown: result.maxDrawdown,
       totalReturn: result.totalReturn,
       tradeReturns: result.tradeReturns,
+      sharpeRatio: sharpe,
+      calmarRatio: calmar,
       validationMeta: BacktestValidationMeta(
         lookAheadSafe: true,
         limitSimulated: config.skipLimitTrade,
@@ -1021,7 +1036,6 @@ class BacktestEngine {
     // 单次遍历计算所有统计量（避免 4 次 where/reduce）
     int winningTrades = 0;
     int losingTrades = 0;
-    int breakevenTrades = 0; // P2-11: 分离平手交易，不计入亏损
     double grossProfit = 0;
     double grossLoss = 0;
     for (final r in tradeReturns) {
@@ -1031,11 +1045,10 @@ class BacktestEngine {
       } else if (r < 0) {
         losingTrades++;
         grossLoss += r.abs();
-      } else {
-        breakevenTrades++;
       }
     }
-    final winRate = tradeReturns.isNotEmpty ? winningTrades / tradeReturns.length : 0.0;
+    final int decisiveTrades = winningTrades + losingTrades;
+    final winRate = decisiveTrades > 0 ? winningTrades / decisiveTrades : 0.0;
     final double avgWinPct = winningTrades > 0 ? grossProfit / winningTrades * 100 : 0;
     final double avgLossPct = losingTrades > 0 ? grossLoss / losingTrades * 100 : 0;
     final double profitFactor = grossLoss > 0
@@ -1060,5 +1073,45 @@ class BacktestEngine {
   static double _safeReturnPct(double buyPrice, double sellPrice) {
     if (buyPrice <= 0) return 0.0;
     return (sellPrice - buyPrice) / buyPrice;
+  }
+
+  /// 风险指标计算：基于逐笔交易收益率计算 Sharpe / MaxDD / Calmar
+  ///
+  /// 返回 (sharpeRatio, maxDrawdown, calmarRatio)
+  /// - maxDrawdown 为负值 (e.g. -0.15 = 15% 回撤)
+  static (double?, double?, double?) _calculateRiskMetrics(List<double> returns) {
+    if (returns.length < 2) return (null, null, null);
+
+    final meanReturn = returns.reduce((a, b) => a + b) / returns.length;
+    final variance = returns
+        .map((r) => (r - meanReturn) * (r - meanReturn))
+        .reduce((a, b) => a + b) /
+        returns.length;
+    final stdDev = sqrt(variance);
+
+    if (stdDev == 0) return (null, null, null);
+
+    // Sharpe: (meanReturn - riskFree/252) / stdDev * sqrt(252)
+    const dailyRiskFree = 0.02 / 252;
+    final sharpeRatio = (meanReturn - dailyRiskFree) / stdDev * sqrt(252);
+
+    // MaxDD: iterate cumulative returns, find peak-to-trough drawdown (negative)
+    double cumulative = 1.0;
+    double peak = 1.0;
+    double maxDD = 0;
+    for (final r in returns) {
+      cumulative *= (1 + r);
+      if (cumulative > peak) peak = cumulative;
+      final dd = (cumulative - peak) / peak; // negative value
+      if (dd < maxDD) maxDD = dd;
+    }
+
+    if (maxDD == 0) return (sharpeRatio, maxDD, null);
+
+    // Calmar: abs(annualizedReturn / maxDrawdown)
+    final annualizedReturn = meanReturn * 252;
+    final calmarRatio = (annualizedReturn / maxDD).abs();
+
+    return (sharpeRatio, maxDD, calmarRatio);
   }
 }

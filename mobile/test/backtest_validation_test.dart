@@ -1240,6 +1240,7 @@ void main() {
         quote: null,
         marketContext: null,
         marketStructure: analysis.marketStructure,
+        backtestResults: analysis.backtestResults,
       ).confidenceScore;
 
       final expectedConfidence =
@@ -1499,6 +1500,7 @@ void main() {
         quote: null,
         marketContext: null,
         marketStructure: analysis.marketStructure,
+        backtestResults: analysis.backtestResults,
       ).confidenceScore;
 
       // 验证公式还原性

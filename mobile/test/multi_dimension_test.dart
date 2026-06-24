@@ -357,18 +357,19 @@ void main() {
       expect(result.score, greaterThanOrEqualTo(6));
     });
 
-    test('置信度分项明细应包含6个维度', () {
+    test('置信度分项明细应包含7个维度', () {
       final data = _makeKlines(List.generate(40, (i) => 15.0 + (i % 10) * 0.5));
       final quote = QuoteData(code: '600000', name: '测试', price: 15, pe: 20, pb: 2);
       final result = generateAnalysis(data, quote);
       expect(result.confidenceBreakdown, isNotNull);
-      expect(result.confidenceBreakdown!.length, equals(6));
+      expect(result.confidenceBreakdown!.length, equals(7));
       expect(result.confidenceBreakdown!.containsKey('signal_consistency'), isTrue);
       expect(result.confidenceBreakdown!.containsKey('fundamental_support'), isTrue);
       expect(result.confidenceBreakdown!.containsKey('sentiment_confirm'), isTrue);
       expect(result.confidenceBreakdown!.containsKey('market_confirm'), isTrue);
       expect(result.confidenceBreakdown!.containsKey('structure_confirm'), isTrue);
       expect(result.confidenceBreakdown!.containsKey('signal_freshness'), isTrue);
+      expect(result.confidenceBreakdown!.containsKey('historical_winrate'), isTrue);
     });
 
     test('confidenceScore应在[0.3, 0.95]范围内', () {
