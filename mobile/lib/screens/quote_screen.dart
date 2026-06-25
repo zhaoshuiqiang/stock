@@ -13,6 +13,7 @@ import '../widgets/technical_indicators_panel.dart';
 import '../widgets/strategy_panel.dart';
 import '../widgets/trading_dashboard.dart';
 import '../core/trading_session.dart';
+import '../analysis/intraday_level_analyzer.dart';
 
 const _kChartLeftReservedSize = 42.0;
 
@@ -51,6 +52,14 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   Map<int, double> _timeshareData = {};
   // 分时图均价数据：key=分钟偏移量, value=均价
   Map<int, double> _timeshareAvgData = {};
+  // 分时图分钟成交量：key=分钟偏移量, value=成交量(股)
+  Map<int, double> _timeshareMinuteVolumes = {};
+  // 分时低吸高抛分析结果
+  IntradayLevelResult? _intradayLevelResult;
+  int _lastAnalyzedOffset = -1;
+  // 用于计算每分钟成交量的累积基准
+  double _lastCumulativeVolume = 0;
+  double _lastCumulativeAmount = 0;
   int? _selectedKlineIndex;
   bool _showFibonacci = false;
   bool _showBoll = false;
@@ -268,8 +277,12 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                 _timeshareAvgData[offset] = preCloseVal;
               }
             }
+            // 保存分钟成交量
+            _timeshareMinuteVolumes = Map<int, double>.from(apiVolumes);
             // VWAP累计计算完成
             _timeshareLoadFailed = false;
+            _lastAnalyzedOffset = -1; // 强制重新分析
+            _analyzeIntradayLevels(); // 在setState内分析，避免build中产生副作用
           });
         }
       }
@@ -496,6 +509,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           // 计算累计VWAP：按分钟偏移量顺序累加成交量和成交额
           final volumes = timeshareResult['volumes'] ?? <int, double>{};
           final amounts = timeshareResult['amounts'] ?? <int, double>{};
+          _timeshareMinuteVolumes = Map<int, double>.from(volumes);
           final preCloseVal = quote?.preClose ?? 0;
           final sortedOffsets = _timeshareData.keys.toList()..sort();
           double cumAmount = 0;
@@ -512,6 +526,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           }
           // VWAP累计计算完成
           _timeshareLoadFailed = false;
+          _lastAnalyzedOffset = -1; // 强制重新分析
+          _analyzeIntradayLevels(); // 在setState内分析
         } else {
           // 分时数据加载失败，设置降级标志（不限交易时段）
           _timeshareLoadFailed = true;
@@ -857,6 +873,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   }
 
   /// 添加分时图数据点
+  /// [volume] 和 [amount] 是当日累计值，内部计算每分钟差值
   void _addTimesharePoint(double price, double volume, double amount) {
     final now = DateTime.now();
     final offset = _timeToMinuteOffset(now);
@@ -866,9 +883,48 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     final clampedOffset = offset.clamp(0, 240);
     _timeshareData[clampedOffset] = price;
 
+    // 计算每分钟成交量（从累积值差值）
+    if (volume > 0 && volume > _lastCumulativeVolume) {
+      _timeshareMinuteVolumes[clampedOffset] = volume - _lastCumulativeVolume;
+    }
+    _lastCumulativeVolume = volume;
+
     // 计算均价 = 累计成交额 / (累计成交量 * 100)
     if (amount > 0 && volume > 0) {
-      _timeshareAvgData[clampedOffset] = amount / (volume * 100); // 成交额(元) / 成交量(股)
+      _timeshareAvgData[clampedOffset] = amount / (volume * 100);
+    }
+    _lastCumulativeAmount = amount;
+  }
+
+  /// 分时低吸高抛分析
+  void _analyzeIntradayLevels() {
+    if (_timeshareData.isEmpty) return;
+    final now = DateTime.now();
+    final currentOffset = _timeToMinuteOffset(now) ?? 240;
+
+    // 下午开盘时强制重新分析（午休后offset都是120，需特殊处理）
+    if (now.hour >= 13 && _lastAnalyzedOffset < 120) {
+      _lastAnalyzedOffset = -1;
+    }
+
+    // 避免同一分钟重复分析
+    if (currentOffset == _lastAnalyzedOffset && _intradayLevelResult != null) return;
+    _lastAnalyzedOffset = currentOffset;
+
+    try {
+      _intradayLevelResult = IntradayLevelAnalyzer.analyze(
+        prices: _timeshareData,
+        volumes: _timeshareMinuteVolumes,
+        vwapData: _timeshareAvgData,
+        preClose: _quote?.preClose ?? 0,
+        openPrice: _quote?.open ?? 0,
+        dayHigh: _quote?.high ?? 0,
+        dayLow: _quote?.low ?? 0,
+        currentOffset: currentOffset,
+        estimatedAmplitude: _quote?.amplitude,
+      );
+    } catch (_) {
+      // 分析失败不阻塞UI
     }
   }
 
@@ -890,6 +946,21 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     // 构建均价线数据点
     final avgSortedKeys = _timeshareAvgData.keys.toList()..sort();
     final avgSpots = avgSortedKeys.map((k) => FlSpot(k.toDouble(), _timeshareAvgData[k]!)).toList();
+
+    // 分时低吸高抛分析（在数据加载时已触发，此处仅消费结果）
+    final signalResult = _intradayLevelResult;
+    final buySpots = <FlSpot>[];
+    final sellSpots = <FlSpot>[];
+    if (signalResult != null) {
+      for (final s in signalResult.buySignals) {
+        final price = _timeshareData[s.minuteOffset];
+        if (price != null) buySpots.add(FlSpot(s.minuteOffset.toDouble(), price));
+      }
+      for (final s in signalResult.sellSignals) {
+        final price = _timeshareData[s.minuteOffset];
+        if (price != null) sellSpots.add(FlSpot(s.minuteOffset.toDouble(), price));
+      }
+    }
 
     // Y轴以昨收价为中心，上下对称
     double maxDeviation = 0;
@@ -1067,11 +1138,186 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       dotData: const FlDotData(show: false),
                       belowBarData: BarAreaData(show: false),
                     ),
+                  // 低吸信号标记（绿色圆点）
+                  if (buySpots.isNotEmpty)
+                    LineChartBarData(
+                      spots: buySpots,
+                      isCurved: false,
+                      color: Colors.transparent,
+                      barWidth: 0,
+                      dotData: FlDotData(
+                        show: true,
+                        getDotPainter: (spot, x, barData, spotIndex) {
+                          final signals = signalResult?.buySignals;
+                          final isHigh = signals != null && spotIndex < signals.length ? signals[spotIndex].isHighConfidence : false;
+                          return FlDotCirclePainter(
+                            radius: isHigh ? 5.5 : 4.5,
+                            color: Colors.greenAccent,
+                            strokeWidth: isHigh ? 2.0 : 1.5,
+                            strokeColor: Colors.white,
+                          );
+                        },
+                      ),
+                      belowBarData: BarAreaData(show: false),
+                    ),
+                  // 高抛信号标记（红色圆点）
+                  if (sellSpots.isNotEmpty)
+                    LineChartBarData(
+                      spots: sellSpots,
+                      isCurved: false,
+                      color: Colors.transparent,
+                      barWidth: 0,
+                      dotData: FlDotData(
+                        show: true,
+                        getDotPainter: (spot, x, barData, spotIndex) {
+                          final signals = signalResult?.sellSignals;
+                          final isHigh = signals != null && spotIndex < signals.length ? signals[spotIndex].isHighConfidence : false;
+                          return FlDotCirclePainter(
+                            radius: isHigh ? 5.5 : 4.5,
+                            color: Colors.redAccent,
+                            strokeWidth: isHigh ? 2.0 : 1.5,
+                            strokeColor: Colors.white,
+                          );
+                        },
+                      ),
+                      belowBarData: BarAreaData(show: false),
+                    ),
                 ],
               ),
             ),
           ),
+          _buildIntradayLevelPanel(),
           _buildMainFundFlowBar(),
+        ],
+      ),
+    );
+  }
+
+  /// 分时低吸高抛信号摘要面板
+  Widget _buildIntradayLevelPanel() {
+    final result = _intradayLevelResult;
+    if (result == null || (result.buySignals.isEmpty && result.sellSignals.isEmpty)) {
+      return const SizedBox.shrink();
+    }
+
+    final buyItems = result.buySignals.take(2).toList();
+    final sellItems = result.sellSignals.take(2).toList();
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Text('日内做T信号', style: TextStyle(color: Colors.grey, fontSize: 11)),
+              const Spacer(),
+              Builder(builder: (context) {
+                final trendLabel = result.trend == IntradayTrend.bullish
+                    ? '偏多'
+                    : result.trend == IntradayTrend.bearish
+                        ? '偏空'
+                        : '震荡';
+                final trendColor = result.trend == IntradayTrend.bullish
+                    ? const Color(0xFFef5350)
+                    : result.trend == IntradayTrend.bearish
+                        ? const Color(0xFF26a69a)
+                        : Colors.grey;
+                return Text(
+                  trendLabel,
+                  style: TextStyle(color: trendColor, fontSize: 10),
+                );
+              }),
+            ],
+          ),
+          if (buyItems.isNotEmpty || sellItems.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  if (buyItems.isNotEmpty)
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.arrow_upward, color: Colors.greenAccent, size: 12),
+                              SizedBox(width: 2),
+                              Text('低吸', style: TextStyle(color: Colors.greenAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                          ...buyItems.map((s) => _buildSignalChip(s)),
+                        ],
+                      ),
+                    ),
+                  if (buyItems.isNotEmpty && sellItems.isNotEmpty)
+                    const SizedBox(width: 8),
+                  if (sellItems.isNotEmpty)
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.arrow_downward, color: Colors.redAccent, size: 12),
+                              SizedBox(width: 2),
+                              Text('高抛', style: TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                          ...sellItems.map((s) => _buildSignalChip(s)),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSignalChip(IntradayLevelPoint signal) {
+    final isBuy = signal.direction == IntradayDirection.buy;
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+            decoration: BoxDecoration(
+              color: isBuy ? Colors.greenAccent.withOpacity(0.15) : Colors.redAccent.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(2),
+              border: signal.isHighConfidence
+                  ? Border.all(color: isBuy ? Colors.greenAccent.withOpacity(0.5) : Colors.redAccent.withOpacity(0.5), width: 0.5)
+                  : null,
+            ),
+            child: Text(
+              signal.shortLabel,
+              style: TextStyle(
+                color: isBuy ? Colors.greenAccent : Colors.redAccent,
+                fontSize: 9,
+              ),
+            ),
+          ),
+          const SizedBox(width: 3),
+          Text(
+            signal.price.toStringAsFixed(2),
+            style: TextStyle(
+              color: isBuy ? Colors.green : Colors.red,
+              fontSize: 10,
+              fontWeight: signal.isHighConfidence ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
         ],
       ),
     );
@@ -1796,6 +2042,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     _analysisRefreshTimer?.cancel();
     _timeshareData.clear();
     _timeshareAvgData.clear();
+    _timeshareMinuteVolumes.clear();
+    _intradayLevelResult = null;
     _analysis = null;
     super.dispose();
   }
