@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:charset_converter/charset_converter.dart';
 import '../models/stock_models.dart';
+import '../analysis/limit_up_analyzer.dart';
 import '../validators/data_validator.dart';
 
 class ApiClient {
@@ -1419,6 +1420,49 @@ class ApiClient {
       return results;
     }
     return [];
+  }
+
+  /// 当日涨停板池（东方财富 push2ex.eastmoney.com/getTopicZTPool）
+  /// 返回完整涨停数据：连板数/首封时间/封单/换手/炸板标记
+  Future<List<LimitUpStock>> getLimitUpBoard({DateTime? date, int pageSize = 500}) async {
+    final dateStr = (date ?? DateTime.now()).toLocal().toString().substring(0, 10).replaceAll('-', '');
+    final url = Uri.parse(
+      'https://push2ex.eastmoney.com/getTopicZTPool'
+      '?ut=7eea3edcaed734bea9cbfc24409ed989'
+      '&dpt=wz.ztzt'
+      '&Pageindex=0'
+      '&Pagesize=$pageSize'
+      '&sort=fbt:asc'
+      '&date=$dateStr'
+      '&_=${DateTime.now().millisecondsSinceEpoch}',
+    );
+    try {
+      final response = await _httpGet(url, headers: {
+        'Referer': 'https://quote.eastmoney.com/ztb/detail',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
+      });
+      if (response == null) {
+        debugPrint('getLimitUpBoard: response null for date=$dateStr');
+        return [];
+      }
+      // IMPORTANT: _decodeGbk returns String, not bytes. Use jsonDecode on the decoded string.
+      final body = await _decodeGbk(response.bodyBytes);
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      final pool = json['data']?['pool'] as List?;
+      if (pool == null) return [];
+      return pool
+          .map((e) => LimitUpStock.fromEastMoney(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('getLimitUpBoard failed: $e');
+      return [];
+    }
+  }
+
+  /// 昨日涨停股池（用于计算赚钱效应）
+  Future<List<LimitUpStock>> getYesterdayLimitUpPool() async {
+    final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    return getLimitUpBoard(date: yesterday);
   }
 
   Future<String> _decodeGbk(Uint8List bytes) async {
