@@ -235,8 +235,10 @@ class DiscoverScreenState extends State<DiscoverScreen>
     // mainLine 经 SQLite 往返后为 int(0/1)，从引擎直接获取时为 bool
     var picks = all.where((p) => p['mainLine'] == 1 || p['mainLine'] == true).toList();
     // 无主线命中时回退到全部精选
+    // 注意：db.query() 返回的 QueryResultSet 是只读的（operator []= 抛 read-only），
+    // 不能直接赋值后 sort，必须创建可变副本
     if (picks.isEmpty && all.isNotEmpty) {
-      picks = all;
+      picks = List<Map<String, dynamic>>.from(all);
     }
     picks.sort((a, b) =>
         (b['score'] as num? ?? 0).toInt().compareTo((a['score'] as num? ?? 0).toInt()));
