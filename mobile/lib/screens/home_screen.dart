@@ -2,9 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
+import '../analysis/limit_up_analyzer.dart';
+import '../analysis/limit_up_scan_engine.dart';
 import '../analysis/market_timing.dart';
 import '../analysis/sector_pick_engine.dart';
 import '../storage/database_service.dart';
+import '../widgets/sentiment_thermometer_card.dart';
 import 'quote_screen.dart';
 import 'sector_screen.dart';
 import 'quant_screen.dart';
@@ -36,6 +39,9 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _lowBuyCount = 0;     // 分时低吸数量
   int _mainLineCount = 0;   // 主线板块数量
   bool _isWorkbenchLoading = false; // 工作台刷新中
+  // 情绪温度计 (v2.27+)：从 LimitUpScanEngine 缓存读取，不在工作台本地重算
+  SentimentResult? _sentiment;
+  StreamSubscription<LimitUpScanProgress>? _limitUpScanSub;
 
   @override
   void initState() {
@@ -49,6 +55,14 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _subscribeToPickProgress();
       _restorePickProgress();
     }
+    // 订阅打板扫描进度：扫描完成时刷新 _sentiment（用户从 DiscoverScreen 触发后回首页可见）
+    _limitUpScanSub = LimitUpScanEngine.instance.progressStream.listen((progress) {
+      if (progress.stage == 'done' && mounted) {
+        setState(() {
+          _sentiment = LimitUpScanEngine.instance.lastSentiment;
+        });
+      }
+    });
   }
 
   @override
@@ -76,6 +90,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _apiClient.dispose();
     // 不取消订阅，让引擎继续后台运行
     _pickSubscription?.pause();
+    _limitUpScanSub?.cancel();
     super.dispose();
   }
 
@@ -231,34 +246,48 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// 加载短线工作台数据：择时 + 涨停/低吸计数
+  /// 加载短线工作台数据：择时 + 涨停/低吸计数 + 情绪温度计缓存
   Future<void> _loadWorkbenchData() async {
     if (_isWorkbenchLoading) return;
     setState(() => _isWorkbenchLoading = true);
     try {
-      // 并发加载择时与探索结果
+      // 并发加载择时 / 探索结果 / 今日打板池
       final results = await Future.wait<dynamic>([
         MarketTiming.fetchTiming(),
         _dbService.getExploreResults(),
+        _dbService.getLimitUpPool(),
       ]);
       final timing = results[0] as MarketTimingResult?;
       final exploreResults = results[1] as List<ExploreResult>;
+      final limitUpPool = results[2] as List<LimitUpAnalysis>;
 
-      // 涨停近似判定
-      int limitUp = 0;
+      // 涨停梯队：来自打板池（排除炸板），无打板池时回退到 explore 近似判定
+      int limitUp = limitUpPool.where((a) => !a.isZhaBan).length;
+      if (limitUp == 0) {
+        for (final r in exploreResults) {
+          if (r.isLimitUpApprox) limitUp++;
+        }
+      }
       int lowBuy = 0;
       for (final r in exploreResults) {
-        if (r.isLimitUpApprox) limitUp++;
         if (r.recommendation.contains('买入') &&
             r.changePct >= -3 && r.changePct <= 5 && r.score >= 6) {
           lowBuy++;
         }
+      }
+      // 情绪温度计：读取扫描引擎缓存（DiscoverScreen 扫描时填充），不在本地重算
+      // 避免 todayQuotePct bug（_computeMoneyMakingEffect 需以昨日 code 为键）
+      final sentiment = LimitUpScanEngine.instance.lastSentiment;
+      // 既无打板池数据也无情绪缓存时，后台触发扫描补全（fire-and-forget，不阻塞工作台）
+      if (limitUpPool.isEmpty && sentiment == null && !LimitUpScanEngine.instance.isRunning) {
+        LimitUpScanEngine.instance.scan();
       }
       if (mounted) {
         setState(() {
           _marketTiming = timing;
           _limitUpCount = limitUp;
           _lowBuyCount = lowBuy;
+          _sentiment = sentiment;
           _isWorkbenchLoading = false;
         });
       }
@@ -267,7 +296,8 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (mounted) {
         setState(() => _isWorkbenchLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('工作台刷新失败: $e'), duration: const Duration(seconds: 2)),
+          SnackBar(content: Text('工作台刷新失败: $e', maxLines: 2, overflow: TextOverflow.ellipsis),
+              duration: const Duration(seconds: 2)),
         );
       }
     }
@@ -430,7 +460,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _pickEngine.pick(_sectors);
   }
 
-  /// 短线工作台卡片 (v2.33)：一屏聚合择时/主线/涨停梯队/分时低吸
+  /// 短线工作台卡片 (v2.33+)：情绪温度计大卡 + 2×2 指标网格
   Widget _buildWorkbenchCard() {
     final timing = _marketTiming;
     // 择时配色
@@ -450,86 +480,98 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       timingLabel = timing.positionLabel;
     }
 
-    return Card(
-      margin: const EdgeInsets.all(8),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.dashboard, color: Colors.blueAccent, size: 20),
-                const SizedBox(width: 8),
-                Text('短线工作台',
-                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                const Spacer(),
-                GestureDetector(
-                  onTap: _isWorkbenchLoading ? null : _loadWorkbenchData,
-                  child: _isWorkbenchLoading
-                      ? const SizedBox(
-                          width: 16, height: 16,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white54))
-                      : const Icon(Icons.refresh, color: Colors.white38, size: 18),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                // 择时
-                Expanded(
-                  child: _buildWorkbenchMetric(
-                    icon: Icons.trending_up,
-                    iconColor: timingColor,
-                    label: '市场择时',
-                    value: timingLabel,
-                    valueColor: timingColor,
-                  ),
-                ),
-                Container(width: 1, height: 44, color: Colors.white12),
-                // 主线板块
-                Expanded(
-                  child: _buildWorkbenchMetric(
-                    icon: Icons.military_tech,
-                    iconColor: const Color(0xFFFFB000),
-                    label: '主线板块',
-                    value: '$_mainLineCount个',
-                    valueColor: const Color(0xFFFFB000),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                // 涨停梯队
-                Expanded(
-                  child: _buildWorkbenchMetric(
-                    icon: Icons.local_fire_department,
-                    iconColor: Colors.red,
-                    label: '涨停梯队',
-                    value: '$_limitUpCount只',
-                    valueColor: Colors.red,
-                  ),
-                ),
-                Container(width: 1, height: 44, color: Colors.white12),
-                // 分时低吸
-                Expanded(
-                  child: _buildWorkbenchMetric(
-                    icon: Icons.trending_down,
-                    iconColor: Colors.green,
-                    label: '分时低吸',
-                    value: '$_lowBuyCount只',
-                    valueColor: Colors.green,
-                  ),
-                ),
-              ],
-            ),
-          ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // 情绪温度计大卡（_sentiment == null 时显示 skeleton）
+        SentimentThermometerCard(
+          sentiment: _sentiment,
+          onRefresh: _isWorkbenchLoading ? null : _loadWorkbenchData,
+          isLoading: _isWorkbenchLoading,
         ),
-      ),
+        // 2×2 指标网格卡片（保持原结构）
+        Card(
+          margin: const EdgeInsets.all(8),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.dashboard, color: Colors.blueAccent, size: 20),
+                    const SizedBox(width: 8),
+                    Text('短线工作台',
+                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: _isWorkbenchLoading ? null : _loadWorkbenchData,
+                      child: _isWorkbenchLoading
+                          ? const SizedBox(
+                              width: 16, height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white54))
+                          : const Icon(Icons.refresh, color: Colors.white38, size: 18),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    // 择时
+                    Expanded(
+                      child: _buildWorkbenchMetric(
+                        icon: Icons.trending_up,
+                        iconColor: timingColor,
+                        label: '市场择时',
+                        value: timingLabel,
+                        valueColor: timingColor,
+                      ),
+                    ),
+                    Container(width: 1, height: 44, color: Colors.white12),
+                    // 主线板块
+                    Expanded(
+                      child: _buildWorkbenchMetric(
+                        icon: Icons.military_tech,
+                        iconColor: const Color(0xFFFFB000),
+                        label: '主线板块',
+                        value: '$_mainLineCount个',
+                        valueColor: const Color(0xFFFFB000),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    // 涨停梯队
+                    Expanded(
+                      child: _buildWorkbenchMetric(
+                        icon: Icons.local_fire_department,
+                        iconColor: Colors.red,
+                        label: '涨停梯队',
+                        value: '$_limitUpCount只',
+                        valueColor: Colors.red,
+                      ),
+                    ),
+                    Container(width: 1, height: 44, color: Colors.white12),
+                    // 分时低吸
+                    Expanded(
+                      child: _buildWorkbenchMetric(
+                        icon: Icons.trending_down,
+                        iconColor: Colors.green,
+                        label: '分时低吸',
+                        value: '$_lowBuyCount只',
+                        valueColor: Colors.green,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
