@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:stock_analyzer/analysis/limit_up_analyzer.dart';
+import 'package:stock_analyzer/storage/database_service.dart';
 
 /// limit_up_pool 表的 schema SQL（与 database_service.dart 保持一致）
 const _limitUpPoolSchema = '''
@@ -151,6 +153,109 @@ void main() {
       expect(rows.first['consecutive_days'], 3);
 
       await db.close();
+    });
+  });
+
+  group('DatabaseService limit_up_pool CRUD', () {
+    late Database db;
+
+    setUp(() async {
+      DatabaseService().resetForTesting();
+      db = await openDatabase(
+        ':memory:',
+        version: 1,
+        onCreate: (db, v) async {
+          await db.execute(_limitUpPoolSchema);
+          await db.execute('CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
+          await db.execute('CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
+        },
+      );
+      await DatabaseService().setDatabaseForTesting(db);
+    });
+
+    tearDown(() async {
+      await db.close();
+      DatabaseService().resetForTesting();
+    });
+
+    test('replaceLimitUpPool is full replace per trade_date', () async {
+      final svc = DatabaseService();
+      final date = '2026-06-27';
+      final analyses = [
+        LimitUpAnalysis(code: '600519', name: '茅台', consecutiveDays: 3, qualityScore: 8.5),
+        LimitUpAnalysis(code: '000001', name: '平安银行', consecutiveDays: 1, qualityScore: 6.0),
+      ];
+      await svc.replaceLimitUpPool(analyses, date);
+      final result = await svc.getLimitUpPool(tradeDate: date);
+      expect(result, hasLength(2));
+
+      // 替换为 1 条（验证全量替换）
+      await svc.replaceLimitUpPool([
+        LimitUpAnalysis(code: '600519', name: '茅台', consecutiveDays: 4, qualityScore: 9.0),
+      ], date);
+      final result2 = await svc.getLimitUpPool(tradeDate: date);
+      expect(result2, hasLength(1));
+      expect(result2.first.consecutiveDays, 4);
+    });
+
+    test('getLimitUpPool returns sorted by consecutive_days DESC', () async {
+      final svc = DatabaseService();
+      final date = '2026-06-27';
+      await svc.replaceLimitUpPool([
+        LimitUpAnalysis(code: '000001', name: 'A', consecutiveDays: 1, qualityScore: 5.0),
+        LimitUpAnalysis(code: '600519', name: 'B', consecutiveDays: 3, qualityScore: 8.0),
+        LimitUpAnalysis(code: '000002', name: 'C', consecutiveDays: 2, qualityScore: 6.0),
+      ], date);
+      final result = await svc.getLimitUpPool(tradeDate: date);
+      expect(result.first.consecutiveDays, 3);  // 高连板在前
+      expect(result.last.consecutiveDays, 1);
+    });
+
+    test('getLimitUpPoolByDate returns only that date', () async {
+      final svc = DatabaseService();
+      await svc.replaceLimitUpPool([
+        LimitUpAnalysis(code: '600519', name: '茅台', consecutiveDays: 3),
+      ], '2026-06-27');
+      await svc.replaceLimitUpPool([
+        LimitUpAnalysis(code: '000001', name: '平安银行', consecutiveDays: 1),
+      ], '2026-06-26');
+
+      final todayPool = await svc.getLimitUpPoolByDate('2026-06-27');
+      expect(todayPool.every((a) => a.code == '600519'), isTrue);
+
+      final yPool = await svc.getLimitUpPoolByDate('2026-06-26');
+      expect(yPool.every((a) => a.code == '000001'), isTrue);
+    });
+
+    test('getLimitUpDates returns distinct dates sorted DESC', () async {
+      final svc = DatabaseService();
+      await svc.replaceLimitUpPool([
+        LimitUpAnalysis(code: '600519', name: '茅台', consecutiveDays: 3),
+      ], '2026-06-27');
+      await svc.replaceLimitUpPool([
+        LimitUpAnalysis(code: '000001', name: '平安银行', consecutiveDays: 1),
+      ], '2026-06-26');
+      await svc.replaceLimitUpPool([
+        LimitUpAnalysis(code: '000002', name: '万科A', consecutiveDays: 2),
+      ], '2026-06-28');
+
+      final dates = await svc.getLimitUpDates();
+      expect(dates, hasLength(3));
+      expect(dates.first, '2026-06-28');  // 最新在前
+      expect(dates.last, '2026-06-26');
+    });
+
+    test('replaceLimitUpPool handles empty list', () async {
+      final svc = DatabaseService();
+      final date = '2026-06-27';
+      // 先插入 1 条
+      await svc.replaceLimitUpPool([
+        LimitUpAnalysis(code: '600519', name: '茅台', consecutiveDays: 3),
+      ], date);
+      // 用空列表替换
+      await svc.replaceLimitUpPool([], date);
+      final result = await svc.getLimitUpPool(tradeDate: date);
+      expect(result, isEmpty);
     });
   });
 }

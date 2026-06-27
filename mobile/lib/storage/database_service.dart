@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import '../models/stock_models.dart';
+import '../analysis/limit_up_analyzer.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -16,6 +17,18 @@ class DatabaseService {
     if (_database != null) return _database!;
     _database = await _initDatabase();
     return _database!;
+  }
+
+  /// 用于测试：注入 in-memory DB，绕过 path_provider
+  @visibleForTesting
+  Future<void> setDatabaseForTesting(Database db) async {
+    _database = db;
+  }
+
+  /// 用于测试：重置 singleton 状态
+  @visibleForTesting
+  void resetForTesting() {
+    _database = null;
   }
 
   Future<Database> _initDatabase() async {
@@ -700,6 +713,57 @@ class DatabaseService {
       return DateTime.fromMillisecondsSinceEpoch(result.first['last_time'] as int);
     }
     return null;
+  }
+
+  // ========== 打板梯队池 CRUD (v2.34) ==========
+
+  /// 全量替换指定交易日的打板池数据
+  Future<void> replaceLimitUpPool(List<LimitUpAnalysis> analyses, String tradeDate) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('limit_up_pool', where: 'trade_date = ?', whereArgs: [tradeDate]);
+      final now = DateTime.now().millisecondsSinceEpoch;
+      for (final a in analyses) {
+        final m = a.toMap();
+        // 移除 limit_up_pool 表中不存在的字段
+        m.remove('quality');
+        m.remove('time_grade');
+        m.remove('position');
+        m.remove('signals');
+        // 补充 schema 必填字段
+        m['trade_date'] = tradeDate;
+        m['updated_at'] = now;
+        await txn.insert('limit_up_pool', m);
+      }
+    });
+  }
+
+  /// 获取打板池数据（默认今日，可指定日期）
+  Future<List<LimitUpAnalysis>> getLimitUpPool({String? tradeDate}) async {
+    final db = await database;
+    final date = tradeDate ?? DateTime.now().toIso8601String().substring(0, 10);
+    final result = await db.query(
+      'limit_up_pool',
+      where: 'trade_date = ?',
+      whereArgs: [date],
+      orderBy: 'consecutive_days DESC, seal_amount DESC',
+    );
+    return result.map((m) => LimitUpAnalysis.fromMap(m)).toList();
+  }
+
+  /// 获取指定交易日的打板池（历史回看用）
+  Future<List<LimitUpAnalysis>> getLimitUpPoolByDate(String tradeDate) async {
+    return getLimitUpPool(tradeDate: tradeDate);
+  }
+
+  /// 获取最近的打板池交易日列表（情绪周期曲线用）
+  Future<List<String>> getLimitUpDates({int limit = 30}) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT DISTINCT trade_date FROM limit_up_pool ORDER BY trade_date DESC LIMIT ?',
+      [limit],
+    );
+    return result.map((m) => m['trade_date'] as String).toList();
   }
 
   // ========== 首页缓存 CRUD ==========
