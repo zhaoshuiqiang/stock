@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../analysis/explore_engine.dart';
 import '../analysis/sector_pick_engine.dart';
+import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
 import '../widgets/stock_card.dart';
@@ -33,6 +34,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
     with SingleTickerProviderStateMixin {
   final ExploreEngine _exploreEngine = ExploreEngine.instance;
   final DatabaseService _dbService = DatabaseService();
+  final ApiClient _apiClient = ApiClient();
 
   late final TabController _tabController;
 
@@ -44,6 +46,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
   Set<String> _watchlistCodes = {};
   // 板块精选结果（主线龙头 Tab 数据源）
   List<Map<String, dynamic>> _sectorPickResults = [];
+  bool _isPickingSectors = false; // 板块精选引擎运行中
   StreamSubscription<SectorPickProgress>? _sectorPickSub;
 
   StreamSubscription<ExploreProgress>? _exploreSub;
@@ -65,16 +68,42 @@ class DiscoverScreenState extends State<DiscoverScreen>
     }
     // 订阅板块精选进度（主线龙头 Tab 数据更新）
     _sectorPickSub = SectorPickEngine.instance.progressStream.listen((p) {
-      if (p.status == SectorPickStatus.complete && mounted) {
-        _loadSectorPicks();
+      if (!mounted) return;
+      switch (p.status) {
+        case SectorPickStatus.analyzing:
+        case SectorPickStatus.saving:
+          setState(() => _isPickingSectors = true);
+          break;
+        case SectorPickStatus.complete:
+          setState(() => _isPickingSectors = false);
+          _loadSectorPicks();
+          break;
+        case SectorPickStatus.error:
+          setState(() => _isPickingSectors = false);
+          if (p.message != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(p.message!)),
+            );
+          }
+          break;
+        case SectorPickStatus.alreadyRunning:
+          setState(() => _isPickingSectors = true);
+          break;
+        case SectorPickStatus.idle:
+          break;
       }
     });
+    // 如果引擎已在运行，恢复状态
+    if (SectorPickEngine.instance.isRunning) {
+      _isPickingSectors = true;
+    }
   }
 
   @override
   void dispose() {
     _exploreSub?.cancel();
     _sectorPickSub?.cancel();
+    _apiClient.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -112,6 +141,39 @@ class DiscoverScreenState extends State<DiscoverScreen>
         setState(() => _sectorPickResults = results);
       }
     } catch (_) {}
+  }
+
+  /// 触发板块精选引擎：获取热门板块 → SectorPickEngine.pick()
+  Future<void> _refreshSectorPicks() async {
+    if (_isPickingSectors) return; // 防止重复触发
+    if (SectorPickEngine.instance.isRunning) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('板块精选分析进行中...'), duration: Duration(seconds: 1)),
+      );
+      return;
+    }
+    setState(() => _isPickingSectors = true);
+    try {
+      final sectors = await _apiClient.getHotSectors();
+      if (sectors.isEmpty) {
+        if (mounted) {
+          setState(() => _isPickingSectors = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('获取板块数据失败，请检查网络')),
+          );
+        }
+        return;
+      }
+      // 引擎异步运行，通过 progressStream 通知进度
+      SectorPickEngine.instance.pick(sectors);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isPickingSectors = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('刷新失败: $e')),
+        );
+      }
+    }
   }
 
   // ─── 智能探索进度回调 ──────────────────────────────────────────
@@ -164,15 +226,23 @@ class DiscoverScreenState extends State<DiscoverScreen>
   }
 
   // ─── Tab 2: 主线龙头（板块精选 + 主线标记） ───────────────────
+  /// 主线板块个股优先；若无主线命中，回退展示全部板块精选（避免Tab常空）
   List<Map<String, dynamic>> get _mainLinePicks {
+    final all = _sectorPickResults;
     // mainLine 经 SQLite 往返后为 int(0/1)，从引擎直接获取时为 bool
-    final picks = _sectorPickResults
-        .where((p) => p['mainLine'] == 1 || p['mainLine'] == true)
-        .toList();
+    var picks = all.where((p) => p['mainLine'] == 1 || p['mainLine'] == true).toList();
+    // 无主线命中时回退到全部精选
+    if (picks.isEmpty && all.isNotEmpty) {
+      picks = all;
+    }
     picks.sort((a, b) =>
         (b['score'] as num? ?? 0).toInt().compareTo((a['score'] as num? ?? 0).toInt()));
     return picks;
   }
+
+  /// 是否有主线板块命中（用于UI提示区分"无主线"与"回退展示"）
+  bool get _hasMainLineHit => _sectorPickResults
+      .any((p) => p['mainLine'] == 1 || p['mainLine'] == true);
 
   // ─── Tab 3: 分时低吸（买入推荐 + 涨幅温和 + 评分高） ─────────
   /// 低吸筛选：买入推荐 且 涨幅在 [-3%, +5%] 区间 且 评分≥6
@@ -390,8 +460,12 @@ class DiscoverScreenState extends State<DiscoverScreen>
       children: [
         _buildTabHeader(
           count: list.length,
-          hint: list.isEmpty ? '今日暂无涨停标的' : '涨停/连板标的，按涨幅排序',
+          hint: list.isEmpty
+              ? (_exploreResults.isEmpty ? '暂无探索数据，点击刷新' : '今日暂无涨停标的')
+              : '涨停/连板标的，按涨幅排序',
           accentColor: _kLimitUpColor,
+          actionText: _exploreLoading ? '探索中...' : '刷新',
+          onAction: _exploreLoading ? null : () => _exploreEngine.explore(),
         ),
         Expanded(
           child: list.isEmpty
@@ -416,20 +490,41 @@ class DiscoverScreenState extends State<DiscoverScreen>
 
   Widget _buildMainLineTab() {
     final list = _mainLinePicks;
+    String hint;
+    if (_isPickingSectors) {
+      hint = '板块精选分析中...';
+    } else if (list.isEmpty) {
+      hint = _sectorPickResults.isEmpty ? '暂无板块精选数据，点击刷新' : '当前无主线板块命中';
+    } else if (_hasMainLineHit) {
+      hint = '主线板块内精选个股，含轮动加成';
+    } else {
+      hint = '暂无主线命中，展示全部板块精选';
+    }
     return Column(
       children: [
         _buildTabHeader(
           count: list.length,
-          hint: list.isEmpty ? '暂无主线板块数据' : '主线板块内精选个股，含轮动加成',
+          hint: hint,
           accentColor: _kMainLineColor,
-          actionText: '刷新板块',
-          onAction: () => _loadSectorPicks(),
+          actionText: _isPickingSectors ? '分析中...' : '刷新板块',
+          onAction: _isPickingSectors ? null : _refreshSectorPicks,
         ),
+        if (_isPickingSectors)
+          const LinearProgressIndicator(
+            backgroundColor: Color(0xFF21262D),
+            valueColor: AlwaysStoppedAnimation<Color>(_kMainLineColor),
+          ),
         Expanded(
           child: list.isEmpty
               ? _buildEmptyState(
                   icon: Icons.military_tech_outlined,
-                  text: _sectorPickResults.isEmpty ? '暂无板块精选数据' : '当前无主线板块命中',
+                  text: _sectorPickResults.isEmpty
+                      ? '暂无板块精选数据'
+                      : '当前无主线板块命中',
+                  actionText: _sectorPickResults.isEmpty && !_isPickingSectors
+                      ? '开始精选' : null,
+                  onAction: _sectorPickResults.isEmpty && !_isPickingSectors
+                      ? _refreshSectorPicks : null,
                 )
               : ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -449,8 +544,12 @@ class DiscoverScreenState extends State<DiscoverScreen>
       children: [
         _buildTabHeader(
           count: list.length,
-          hint: list.isEmpty ? '暂无低吸标的' : '买入推荐 · 涨幅[-3%,+5%] · 评分≥6',
+          hint: list.isEmpty
+              ? (_exploreResults.isEmpty ? '暂无探索数据，点击刷新' : '当前无低吸信号')
+              : '买入推荐 · 涨幅[-3%,+5%] · 评分≥6',
           accentColor: _kLowBuyColor,
+          actionText: _exploreLoading ? '探索中...' : '刷新',
+          onAction: _exploreLoading ? null : () => _exploreEngine.explore(),
         ),
         Expanded(
           child: list.isEmpty
