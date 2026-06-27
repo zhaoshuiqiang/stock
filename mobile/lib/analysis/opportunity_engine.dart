@@ -4,10 +4,11 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
-import '../analysis/indicators.dart';
-import '../analysis/signal_layer.dart';
-import '../analysis/signal_engine.dart';
-import '../analysis/market_timing.dart';
+import 'base_analysis_engine.dart';
+import 'indicators.dart';
+import 'signal_layer.dart';
+import 'signal_engine.dart';
+import 'market_timing.dart';
 import '../api/market_context_provider.dart';
 import '../storage/database_service.dart';
 
@@ -112,56 +113,27 @@ class OpportunityProgress {
 }
 
 /// 机会分析引擎：后台分析自选股机会与风险，切换Tab不中断
-class OpportunityEngine {
+class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
   static final OpportunityEngine _instance = OpportunityEngine._();
   static OpportunityEngine get instance => _instance;
 
   final ApiClient _apiClient;
   final DatabaseService _dbService;
-  bool _isRunning = false;
-
-  StreamController<OpportunityProgress> _progressController =
-      StreamController<OpportunityProgress>.broadcast();
 
   OpportunityEngine._()
       : _apiClient = ApiClient(),
         _dbService = DatabaseService();
 
-  bool get isRunning => _isRunning;
-  Stream<OpportunityProgress> get progressStream => _ensureController().stream;
-
-  /// 释放资源并重置内部状态，允许单例后续继续使用
-  void dispose() {
-    _isRunning = false;
-    _progressController.close();
-  }
-
-  /// 获取或重建 StreamController（dispose后自动重建）
-  StreamController<OpportunityProgress> _ensureController() {
-    if (_progressController.isClosed) {
-      _progressController = StreamController<OpportunityProgress>.broadcast();
-    }
-    return _progressController;
-  }
-
-  OpportunityProgress? _latestProgress;
-  OpportunityProgress? get latestProgress => _latestProgress;
-
   /// 执行机会分析（优化版：MarketTiming仅计算一次，并发度提升，K线天数缩减）
   Future<void> analyze() async {
-    if (_isRunning) {
-      _emit(OpportunityProgress(status: OpportunityStatus.alreadyRunning));
-      return;
-    }
-    _isRunning = true;
+    if (!tryStart(OpportunityProgress(status: OpportunityStatus.alreadyRunning))) return;
 
     try {
       // 1. 获取自选列表
-      _emit(OpportunityProgress(status: OpportunityStatus.fetching));
+      emit(OpportunityProgress(status: OpportunityStatus.fetching));
       final watchlist = await _dbService.getWatchlist();
       if (watchlist.isEmpty) {
-        _emit(OpportunityProgress(status: OpportunityStatus.complete, results: [], totalCount: 0));
-        _isRunning = false;
+        emit(OpportunityProgress(status: OpportunityStatus.complete, results: [], totalCount: 0));
         return;
       }
       final totalCount = watchlist.length;
@@ -183,7 +155,7 @@ class OpportunityEngine {
       final marketTimingResult = results_futures[1] as MarketTimingResult?;
       final positionFactor = marketTimingResult != null ? MarketTiming.getPositionAdjustment(marketTimingResult) : null;
 
-      _emit(OpportunityProgress(status: OpportunityStatus.analyzing, totalCount: totalCount, completedCount: 0));
+      emit(OpportunityProgress(status: OpportunityStatus.analyzing, totalCount: totalCount, completedCount: 0));
 
       // 3. 分批分析，并发10（与发现页一致使用120天K线）
       const batchSize = 10;
@@ -230,7 +202,7 @@ class OpportunityEngine {
 
         results.addAll(batchResults);
         completedCount += batch.length;
-        _emit(OpportunityProgress(status: OpportunityStatus.analyzing,
+        emit(OpportunityProgress(status: OpportunityStatus.analyzing,
             totalCount: totalCount, completedCount: completedCount.clamp(0, totalCount)));
       }
 
@@ -238,16 +210,16 @@ class OpportunityEngine {
       final opportunities = results.whereType<OpportunityResult>().toList();
       opportunities.sort((a, b) => b.score.compareTo(a.score));
 
-      _emit(OpportunityProgress(status: OpportunityStatus.saving));
+      emit(OpportunityProgress(status: OpportunityStatus.saving));
       await _dbService.replaceOpportunityResults(
           opportunities.map((o) => o.toMap(DateTime.now())).toList());
 
-      _emit(OpportunityProgress(status: OpportunityStatus.complete,
+      emit(OpportunityProgress(status: OpportunityStatus.complete,
           results: opportunities, totalCount: totalCount, completedCount: totalCount));
     } catch (e) {
-      _emit(OpportunityProgress(status: OpportunityStatus.error, message: '分析出错：$e'));
+      emit(OpportunityProgress(status: OpportunityStatus.error, message: '分析出错：$e'));
     } finally {
-      _isRunning = false;
+      markFinished();
     }
   }
 
@@ -263,10 +235,5 @@ class OpportunityEngine {
         marketSentiment: results[1] as MarketSentiment?,
       );
     } catch (_) { return null; }
-  }
-
-  void _emit(OpportunityProgress progress) {
-    _latestProgress = progress;
-    _ensureController().add(progress);
   }
 }
