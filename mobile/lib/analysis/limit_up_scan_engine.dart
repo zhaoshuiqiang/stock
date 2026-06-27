@@ -53,7 +53,20 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
       }
 
       final yesterdayStocks = await _apiClient.getYesterdayLimitUpPool();
-      final yesterdayAnalyses = LimitUpAnalyzer.analyzeBatchList(yesterdayStocks);
+      // 为昨日涨停池补充今日实时行情（计算赚钱效应需要今日涨跌幅）
+      final yesterdayQuotes = <QuoteData>[];
+      for (var i = 0; i < yesterdayStocks.length; i += 30) {
+        try {
+          final batch = yesterdayStocks.skip(i).take(30).map((s) => s.code).toList();
+          final prefixed = batch.map((c) => _apiClient.addMarketPrefix(c)).toList();
+          final quotes = await _apiClient.getBatchRealtimeQuotes(prefixed);
+          yesterdayQuotes.addAll(quotes);
+        } catch (e) {
+          debugPrint('LimitUpScanEngine: 昨日池行情批次 $i 失败: $e');
+        }
+      }
+      final supplementedYesterday = LimitUpUniverseProvider.supplementQuotes(yesterdayStocks, yesterdayQuotes);
+      final yesterdayAnalyses = LimitUpAnalyzer.analyzeBatchList(supplementedYesterday);
 
       // Step 2: 分析今日涨停股
       emit(LimitUpScanProgress(
@@ -61,15 +74,11 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
           message: '分析打板质量...'));
       final todayAnalyses = LimitUpAnalyzer.analyzeBatchList(todayStocks);
 
-      // Step 3: 补充行情数据到 todayAnalyses（price/changePct）
-      // analyzeBatchList 已通过 LimitUpStock 传入 price/changePct
-      // 但 fromEastMoney 时 price=0，需通过 supplementQuotes 补充
-      //（已在 LimitUpUniverseProvider.fetchLatest 中完成）
-
-      // Step 4: 计算情绪温度计
+      // Step 3: 计算情绪温度计
       emit(const LimitUpScanProgress(stage: 'computing_sentiment', message: '计算情绪温度计...'));
+      // 赚钱效应 = 昨日涨停股今日涨跌幅的均值，因此 todayQuotePct 必须以昨日 code 为键
       final todayQuotePct = <String, double>{};
-      for (final a in todayAnalyses) {
+      for (final a in yesterdayAnalyses) {
         todayQuotePct[a.code] = a.changePct;
       }
       final sentiment = SentimentThermometer.compute(
@@ -81,14 +90,16 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
       _lastSentiment = sentiment;
 
       // Step 5: 落库
-      final tradeDate = DateTime.now().toIso8601String().substring(0, 10);
+      // A股交易日按上海时区计算，避免海外/出差用户日期偏移
+      final shanghaiNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+      final tradeDate = shanghaiNow.toIso8601String().substring(0, 10);
       await _dbService.replaceLimitUpPool(todayAnalyses, tradeDate);
 
       emit(const LimitUpScanProgress(stage: 'done', message: '扫描完成'));
       return sentiment;
     } catch (e) {
       debugPrint('LimitUpScanEngine.scan failed: $e');
-      emit(LimitUpScanProgress(stage: 'error', message: '扫描失败: $e'));
+      emit(const LimitUpScanProgress(stage: 'error', message: '扫描失败，请稍后重试'));
       return null;
     } finally {
       markFinished();
