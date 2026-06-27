@@ -12,6 +12,37 @@ import 'package:stock_analyzer/data/concept_tag_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 捕获构建期异常，防止 release 模式下白屏无任何提示
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    FlutterError.reportError(details);
+    debugPrint('ErrorWidget: ${details.exception}');
+    return Material(
+      color: const Color(0xFF0D1117),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
+              const SizedBox(height: 12),
+              const Text('页面渲染异常',
+                  style: TextStyle(color: Colors.redAccent, fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(
+                '${details.exception}',
+                style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              const Text('请下拉刷新或重启应用',
+                  style: TextStyle(color: Color(0xFF8B949E), fontSize: 12)),
+            ],
+          ),
+        ),
+      ),
+    );
+  };
   final notificationService = NotificationService();
   await notificationService.init();
   // 预加载概念标签数据

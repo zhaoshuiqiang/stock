@@ -35,6 +35,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _limitUpCount = 0;    // 涨停梯队数量
   int _lowBuyCount = 0;     // 分时低吸数量
   int _mainLineCount = 0;   // 主线板块数量
+  bool _isWorkbenchLoading = false; // 工作台刷新中
 
   @override
   void initState() {
@@ -232,6 +233,8 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// 加载短线工作台数据：择时 + 涨停/低吸计数
   Future<void> _loadWorkbenchData() async {
+    if (_isWorkbenchLoading) return;
+    setState(() => _isWorkbenchLoading = true);
     try {
       // 并发加载择时与探索结果
       final results = await Future.wait<dynamic>([
@@ -261,10 +264,17 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _marketTiming = timing;
           _limitUpCount = limitUp;
           _lowBuyCount = lowBuy;
+          _isWorkbenchLoading = false;
         });
       }
     } catch (e) {
       debugPrint('Workbench load failed: $e');
+      if (mounted) {
+        setState(() => _isWorkbenchLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('工作台刷新失败: $e'), duration: const Duration(seconds: 2)),
+        );
+      }
     }
   }
 
@@ -460,8 +470,13 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                 const Spacer(),
                 GestureDetector(
-                  onTap: _loadWorkbenchData,
-                  child: const Icon(Icons.refresh, color: Colors.white38, size: 18),
+                  onTap: _isWorkbenchLoading ? null : _loadWorkbenchData,
+                  child: _isWorkbenchLoading
+                      ? const SizedBox(
+                          width: 16, height: 16,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white54))
+                      : const Icon(Icons.refresh, color: Colors.white38, size: 18),
                 ),
               ],
             ),

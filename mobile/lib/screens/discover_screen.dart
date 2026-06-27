@@ -64,7 +64,10 @@ class DiscoverScreenState extends State<DiscoverScreen>
     // 订阅智能探索进度
     _exploreSub = _exploreEngine.progressStream.listen(_onExploreProgress);
     if (_exploreEngine.latestProgress != null) {
-      _onExploreProgress(_exploreEngine.latestProgress!);
+      // 延迟到首帧后再恢复进度，避免在 initState 中调用 setState
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _onExploreProgress(_exploreEngine.latestProgress!);
+      });
     }
     // 订阅板块精选进度（主线龙头 Tab 数据更新）
     _sectorPickSub = SectorPickEngine.instance.progressStream.listen((p) {
@@ -117,20 +120,28 @@ class DiscoverScreenState extends State<DiscoverScreen>
   // ─── 数据加载 ──────────────────────────────────────────────────
 
   Future<void> _loadExploreFromDb() async {
-    final results = await _dbService.getExploreResults();
-    if (mounted) {
-      setState(() {
-        _exploreResults = results;
-      });
+    try {
+      final results = await _dbService.getExploreResults();
+      if (mounted) {
+        setState(() {
+          _exploreResults = results;
+        });
+      }
+    } catch (e) {
+      debugPrint('_loadExploreFromDb failed: $e');
     }
   }
 
   Future<void> _loadWatchlistCodes() async {
-    final list = await _dbService.getWatchlist();
-    if (mounted) {
-      setState(() {
-        _watchlistCodes = list.map((e) => e.code).toSet();
-      });
+    try {
+      final list = await _dbService.getWatchlist();
+      if (mounted) {
+        setState(() {
+          _watchlistCodes = list.map((e) => e.code).toSet();
+        });
+      }
+    } catch (e) {
+      debugPrint('_loadWatchlistCodes failed: $e');
     }
   }
 
