@@ -1445,11 +1445,9 @@ class ApiClient {
         debugPrint('getLimitUpBoard: response null for date=$dateStr');
         return [];
       }
-      // IMPORTANT: _decodeGbk returns String, not bytes. Use jsonDecode on the decoded string.
-      final body = await _decodeGbk(response.bodyBytes);
-      final json = jsonDecode(body) as Map<String, dynamic>;
-      final pool = json['data']?['pool'] as List?;
-      if (pool == null) return [];
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final pool = json['data']?['pool'];
+      if (pool is! List) return [];
       return pool
           .map((e) => LimitUpStock.fromEastMoney(e as Map<String, dynamic>))
           .toList();
