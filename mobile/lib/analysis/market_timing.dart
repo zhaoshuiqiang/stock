@@ -1,3 +1,5 @@
+import '../api/api_client.dart';
+import '../api/market_context_provider.dart';
 import '../models/stock_models.dart';
 
 class MarketTimingResult {
@@ -17,6 +19,25 @@ class MarketTimingResult {
 }
 
 class MarketTiming {
+  /// 获取市场择时结果（含大盘指数 + 涨跌停情绪 + 量能）。
+  ///
+  /// 统一入口，供 ExploreEngine / OpportunityEngine / SectorPickEngine 共用，
+  /// 避免每个引擎重复实现择时获取逻辑。失败时返回 null，调用方应安全降级。
+  static Future<MarketTimingResult?> fetchTiming() async {
+    try {
+      final results = await Future.wait([
+        MarketContextProvider.getMarketContext(),
+        ApiClient().getMarketSentiment(),
+      ]);
+      return MarketTiming.analyze(
+        marketContext: results[0] as MarketContext?,
+        marketSentiment: results[1] as MarketSentiment?,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   static MarketTimingResult analyze({
     required MarketContext? marketContext,
     MarketSentiment? marketSentiment,

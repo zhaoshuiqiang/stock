@@ -46,6 +46,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
   // ─── 预警状态 ──────────────────────────────────────────────────
   Set<String> _alertCodes = {}; // 已有预警的股票代码
 
+  // ─── 持仓状态 (v2.33) ────────────────────────────────────────
+  Map<String, Position> _positionMap = {}; // code → Position
+
   // ─── 颜色常量 ──────────────────────────────────────────────────
   static const Color _bgColor = Color(0xFF0D1117);
   static const Color _cardColor = Color(0xFF161B22);
@@ -65,6 +68,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     _startRefreshTimer();
     _loadOppFromDb();
     _loadAlerts();
+    _loadPositions();
 
     // 订阅自选分析进度
     _oppSub = _oppEngine.progressStream.listen(_onOppProgress);
@@ -90,6 +94,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     } else if (state == AppLifecycleState.resumed) {
       _startRefreshTimer();
       _loadWatchlist();
+      _loadPositions();
     }
   }
 
@@ -434,6 +439,17 @@ class WatchlistScreenState extends State<WatchlistScreen>
     } catch (_) {}
   }
 
+  // ─── 持仓加载 (v2.33) ─────────────────────────────────────────
+
+  Future<void> _loadPositions() async {
+    try {
+      final map = await _dbService.getPositionMap();
+      if (mounted) {
+        setState(() => _positionMap = map);
+      }
+    } catch (_) {}
+  }
+
   // ─── 精选板块选股 ──────────────────────────────────────────────
 
   Future<void> _runSectorPick() async {
@@ -523,7 +539,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   Future<void> _searchAndAddStockByName(String name, String code) async {
-    final prefixed = _apiClient.addMarketPrefix(code);
     final exists = _watchlist.any((w) => w.code == code);
     if (exists) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -897,6 +912,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
   /// 合并卡片：同时显示行情 + 分析数据
   Widget _buildMergedCard(
       WatchlistItem item, QuoteData quote, String codeWithPrefix, OpportunityResult? opp) {
+    // 持仓查找 (v2.33)
+    final position = _positionMap[item.code];
+    final hasPosition = position != null && position.quantity > 0;
+
     // 信号标签
     final tags = <Widget>[];
     if (opp != null) {
@@ -972,7 +991,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
       child: GestureDetector(
         onLongPress: () => _showItemMenu(item, codeWithPrefix),
         child: StockCard(
-          name: item.isPinned ? '📌 ${item.name}' : item.name,
+          name: item.isPinned
+              ? '📌 ${item.name}'
+              : (hasPosition ? '💼 ${item.name}' : item.name),
           code: codeWithPrefix,
           price: quote.price,
           changePct: quote.changePct,
@@ -983,6 +1004,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
           riskLevel: opp?.riskLevel,
           tags: tags.isNotEmpty ? tags : null,
           actions: actions.isNotEmpty ? actions : null,
+          positionInfo: hasPosition && quote.price > 0
+              ? PositionInfo(
+                  quantity: position.quantity,
+                  avgPrice: position.avgPrice,
+                  currentPrice: quote.price,
+                )
+              : null,
           onTap: () => _onStockTap(codeWithPrefix, item.name),
           trailing: IconButton(
             icon: Icon(
@@ -1043,6 +1071,20 @@ class WatchlistScreenState extends State<WatchlistScreen>
               },
             ),
             ListTile(
+              leading: Icon(
+                _positionMap[item.code] != null ? Icons.edit_note : Icons.account_balance_wallet_outlined,
+                color: _accentColor, size: 22,
+              ),
+              title: Text(
+                _positionMap[item.code] != null ? '编辑持仓' : '添加持仓',
+                style: const TextStyle(color: _textPrimary, fontSize: 15),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showPositionDialog(item);
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.checklist, color: _accentColor, size: 22),
               title: const Text('多选编辑',
                   style: TextStyle(color: _textPrimary, fontSize: 15)),
@@ -1085,6 +1127,140 @@ class WatchlistScreenState extends State<WatchlistScreen>
             const SizedBox(height: 8),
           ],
         ),
+      ),
+    );
+  }
+
+  // ─── 持仓管理对话框 (v2.33) ───────────────────────────────────
+
+  void _showPositionDialog(WatchlistItem item) {
+    final existing = _positionMap[item.code];
+    final qtyCtrl = TextEditingController(text: existing?.quantity.toString() ?? '');
+    final priceCtrl = TextEditingController(text: existing?.avgPrice.toStringAsFixed(2) ?? '');
+    final notesCtrl = TextEditingController(text: existing?.notes ?? '');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text(
+          existing != null ? '编辑持仓 - ${item.name}' : '添加持仓 - ${item.name}',
+          style: const TextStyle(color: _textPrimary, fontSize: 16),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: qtyCtrl,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: _textPrimary),
+                decoration: const InputDecoration(
+                  labelText: '持仓股数',
+                  labelStyle: TextStyle(color: _textSecondary),
+                  hintText: '如 1000',
+                  hintStyle: TextStyle(color: _textSecondary),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _borderColor)),
+                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _accentColor)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: priceCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: const TextStyle(color: _textPrimary),
+                decoration: const InputDecoration(
+                  labelText: '持仓均价',
+                  labelStyle: TextStyle(color: _textSecondary),
+                  hintText: '如 10.50',
+                  hintStyle: TextStyle(color: _textSecondary),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _borderColor)),
+                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _accentColor)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: notesCtrl,
+                style: const TextStyle(color: _textPrimary),
+                decoration: const InputDecoration(
+                  labelText: '备注（可选）',
+                  labelStyle: TextStyle(color: _textSecondary),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _borderColor)),
+                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _accentColor)),
+                ),
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          if (existing != null)
+            TextButton(
+              onPressed: () async {
+                await _dbService.deletePosition(existing.id!);
+                if (mounted) {
+                  Navigator.pop(ctx);
+                  _loadPositions();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('${item.name} 持仓已清空'),
+                        backgroundColor: Colors.red, duration: const Duration(seconds: 1)),
+                  );
+                }
+              },
+              child: const Text('清空持仓', style: TextStyle(color: Colors.red)),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消', style: TextStyle(color: _textSecondary)),
+          ),
+          TextButton(
+            onPressed: () async {
+              final qty = int.tryParse(qtyCtrl.text.trim());
+              final price = double.tryParse(priceCtrl.text.trim());
+              if (qty == null || qty <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('请输入有效的股数'), duration: Duration(seconds: 1)),
+                );
+                return;
+              }
+              if (price == null || price <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('请输入有效的均价'), duration: Duration(seconds: 1)),
+                );
+                return;
+              }
+              if (existing != null) {
+                await _dbService.updatePosition(Position(
+                  id: existing.id,
+                  code: existing.code,
+                  name: existing.name,
+                  quantity: qty,
+                  avgPrice: price,
+                  notes: notesCtrl.text.trim(),
+                  createdAt: existing.createdAt,
+                ));
+              } else {
+                await _dbService.addPosition(Position(
+                  code: item.code,
+                  name: item.name,
+                  quantity: qty,
+                  avgPrice: price,
+                  notes: notesCtrl.text.trim(),
+                ));
+              }
+              if (mounted) {
+                Navigator.pop(ctx);
+                _loadPositions();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('${item.name} 持仓已${existing != null ? '更新' : '添加'}'),
+                      backgroundColor: _accentColor, duration: const Duration(seconds: 1)),
+                );
+              }
+            },
+            child: const Text('保存', style: TextStyle(color: _accentColor)),
+          ),
+        ],
       ),
     );
   }

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
+import '../analysis/market_timing.dart';
 import '../analysis/sector_pick_engine.dart';
 import '../storage/database_service.dart';
 import 'quote_screen.dart';
@@ -29,12 +30,19 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _cachedPicks = [];
   DateTime? _pickLastTime;
 
+  // ─── 短线工作台状态 (v2.33) ──────────────────────────────────
+  MarketTimingResult? _marketTiming;
+  int _limitUpCount = 0;    // 涨停梯队数量
+  int _lowBuyCount = 0;     // 分时低吸数量
+  int _mainLineCount = 0;   // 主线板块数量
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadFromCache();
     _loadCachedPicks();
+    _loadWorkbenchData();
     // 如果引擎正在运行，订阅进度流并恢复状态
     if (_pickEngine.isRunning) {
       _subscribeToPickProgress();
@@ -58,6 +66,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _restorePickProgress();
       }
     }
+    _loadWorkbenchData();
   }
 
   @override
@@ -216,7 +225,46 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _cachedPicks = results;
         _pickLastTime = lastTime;
+        _mainLineCount = results.where((p) => p['mainLine'] == 1 || p['mainLine'] == true).length;
       });
+    }
+  }
+
+  /// 加载短线工作台数据：择时 + 涨停/低吸计数
+  Future<void> _loadWorkbenchData() async {
+    try {
+      // 并发加载择时与探索结果
+      final results = await Future.wait<dynamic>([
+        MarketTiming.fetchTiming(),
+        _dbService.getExploreResults(),
+      ]);
+      final timing = results[0] as MarketTimingResult?;
+      final exploreResults = results[1] as List<ExploreResult>;
+
+      // 涨停近似判定
+      int limitUp = 0;
+      int lowBuy = 0;
+      for (final r in exploreResults) {
+        final code = r.code;
+        final isStar = code.startsWith('688');
+        final isChiNext = code.startsWith('30');
+        final isBse = code.startsWith('8') || code.startsWith('43');
+        final threshold = isBse ? 29.0 : (isStar || isChiNext ? 19.0 : 9.5);
+        if (r.changePct >= threshold) limitUp++;
+        if (r.recommendation.contains('买入') &&
+            r.changePct >= -3 && r.changePct <= 5 && r.score >= 6) {
+          lowBuy++;
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _marketTiming = timing;
+          _limitUpCount = limitUp;
+          _lowBuyCount = lowBuy;
+        });
+      }
+    } catch (e) {
+      debugPrint('Workbench load failed: $e');
     }
   }
 
@@ -300,6 +348,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                   ),
                 ),
+                _buildWorkbenchCard(),
                 Card(
                   margin: const EdgeInsets.all(8),
                   child: Padding(
@@ -374,6 +423,129 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _subscribeToPickProgress();
     // 引擎独立运行，不await
     _pickEngine.pick(_sectors);
+  }
+
+  /// 短线工作台卡片 (v2.33)：一屏聚合择时/主线/涨停梯队/分时低吸
+  Widget _buildWorkbenchCard() {
+    final timing = _marketTiming;
+    // 择时配色
+    Color timingColor;
+    String timingLabel;
+    if (timing == null) {
+      timingColor = Colors.grey;
+      timingLabel = '加载中';
+    } else if (timing.trendDirection == 'bull') {
+      timingColor = Colors.red;
+      timingLabel = timing.positionLabel;
+    } else if (timing.trendDirection == 'bear') {
+      timingColor = Colors.green;
+      timingLabel = timing.positionLabel;
+    } else {
+      timingColor = Colors.orange;
+      timingLabel = timing.positionLabel;
+    }
+
+    return Card(
+      margin: const EdgeInsets.all(8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.dashboard, color: Colors.blueAccent, size: 20),
+                const SizedBox(width: 8),
+                Text('短线工作台',
+                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                GestureDetector(
+                  onTap: _loadWorkbenchData,
+                  child: const Icon(Icons.refresh, color: Colors.white38, size: 18),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                // 择时
+                Expanded(
+                  child: _buildWorkbenchMetric(
+                    icon: Icons.trending_up,
+                    iconColor: timingColor,
+                    label: '市场择时',
+                    value: timingLabel,
+                    valueColor: timingColor,
+                  ),
+                ),
+                Container(width: 1, height: 44, color: Colors.white12),
+                // 主线板块
+                Expanded(
+                  child: _buildWorkbenchMetric(
+                    icon: Icons.military_tech,
+                    iconColor: const Color(0xFFFFB000),
+                    label: '主线板块',
+                    value: '$_mainLineCount个',
+                    valueColor: const Color(0xFFFFB000),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                // 涨停梯队
+                Expanded(
+                  child: _buildWorkbenchMetric(
+                    icon: Icons.local_fire_department,
+                    iconColor: Colors.red,
+                    label: '涨停梯队',
+                    value: '$_limitUpCount只',
+                    valueColor: Colors.red,
+                  ),
+                ),
+                Container(width: 1, height: 44, color: Colors.white12),
+                // 分时低吸
+                Expanded(
+                  child: _buildWorkbenchMetric(
+                    icon: Icons.trending_down,
+                    iconColor: Colors.green,
+                    label: '分时低吸',
+                    value: '$_lowBuyCount只',
+                    valueColor: Colors.green,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWorkbenchMetric({
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required String value,
+    required Color valueColor,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: iconColor, size: 16),
+            const SizedBox(width: 4),
+            Text(label, style: TextStyle(color: Colors.grey[400], fontSize: 11)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(value, style: TextStyle(color: valueColor, fontSize: 15, fontWeight: FontWeight.bold),
+          overflow: TextOverflow.ellipsis),
+      ],
+    );
   }
 
   Widget _buildMarketItem(String name, String code) {

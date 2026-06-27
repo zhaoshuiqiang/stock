@@ -1,5 +1,3 @@
-import '../models/stock_models.dart';
-
 class SectorAnalysis { String name, code; double changePct, mainNetFlow, strengthScore; int limitUpCount, consecutiveStrongDays; bool isMainLine;
   SectorAnalysis({required this.name, required this.code, this.changePct=0, this.limitUpCount=0, this.mainNetFlow=0, this.consecutiveStrongDays=0, this.strengthScore=0, this.isMainLine=false}); }
 

@@ -13,6 +13,7 @@ import 'confidence_calculator.dart';
 import 'strategy_builder.dart';
 import 'strategy_engine.dart';
 import 'backtest_engine.dart';
+import 'limit_up_analyzer.dart';
 import 'sr_quality.dart';
 import 'capital_flow_analyzer.dart';
 import 'market_structure_analyzer.dart';
@@ -280,6 +281,17 @@ AnalysisResult generateAnalysis(
   // 1b. 分位值分析 (Phase 4)
   final percentile = PercentileAnalyzer.analyze(data, quote);
 
+  // 1c. 打板分析 (激活 LimitUpAnalyzer 孤儿模块)
+  // 从日K线推断涨停/连板信息，识别打板标的（非涨停返回 null）
+  final limitUpAnalysis = quote != null
+      ? LimitUpAnalyzer.analyzeFromDaily(
+          code: quote.code,
+          name: quote.name,
+          klines: data,
+          quote: quote,
+        )
+      : null;
+
   final buySignals = signals.where((s) => s.type == 'buy').toList();
   final sellSignals = signals.where((s) => s.type == 'sell').toList();
 
@@ -433,6 +445,12 @@ AnalysisResult generateAnalysis(
     confidenceScore: confidenceScore,
   );
 
+  // 追加打板理由（若当日涨停）
+  if (limitUpAnalysis != null) {
+    reasons.add('打板分析：${limitUpAnalysis.consecutiveDays}连板${limitUpAnalysis.boardType}，'
+        '${limitUpAnalysis.quality}（次日溢价概率${(limitUpAnalysis.premiumProb * 100).round()}%）');
+  }
+
   // 操作建议（动态仓位：基于ATR波动率、置信度、市场结构）
   final suggestions = SuggestionGenerator.generate(
     recommendation: recommendation,
@@ -482,7 +500,7 @@ AnalysisResult generateAnalysis(
       marketStructure: marketStructure,
     );
     // 异步fire-and-forget，不阻塞主分析流程
-    RecommendationTracker().track(trackResult).catchError((_) {});
+    RecommendationTracker().track(trackResult).catchError((_) => null);
   }
 
   return AnalysisResult(
@@ -511,6 +529,7 @@ AnalysisResult generateAnalysis(
     confidenceBreakdown: confidenceBreakdown,
     marketStructure: marketStructure,
     percentile: percentile,
+    limitUpAnalysis: limitUpAnalysis,
   );
 }
 

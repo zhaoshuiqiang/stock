@@ -8,6 +8,7 @@ import '../data/concept_tag_provider.dart';
 import 'base_analysis_engine.dart';
 import 'indicators.dart';
 import 'signal_engine.dart';
+import 'market_timing.dart';
 import 'market_structure_analyzer.dart';
 import 'recommendation_tracker.dart';
 
@@ -32,9 +33,14 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
     final startTime = DateTime.now();
 
     try {
-      // 1. 获取热门板块列表
+      // 1. 并行获取热门板块 + 市场择时（择时结果用于UI展示）
       emit(ExploreProgress(status: ExploreStatus.fetchingSectors));
-      final sectors = await _apiClient.getHotSectors();
+      final sectorAndTiming = await Future.wait<dynamic>([
+        _apiClient.getHotSectors(),
+        MarketTiming.fetchTiming(),
+      ]);
+      final sectors = sectorAndTiming[0] as List<SectorInfo>;
+      final marketTiming = sectorAndTiming[1] as MarketTimingResult?;
       final topSectors = sectors.take(20).toList();
 
       if (topSectors.isEmpty) {
@@ -194,6 +200,7 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         totalStocks: allStocks.length,
         foundStocks: results.length,
         elapsedSeconds: elapsed.inSeconds,
+        marketTiming: marketTiming,
       ));
     } catch (e) {
       debugPrint('ExploreEngine error: $e');
@@ -298,6 +305,7 @@ class ExploreProgress {
   final String? message;
   final List<ExploreResult>? results;
   final int? elapsedSeconds;
+  final MarketTimingResult? marketTiming;
 
   ExploreProgress({
     required this.status,
@@ -308,5 +316,6 @@ class ExploreProgress {
     this.message,
     this.results,
     this.elapsedSeconds,
+    this.marketTiming,
   });
 }

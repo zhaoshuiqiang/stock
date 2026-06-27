@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../analysis/explore_engine.dart';
+import '../analysis/sector_pick_engine.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
 import '../widgets/stock_card.dart';
@@ -17,6 +18,9 @@ const _kDown = Color(0xFF2ECC71);
 const _kTextPrimary = Color(0xFFF0F6FC);
 const _kTextSecondary = Color(0xFF8B949E);
 const _kBorder = Color(0xFF30363D);
+const _kLimitUpColor = Color(0xFFE74C3C);   // 打板红
+const _kMainLineColor = Color(0xFFFFB000);  // 主线金
+const _kLowBuyColor = Color(0xFF2ECC71);    // 低吸绿
 
 class DiscoverScreen extends StatefulWidget {
   const DiscoverScreen({super.key});
@@ -25,9 +29,12 @@ class DiscoverScreen extends StatefulWidget {
   State<DiscoverScreen> createState() => DiscoverScreenState();
 }
 
-class DiscoverScreenState extends State<DiscoverScreen> {
+class DiscoverScreenState extends State<DiscoverScreen>
+    with SingleTickerProviderStateMixin {
   final ExploreEngine _exploreEngine = ExploreEngine.instance;
   final DatabaseService _dbService = DatabaseService();
+
+  late final TabController _tabController;
 
   // ─── 智能探索状态 ──────────────────────────────────────────────
   List<ExploreResult> _exploreResults = [];
@@ -35,6 +42,9 @@ class DiscoverScreenState extends State<DiscoverScreen> {
   String _exploreSort = '评分'; // 评分 / 涨幅 / 名称
   String _exploreFilter = '全部'; // 全部 / 买入 / 观望
   Set<String> _watchlistCodes = {};
+  // 板块精选结果（主线龙头 Tab 数据源）
+  List<Map<String, dynamic>> _sectorPickResults = [];
+  StreamSubscription<SectorPickProgress>? _sectorPickSub;
 
   StreamSubscription<ExploreProgress>? _exploreSub;
 
@@ -43,25 +53,36 @@ class DiscoverScreenState extends State<DiscoverScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 4, vsync: this);
     _loadExploreFromDb();
     _loadWatchlistCodes();
+    _loadSectorPicks();
 
     // 订阅智能探索进度
     _exploreSub = _exploreEngine.progressStream.listen(_onExploreProgress);
     if (_exploreEngine.latestProgress != null) {
       _onExploreProgress(_exploreEngine.latestProgress!);
     }
+    // 订阅板块精选进度（主线龙头 Tab 数据更新）
+    _sectorPickSub = SectorPickEngine.instance.progressStream.listen((p) {
+      if (p.status == SectorPickStatus.complete && mounted) {
+        _loadSectorPicks();
+      }
+    });
   }
 
   @override
   void dispose() {
     _exploreSub?.cancel();
+    _sectorPickSub?.cancel();
+    _tabController.dispose();
     super.dispose();
   }
 
   /// 切回发现Tab时刷新自选状态
   void onTabVisible() {
     _loadWatchlistCodes();
+    _loadSectorPicks();
   }
 
   // ─── 数据加载 ──────────────────────────────────────────────────
@@ -82,6 +103,15 @@ class DiscoverScreenState extends State<DiscoverScreen> {
         _watchlistCodes = list.map((e) => e.code).toSet();
       });
     }
+  }
+
+  Future<void> _loadSectorPicks() async {
+    try {
+      final results = await _dbService.getSectorPickResults();
+      if (mounted) {
+        setState(() => _sectorPickResults = results);
+      }
+    } catch (_) {}
   }
 
   // ─── 智能探索进度回调 ──────────────────────────────────────────
@@ -116,8 +146,47 @@ class DiscoverScreenState extends State<DiscoverScreen> {
     });
   }
 
-  // ─── 智能探索：排序 + 过滤 ────────────────────────────────────
+  // ─── Tab 1: 打板梯队（涨停/连板标的） ─────────────────────────
+  /// 涨停近似判定：主板≥9.5%, 创业板/科创板≥19%, 北交所≥29%
+  bool _isLimitUpApprox(ExploreResult r) {
+    final code = r.code;
+    final isStar = code.startsWith('688');
+    final isChiNext = code.startsWith('30');
+    final isBse = code.startsWith('8') || code.startsWith('43');
+    final threshold = isBse ? 29.0 : (isStar || isChiNext ? 19.0 : 9.5);
+    return r.changePct >= threshold;
+  }
 
+  List<ExploreResult> get _limitUpList {
+    final list = _exploreResults.where(_isLimitUpApprox).toList();
+    list.sort((a, b) => b.changePct.compareTo(a.changePct));
+    return list;
+  }
+
+  // ─── Tab 2: 主线龙头（板块精选 + 主线标记） ───────────────────
+  List<Map<String, dynamic>> get _mainLinePicks {
+    // mainLine 经 SQLite 往返后为 int(0/1)，从引擎直接获取时为 bool
+    final picks = _sectorPickResults
+        .where((p) => p['mainLine'] == 1 || p['mainLine'] == true)
+        .toList();
+    picks.sort((a, b) =>
+        (b['score'] as num? ?? 0).toInt().compareTo((a['score'] as num? ?? 0).toInt()));
+    return picks;
+  }
+
+  // ─── Tab 3: 分时低吸（买入推荐 + 涨幅温和 + 评分高） ─────────
+  /// 低吸筛选：买入推荐 且 涨幅在 [-3%, +5%] 区间 且 评分≥6
+  List<ExploreResult> get _lowBuyList {
+    final list = _exploreResults.where((r) =>
+        r.recommendation.contains('买入') &&
+        r.changePct >= -3 &&
+        r.changePct <= 5 &&
+        r.score >= 6).toList();
+    list.sort((a, b) => b.score.compareTo(a.score));
+    return list;
+  }
+
+  // ─── Tab 4: 全市场（原探索结果，排序+筛选） ──────────────────
   List<ExploreResult> get _processedExploreResults {
     var list = List<ExploreResult>.from(_exploreResults);
 
@@ -167,6 +236,16 @@ class DiscoverScreenState extends State<DiscoverScreen> {
     await _loadWatchlistCodes();
   }
 
+  Future<void> _toggleWatchlistByCode(String code, String name) async {
+    final isIn = _watchlistCodes.contains(code);
+    if (isIn) {
+      await _dbService.removeFromWatchlist(code);
+    } else {
+      await _dbService.addToWatchlist(code, name);
+    }
+    await _loadWatchlistCodes();
+  }
+
   // ─── 智能探索：一键加自选 ──────────────────────────────────────
 
   Future<void> _batchAddToWatchlist() async {
@@ -203,40 +282,270 @@ class DiscoverScreenState extends State<DiscoverScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final processed = _processedExploreResults;
     return Scaffold(
       backgroundColor: _kBg,
       body: SafeArea(
         child: Column(
           children: [
-            // 排序 + 筛选条
-            _buildExploreHeader(),
-            // 进度条
+            _buildTabBar(),
+            // 进度条（仅探索进行中时显示）
             if (_exploreLoading) _buildExploreProgress(),
-            // 列表
             Expanded(
-              child: processed.isEmpty
-                  ? _buildEmptyState(
-                      icon: Icons.explore_outlined,
-                      text: _exploreResults.isEmpty ? '暂无探索数据' : '当前筛选无结果',
-                      actionText: _exploreResults.isEmpty ? '开始探索' : null,
-                      onAction: _exploreResults.isEmpty
-                          ? () => _exploreEngine.explore()
-                          : null,
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: processed.length,
-                      itemBuilder: (_, i) => _buildExploreCard(processed[i], i + 1),
-                    ),
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildLimitUpTab(),
+                  _buildMainLineTab(),
+                  _buildLowBuyTab(),
+                  _buildAllMarketTab(),
+                ],
+              ),
             ),
-            // 一键加自选
-            if (!_exploreLoading && processed.isNotEmpty) _buildExploreBottomBar(),
           ],
         ),
       ),
     );
   }
+
+  // ─── TabBar ────────────────────────────────────────────────────
+
+  Widget _buildTabBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _kBorder),
+      ),
+      child: TabBar(
+        controller: _tabController,
+        isScrollable: true,
+        labelColor: Colors.white,
+        unselectedLabelColor: _kTextSecondary,
+        indicatorSize: TabBarIndicatorSize.tab,
+        indicator: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: _kAccent,
+        ),
+        dividerHeight: 0,
+        labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        unselectedLabelStyle: const TextStyle(fontSize: 13),
+        tabAlignment: TabAlignment.fill,
+        tabs: const [
+          Tab(
+            height: 36,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.local_fire_department, size: 16),
+                SizedBox(width: 4),
+                Text('打板梯队'),
+              ],
+            ),
+          ),
+          Tab(
+            height: 36,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.military_tech, size: 16),
+                SizedBox(width: 4),
+                Text('主线龙头'),
+              ],
+            ),
+          ),
+          Tab(
+            height: 36,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.trending_down, size: 16),
+                SizedBox(width: 4),
+                Text('分时低吸'),
+              ],
+            ),
+          ),
+          Tab(
+            height: 36,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.public, size: 16),
+                SizedBox(width: 4),
+                Text('全市场'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Tab 1: 打板梯队 ──────────────────────────────────────────
+
+  Widget _buildLimitUpTab() {
+    final list = _limitUpList;
+    return Column(
+      children: [
+        _buildTabHeader(
+          count: list.length,
+          hint: list.isEmpty ? '今日暂无涨停标的' : '涨停/连板标的，按涨幅排序',
+          accentColor: _kLimitUpColor,
+        ),
+        Expanded(
+          child: list.isEmpty
+              ? _buildEmptyState(
+                  icon: Icons.local_fire_department_outlined,
+                  text: _exploreResults.isEmpty ? '暂无探索数据，请先刷新' : '今日暂无涨停标的',
+                  actionText: _exploreResults.isEmpty ? '开始探索' : null,
+                  onAction: _exploreResults.isEmpty ? () => _exploreEngine.explore() : null,
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: list.length,
+                  itemBuilder: (_, i) => _buildExploreCard(list[i], i + 1,
+                      accentTag: '涨停'),
+                ),
+        ),
+      ],
+    );
+  }
+
+  // ─── Tab 2: 主线龙头 ──────────────────────────────────────────
+
+  Widget _buildMainLineTab() {
+    final list = _mainLinePicks;
+    return Column(
+      children: [
+        _buildTabHeader(
+          count: list.length,
+          hint: list.isEmpty ? '暂无主线板块数据' : '主线板块内精选个股，含轮动加成',
+          accentColor: _kMainLineColor,
+          actionText: '刷新板块',
+          onAction: () => _loadSectorPicks(),
+        ),
+        Expanded(
+          child: list.isEmpty
+              ? _buildEmptyState(
+                  icon: Icons.military_tech_outlined,
+                  text: _sectorPickResults.isEmpty ? '暂无板块精选数据' : '当前无主线板块命中',
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: list.length,
+                  itemBuilder: (_, i) => _buildMainLineCard(list[i], i + 1),
+                ),
+        ),
+      ],
+    );
+  }
+
+  // ─── Tab 3: 分时低吸 ──────────────────────────────────────────
+
+  Widget _buildLowBuyTab() {
+    final list = _lowBuyList;
+    return Column(
+      children: [
+        _buildTabHeader(
+          count: list.length,
+          hint: list.isEmpty ? '暂无低吸标的' : '买入推荐 · 涨幅[-3%,+5%] · 评分≥6',
+          accentColor: _kLowBuyColor,
+        ),
+        Expanded(
+          child: list.isEmpty
+              ? _buildEmptyState(
+                  icon: Icons.trending_down_outlined,
+                  text: _exploreResults.isEmpty ? '暂无探索数据，请先刷新' : '当前无低吸信号',
+                  actionText: _exploreResults.isEmpty ? '开始探索' : null,
+                  onAction: _exploreResults.isEmpty ? () => _exploreEngine.explore() : null,
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: list.length,
+                  itemBuilder: (_, i) => _buildExploreCard(list[i], i + 1,
+                      accentTag: '低吸'),
+                ),
+        ),
+      ],
+    );
+  }
+
+  // ─── Tab 4: 全市场 ────────────────────────────────────────────
+
+  Widget _buildAllMarketTab() {
+    final processed = _processedExploreResults;
+    return Column(
+      children: [
+        _buildExploreHeader(),
+        Expanded(
+          child: processed.isEmpty
+              ? _buildEmptyState(
+                  icon: Icons.explore_outlined,
+                  text: _exploreResults.isEmpty ? '暂无探索数据' : '当前筛选无结果',
+                  actionText: _exploreResults.isEmpty ? '开始探索' : null,
+                  onAction: _exploreResults.isEmpty
+                      ? () => _exploreEngine.explore()
+                      : null,
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: processed.length,
+                  itemBuilder: (_, i) => _buildExploreCard(processed[i], i + 1),
+                ),
+        ),
+        if (!_exploreLoading && processed.isNotEmpty) _buildExploreBottomBar(),
+      ],
+    );
+  }
+
+  // ─── Tab 通用头部（计数+提示+可选操作） ────────────────────────
+
+  Widget _buildTabHeader({
+    required int count,
+    required String hint,
+    required Color accentColor,
+    String? actionText,
+    VoidCallback? onAction,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Row(
+        children: [
+          Container(
+            width: 6,
+            height: 14,
+            decoration: BoxDecoration(
+              color: accentColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text('$count只', style: TextStyle(
+            color: accentColor, fontSize: 13, fontWeight: FontWeight.bold)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(hint, style: const TextStyle(
+                color: _kTextSecondary, fontSize: 11),
+              overflow: TextOverflow.ellipsis),
+          ),
+          if (actionText != null && onAction != null)
+            TextButton(
+              onPressed: onAction,
+              style: TextButton.styleFrom(
+                foregroundColor: accentColor,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(actionText, style: const TextStyle(fontSize: 12)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ─── 排序+筛选条（仅全市场Tab） ────────────────────────────────
 
   Widget _buildExploreHeader() {
     return Container(
@@ -244,7 +553,6 @@ class DiscoverScreenState extends State<DiscoverScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 排序
           const Text('排序', style: TextStyle(color: _kTextSecondary, fontSize: 12)),
           const SizedBox(width: 4),
           Expanded(
@@ -286,7 +594,6 @@ class DiscoverScreenState extends State<DiscoverScreen> {
             ),
           ),
           const SizedBox(width: 6),
-          // 筛选
           const Text('筛选', style: TextStyle(color: _kTextSecondary, fontSize: 12)),
           const SizedBox(width: 4),
           Expanded(
@@ -388,11 +695,17 @@ class DiscoverScreenState extends State<DiscoverScreen> {
     );
   }
 
-  Widget _buildExploreCard(ExploreResult r, int rank) {
+  // ─── ExploreResult 卡片（打板/低吸/全市场共用） ────────────────
+
+  Widget _buildExploreCard(ExploreResult r, int rank, {String? accentTag}) {
     final isInWatchlist = _watchlistCodes.contains(r.code);
 
     // 信号标签
     final tags = <Widget>[];
+    if (accentTag != null) {
+      final color = accentTag == '涨停' ? _kLimitUpColor : _kLowBuyColor;
+      tags.add(SignalTag(text: accentTag, color: color));
+    }
     if (r.confluenceScore > 0) {
       tags.add(SignalTag(text: '共振${r.confluenceScore}', color: _kAccent));
     }
@@ -443,6 +756,55 @@ class DiscoverScreenState extends State<DiscoverScreen> {
           size: 22,
         ),
         onPressed: () => _toggleWatchlist(r),
+      ),
+    );
+  }
+
+  // ─── 主线龙头卡片（来自 SectorPickEngine 结果） ────────────────
+
+  Widget _buildMainLineCard(Map<String, dynamic> p, int rank) {
+    final code = p['code'] as String? ?? '';
+    final name = p['name'] as String? ?? '';
+    final score = (p['score'] as num?)?.toInt() ?? 0;
+    final rec = p['recommendation'] as String? ?? '';
+    final sector = p['sector'] as String? ?? '';
+    final bonus = (p['bonus'] as num?)?.toDouble() ?? 1.0;
+    final originalScore = (p['originalScore'] as num?)?.toInt() ?? score;
+    final isInWatchlist = _watchlistCodes.contains(code);
+
+    final tags = <Widget>[
+      SignalTag(text: sector, color: _kMainLineColor),
+      if (bonus > 1.0)
+        SignalTag(text: '主线+${((bonus - 1) * 100).toStringAsFixed(0)}%', color: _kMainLineColor),
+      if (originalScore != score)
+        SignalTag(text: '原$originalScore分', color: _kTextSecondary),
+    ];
+
+    // 主线龙头卡片没有现价/涨跌幅（SectorPickEngine 未保存），用评分驱动
+    return StockCard(
+      name: name,
+      code: code,
+      price: 0,
+      changePct: 0,
+      score: score,
+      recommendation: rec,
+      rank: rank,
+      tags: tags,
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => QuoteScreen(code: code, name: name),
+          ),
+        );
+      },
+      trailing: IconButton(
+        icon: Icon(
+          isInWatchlist ? Icons.star : Icons.star_border,
+          color: isInWatchlist ? _kAccent : _kTextSecondary,
+          size: 22,
+        ),
+        onPressed: () => _toggleWatchlistByCode(code, name),
       ),
     );
   }

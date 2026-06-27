@@ -17,6 +17,8 @@ class StockCard extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final Widget? trailing;
+  /// 持仓信息（v2.33）：非空时在卡片显示持仓行
+  final PositionInfo? positionInfo;
 
   const StockCard({
     super.key,
@@ -35,6 +37,7 @@ class StockCard extends StatelessWidget {
     this.onTap,
     this.onLongPress,
     this.trailing,
+    this.positionInfo,
   });
 
   Color get _changeColor =>
@@ -202,6 +205,11 @@ class StockCard extends StatelessWidget {
               const SizedBox(height: 8),
               Wrap(spacing: 4, runSpacing: 4, children: tags!),
             ],
+            // 持仓行（v2.33）：持仓股数 + 成本 + 浮盈
+            if (positionInfo != null) ...[
+              const SizedBox(height: 8),
+              _PositionRow(info: positionInfo!),
+            ],
             // 第五行：操作按钮（可选）
             if (actions != null && actions!.isNotEmpty) ...[
               const SizedBox(height: 10),
@@ -232,6 +240,63 @@ class SignalTag extends StatelessWidget {
       child: Text(
         text,
         style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+/// 持仓展示数据（v2.33）
+/// 解耦 StockCard 与 Position 模型：调用方负责计算现价盈亏后传入
+class PositionInfo {
+  final int quantity;
+  final double avgPrice;
+  final double currentPrice;
+
+  const PositionInfo({
+    required this.quantity,
+    required this.avgPrice,
+    required this.currentPrice,
+  });
+
+  double get cost => quantity * avgPrice;
+  double get marketValue => quantity * currentPrice;
+  double get pnl => marketValue - cost;
+  double get pnlPct => cost > 0 ? pnl / cost * 100 : 0.0;
+}
+
+/// 持仓行：高亮显示持仓股数、成本价、浮盈/浮亏
+class _PositionRow extends StatelessWidget {
+  final PositionInfo info;
+  const _PositionRow({required this.info});
+
+  @override
+  Widget build(BuildContext context) {
+    final isProfit = info.pnl >= 0;
+    final pnlColor = isProfit ? const Color(0xFFE74C3C) : const Color(0xFF2ECC71);
+    final pnlSign = isProfit ? '+' : '';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: pnlColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: pnlColor.withOpacity(0.25), width: 0.8),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.account_balance_wallet, size: 14, color: pnlColor),
+          const SizedBox(width: 6),
+          Text('持仓 ${info.quantity}股',
+              style: const TextStyle(color: Color(0xFFF0F6FC), fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(width: 10),
+          Text('成本¥${info.avgPrice.toStringAsFixed(2)}',
+              style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11)),
+          const Spacer(),
+          Text('$pnlSign${info.pnl.toStringAsFixed(0)}',
+              style: TextStyle(color: pnlColor, fontSize: 13, fontWeight: FontWeight.bold)),
+          const SizedBox(width: 6),
+          Text('$pnlSign${info.pnlPct.toStringAsFixed(2)}%',
+              style: TextStyle(color: pnlColor, fontSize: 12, fontWeight: FontWeight.w600)),
+        ],
       ),
     );
   }

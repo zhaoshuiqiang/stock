@@ -1,15 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import 'base_analysis_engine.dart';
 import 'indicators.dart';
-import 'signal_layer.dart';
 import 'signal_engine.dart';
 import 'market_timing.dart';
-import '../api/market_context_provider.dart';
 import '../storage/database_service.dart';
 
 /// 机会分析结果
@@ -102,6 +99,7 @@ class OpportunityProgress {
   final int totalCount;
   final List<OpportunityResult>? results;
   final String? message;
+  final MarketTimingResult? marketTiming;
 
   OpportunityProgress({
     required this.status,
@@ -109,6 +107,7 @@ class OpportunityProgress {
     this.totalCount = 0,
     this.results,
     this.message,
+    this.marketTiming,
   });
 }
 
@@ -142,7 +141,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       final prefixedCodes = watchlist.map((item) => _apiClient.addMarketPrefix(item.code)).toList();
       final futures = <Future>[
         _apiClient.getBatchRealtimeQuotes(prefixedCodes).catchError((_) => <QuoteData>[]),
-        _fetchMarketTiming(),
+        MarketTiming.fetchTiming(),
       ];
       final results_futures = await Future.wait(futures);
       final batchQuotes = results_futures[0] as List<QuoteData>;
@@ -153,7 +152,6 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       }
 
       final marketTimingResult = results_futures[1] as MarketTimingResult?;
-      final positionFactor = marketTimingResult != null ? MarketTiming.getPositionAdjustment(marketTimingResult) : null;
 
       emit(OpportunityProgress(status: OpportunityStatus.analyzing, totalCount: totalCount, completedCount: 0));
 
@@ -215,25 +213,12 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
           opportunities.map((o) => o.toMap(DateTime.now())).toList());
 
       emit(OpportunityProgress(status: OpportunityStatus.complete,
-          results: opportunities, totalCount: totalCount, completedCount: totalCount));
+          results: opportunities, totalCount: totalCount, completedCount: totalCount,
+          marketTiming: marketTimingResult));
     } catch (e) {
       emit(OpportunityProgress(status: OpportunityStatus.error, message: '分析出错：$e'));
     } finally {
       markFinished();
     }
-  }
-
-  /// 获取市场择时结果（仅调用一次，含情绪数据）
-  static Future<MarketTimingResult?> _fetchMarketTiming() async {
-    try {
-      final results = await Future.wait([
-        MarketContextProvider.getMarketContext(),
-        ApiClient().getMarketSentiment(),
-      ]);
-      return MarketTiming.analyze(
-        marketContext: results[0] as MarketContext?,
-        marketSentiment: results[1] as MarketSentiment?,
-      );
-    } catch (_) { return null; }
   }
 }

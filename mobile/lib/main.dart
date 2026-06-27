@@ -10,8 +10,6 @@ import 'package:stock_analyzer/screens/update_log_screen.dart';
 import 'package:stock_analyzer/services/notification_service.dart';
 import 'package:stock_analyzer/data/concept_tag_provider.dart';
 
-const String appVersion = 'v2.22.0';
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final notificationService = NotificationService();

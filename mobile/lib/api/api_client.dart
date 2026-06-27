@@ -922,12 +922,15 @@ class ApiClient {
           avgChangePct = avgChangePct / count;
         }
 
+        // 接入东方财富涨停/跌停池接口，修复原先硬编码为 0 的问题
+        // 失败时 fallback 为 0，不影响主流程
+        final limitPool = await _fetchLimitPoolCount();
         final result = MarketSentiment(
           upCount: upCount,
           downCount: downCount,
           flatCount: flatCount,
-          limitUpCount: 0,
-          limitDownCount: 0,
+          limitUpCount: limitPool.up,
+          limitDownCount: limitPool.down,
           avgChangePct: avgChangePct,
           totalVolume: 0,
           totalAmount: totalAmount,
@@ -938,6 +941,60 @@ class ApiClient {
       }
     }
     return null;
+  }
+
+  /// 获取涨停/跌停家数（接入东方财富涨停池/跌停池接口）
+  /// 失败时返回 (0, 0)，不影响主流程
+  Future<({int up, int down})> _fetchLimitPoolCount() async {
+    final now = DateTime.now();
+    final dateStr = '${now.year}'
+        '${now.month.toString().padLeft(2, '0')}'
+        '${now.day.toString().padLeft(2, '0')}';
+
+    int limitUp = 0;
+    int limitDown = 0;
+
+    // 涨停池
+    try {
+      final url = Uri.parse(
+        'https://push2ex.eastmoney.com/getTopicZTPool?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt&date=$dateStr',
+      );
+      final response = await _httpGet(url, headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://quote.eastmoney.com/',
+      });
+      if (response != null) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final pool = data['data']?['pool'];
+        if (pool is List) {
+          limitUp = pool.length;
+        }
+      }
+    } catch (e) {
+      debugPrint('获取涨停家数失败: $e');
+    }
+
+    // 跌停池
+    try {
+      final url = Uri.parse(
+        'https://push2ex.eastmoney.com/getTopicDTPool?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt&date=$dateStr',
+      );
+      final response = await _httpGet(url, headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://quote.eastmoney.com/',
+      });
+      if (response != null) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final pool = data['data']?['pool'];
+        if (pool is List) {
+          limitDown = pool.length;
+        }
+      }
+    } catch (e) {
+      debugPrint('获取跌停家数失败: $e');
+    }
+
+    return (up: limitUp, down: limitDown);
   }
 
   dynamic _getCached(String key) {

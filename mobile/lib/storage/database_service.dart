@@ -23,7 +23,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 8,
+      version: 10,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -157,6 +157,37 @@ class DatabaseService {
             )
           ''');
         }
+        if (oldVersion < 9) {
+          // v2.33: 持仓管理
+          await db.execute('''
+            CREATE TABLE positions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              code TEXT NOT NULL,
+              name TEXT NOT NULL,
+              quantity INTEGER NOT NULL DEFAULT 0,
+              avg_price REAL NOT NULL DEFAULT 0,
+              buy_date INTEGER,
+              notes TEXT DEFAULT '',
+              created_at INTEGER NOT NULL
+            )
+          ''');
+          await db.execute('CREATE INDEX idx_positions_code ON positions(code)');
+        }
+        if (oldVersion < 10) {
+          // v2.33: sector_pick_results 增加主线轮动字段
+          await db.execute(
+            'ALTER TABLE sector_pick_results ADD COLUMN mainLine INTEGER NOT NULL DEFAULT 0',
+          );
+          await db.execute(
+            'ALTER TABLE sector_pick_results ADD COLUMN bonus REAL NOT NULL DEFAULT 1.0',
+          );
+          await db.execute(
+            'ALTER TABLE sector_pick_results ADD COLUMN originalScore INTEGER',
+          );
+          await db.execute(
+            'ALTER TABLE sector_pick_results ADD COLUMN sectorCode TEXT NOT NULL DEFAULT \'\'',
+          );
+        }
       },
     );
   }
@@ -253,7 +284,11 @@ class DatabaseService {
         recommendation TEXT NOT NULL,
         score INTEGER NOT NULL,
         sector TEXT NOT NULL,
-        analyzed_at INTEGER NOT NULL
+        analyzed_at INTEGER NOT NULL,
+        mainLine INTEGER NOT NULL DEFAULT 0,
+        bonus REAL NOT NULL DEFAULT 1.0,
+        originalScore INTEGER,
+        sectorCode TEXT NOT NULL DEFAULT ''
       )
     ''');
 
@@ -285,6 +320,20 @@ class DatabaseService {
         is_closed INTEGER DEFAULT 0
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE positions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 0,
+        avg_price REAL NOT NULL DEFAULT 0,
+        buy_date INTEGER,
+        notes TEXT DEFAULT '',
+        created_at INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX idx_positions_code ON positions(code)');
   }
 
   Future<void> addToWatchlist(String code, String name) async {
@@ -699,5 +748,45 @@ class DatabaseService {
     final cutoff = DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
     await db.delete('recommendation_tracking',
       where: 'signal_date < ?', whereArgs: [cutoff]);
+  }
+
+  // ========== 持仓管理 CRUD (v2.33) ==========
+
+  Future<int> addPosition(Position position) async {
+    final db = await database;
+    return await db.insert('positions', position.toMap());
+  }
+
+  Future<void> updatePosition(Position position) async {
+    final db = await database;
+    if (position.id == null) return;
+    await db.update(
+      'positions',
+      {
+        'quantity': position.quantity,
+        'avg_price': position.avgPrice,
+        'buy_date': position.buyDate?.millisecondsSinceEpoch,
+        'notes': position.notes,
+      },
+      where: 'id = ?',
+      whereArgs: [position.id],
+    );
+  }
+
+  Future<void> deletePosition(int id) async {
+    final db = await database;
+    await db.delete('positions', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<Position>> getPositions() async {
+    final db = await database;
+    final result = await db.query('positions', orderBy: 'created_at DESC');
+    return result.map((row) => Position.fromMap(row)).toList();
+  }
+
+  /// 返回 code → Position 的映射，用于自选列表 O(1) 查找持仓标记
+  Future<Map<String, Position>> getPositionMap() async {
+    final positions = await getPositions();
+    return {for (final p in positions) p.code: p};
   }
 }

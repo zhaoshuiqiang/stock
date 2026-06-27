@@ -1,3 +1,6 @@
+import '../models/stock_models.dart';
+import 'backtest_engine.dart';
+
 class LimitUpStock {
   final String code, name, sector, limitUpType;
   final double price, changePct, sealAmount, turnoverRate, volumeRatio;
@@ -65,5 +68,143 @@ class LimitUpAnalyzer {
     for (final s in stocks) { final k = s.consecutiveDays == 1 ? '首板' : '${s.consecutiveDays}连板'; dist[k] = (dist[k]??0)+1; }
     final avg = analyses.isEmpty ? 0 : double.parse((analyses.map((a)=>a.qualityScore).reduce((a,b)=>a+b)/analyses.length).toStringAsFixed(1));
     return {'analyses':analyses.map((a)=>a.toMap()).toList(), 'total':stocks.length, 'leaders':leaders.map((a)=>a.toMap()).toList(), 'distribution':dist, 'avg_quality':avg};
+  }
+
+  /// 从日K线推断打板信息（简化版，无首封时间和封单数据）。
+  ///
+  /// 用于信号引擎 [generateAnalysis] 流程，识别涨停标的并评估打板质量。
+  /// 与 [analyzeSingle] 的区别：跳过首封时间和封单充足率维度（日K线无法获取），
+  /// 评分维度调整为连板高度 + 板型 + 量价配合。非涨停日返回 null。
+  static LimitUpAnalysis? analyzeFromDaily({
+    required String code,
+    required String name,
+    required List<HistoryKline> klines,
+    QuoteData? quote,
+  }) {
+    if (klines.length < 2) return null;
+
+    final limitPct = BacktestConfig.inferLimitPct(code);
+    final last = klines.last;
+    final prev = klines[klines.length - 2];
+
+    // 判断最近一日是否涨停（收盘价或最高价触及涨停价）
+    if (!KlineValidator.isLimitUp(last, prev, limitPct)) return null;
+
+    // 统计连板天数（往前遍历）
+    int consecutiveDays = 1;
+    for (int i = klines.length - 2; i >= 1; i--) {
+      final k = klines[i];
+      final p = klines[i - 1];
+      if (KlineValidator.isLimitUp(k, p, limitPct)) {
+        consecutiveDays++;
+      } else {
+        break;
+      }
+    }
+
+    // 推断板型
+    String boardType;
+    if (KlineValidator.isYiZiBan(last, prev, limitPct)) {
+      boardType = '一字板';
+    } else if ((last.open - KlineValidator.limitUpPrice(prev.close, limitPct)).abs() < 0.001) {
+      boardType = 'T字板';
+    } else {
+      boardType = '换手板';
+    }
+
+    // 量价信息
+    final turnoverRate = quote?.turnover ?? 0;
+    final volumeRatio = last.volMa5 > 0 ? last.volume / last.volMa5 : 1.0;
+
+    // 简化版评分（基础5.0，只用日K线可推断的维度）
+    double score = 5.0;
+    final signals = <String>[];
+
+    // 连板高度
+    if (consecutiveDays >= 5) {
+      score += 3.0;
+      signals.add('$consecutiveDays连板，市场龙头');
+    } else if (consecutiveDays >= 3) {
+      score += 2.0;
+      signals.add('$consecutiveDays连板，板块核心');
+    } else if (consecutiveDays >= 2) {
+      score += 1.0;
+      signals.add('2连板，确认强势');
+    } else {
+      signals.add('首板涨停');
+    }
+
+    // 板型
+    if (boardType == '一字板') {
+      score += 1.5;
+      signals.add('一字板，封板极强');
+    } else if (boardType == 'T字板') {
+      score += 0.8;
+      signals.add('T字板，盘中开板回封');
+    } else {
+      // 换手板：低换手锁仓加分
+      if (consecutiveDays >= 2 && turnoverRate > 0 && turnoverRate < 5) {
+        score += 0.5;
+        signals.add('低换手锁仓');
+      }
+    }
+
+    // 量价配合
+    if (volumeRatio > 2.0) {
+      score += 0.8;
+      signals.add('量比${volumeRatio.toStringAsFixed(1)}，放量封板');
+    } else if (volumeRatio > 1.5) {
+      score += 0.4;
+    } else if (volumeRatio < 0.8 && consecutiveDays >= 2) {
+      score += 0.3;
+      signals.add('缩量封板，筹码锁定');
+    }
+
+    // 换手率合理性
+    if (turnoverRate > 0) {
+      if (turnoverRate >= 5 && turnoverRate <= 15) {
+        score += 0.3;
+      } else if (turnoverRate > 25) {
+        score -= 0.3;
+        signals.add('换手率${turnoverRate.toStringAsFixed(1)}%过高，分歧大');
+      }
+    }
+
+    // 次日溢价概率（简化版：基于连板天数和板型）
+    double prob = 0.5;
+    if (consecutiveDays == 1) {
+      prob = boardType == '一字板' ? 0.75 : 0.60;
+    } else if (consecutiveDays == 2) {
+      prob = 0.70;
+    } else if (consecutiveDays >= 3) {
+      prob = 0.55 + (consecutiveDays - 3) * 0.05;
+    }
+    if (boardType == '一字板') prob += 0.1;
+    if (prob > 0.95) prob = 0.95;
+
+    String quality;
+    if (score >= 8.0) {
+      quality = '优质';
+    } else if (score >= 6.5) {
+      quality = '良好';
+    } else if (score >= 4.5) {
+      quality = '一般';
+    } else {
+      quality = '弱势';
+    }
+    score = score.clamp(0.0, 10.0);
+
+    return LimitUpAnalysis(
+      code: code,
+      name: name,
+      consecutiveDays: consecutiveDays,
+      quality: quality,
+      qualityScore: score,
+      timeGrade: '日K推断',
+      sealRate: 0,
+      boardType: boardType,
+      premiumProb: prob,
+      signals: signals,
+    );
   }
 }

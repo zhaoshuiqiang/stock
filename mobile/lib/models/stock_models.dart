@@ -2,6 +2,7 @@ import '../analysis/strategy_engine.dart';
 import '../analysis/backtest_engine.dart';
 import '../analysis/market_structure_analyzer.dart';
 import '../analysis/percentile_analyzer.dart';
+import '../analysis/limit_up_analyzer.dart';
 
 enum DataConfidence { high, medium, low }
 
@@ -801,6 +802,9 @@ class AnalysisResult {
   final Map<String, List<String>>? conceptTags;       // 概念标签 {'long': [...], 'short': [...]}
   final PercentileResult? percentile;                 // 分位值分析结果
 
+  // 打板分析 (Phase 激活孤儿模块)
+  final LimitUpAnalysis? limitUpAnalysis;             // 涨停/连板分析结果
+
   AnalysisResult({
     this.quote,
     this.indicators = const {},
@@ -829,6 +833,7 @@ class AnalysisResult {
     this.marketStructure,
     this.conceptTags,
     this.percentile,
+    this.limitUpAnalysis,
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {
@@ -1057,6 +1062,70 @@ class WatchlistItem {
       addedAt: DateTime.now(),
       isPinned: (json['is_pinned'] as int?) == 1,
     );
+  }
+}
+
+/// 持仓记录（v2.33: 短线持仓管理）
+class Position {
+  final int? id;
+  final String code;       // 不带前缀的6位代码
+  final String name;
+  final int quantity;       // 持仓股数
+  final double avgPrice;   // 持仓均价
+  final DateTime? buyDate; // 买入日期
+  final String notes;       // 备注
+  final DateTime createdAt;
+
+  Position({
+    this.id,
+    required this.code,
+    required this.name,
+    required this.quantity,
+    required this.avgPrice,
+    this.buyDate,
+    this.notes = '',
+    DateTime? createdAt,
+  }) : createdAt = createdAt ?? DateTime.now();
+
+  /// 持仓市值（按均价计算的投入成本）
+  double get cost => quantity * avgPrice;
+
+  /// 计算当前盈亏（按现价）
+  ({double marketValue, double pnl, double pnlPct}) computePnl(double currentPrice) {
+    final marketValue = quantity * currentPrice;
+    final pnl = marketValue - cost;
+    final pnlPct = cost > 0 ? pnl / cost * 100 : 0.0;
+    return (marketValue: marketValue, pnl: pnl, pnlPct: pnlPct);
+  }
+
+  factory Position.fromMap(Map<String, dynamic> map) {
+    return Position(
+      id: map['id'] as int?,
+      code: map['code'] as String? ?? '',
+      name: map['name'] as String? ?? '',
+      quantity: (map['quantity'] as num?)?.toInt() ?? 0,
+      avgPrice: (map['avg_price'] as num?)?.toDouble() ?? 0.0,
+      buyDate: map['buy_date'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['buy_date'] as int)
+          : null,
+      notes: map['notes'] as String? ?? '',
+      createdAt: map['created_at'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int)
+          : DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      if (id != null) 'id': id,
+      'code': code,
+      'name': name,
+      'quantity': quantity,
+      'avg_price': avgPrice,
+      'buy_date': buyDate?.millisecondsSinceEpoch,
+      'notes': notes,
+      'created_at': createdAt.millisecondsSinceEpoch,
+    };
   }
 }
 
