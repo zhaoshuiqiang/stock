@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../analysis/explore_engine.dart';
 import '../analysis/sector_pick_engine.dart';
+import '../analysis/limit_up_analyzer.dart';
+import '../analysis/limit_up_scan_engine.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
+import '../widgets/limit_up_card.dart';
 import '../widgets/stock_card.dart';
 import 'quote_screen.dart';
 
@@ -23,8 +26,28 @@ const _kLimitUpColor = Color(0xFFE74C3C);   // 打板红
 const _kMainLineColor = Color(0xFFFFB000);  // 主线金
 const _kLowBuyColor = Color(0xFF2ECC71);    // 低吸绿
 
+/// 打板梯队分组数据模型
+class _LimitUpGroup {
+  final String title;
+  final String subtitle;
+  final Color accentColor;
+  final List<LimitUpAnalysis> items;
+  const _LimitUpGroup({
+    required this.title,
+    required this.subtitle,
+    required this.accentColor,
+    required this.items,
+  });
+}
+
 class DiscoverScreen extends StatefulWidget {
-  const DiscoverScreen({super.key});
+  const DiscoverScreen({
+    super.key,
+    this.limitUpPoolOverride,
+    this.sentimentOverride,
+  });
+  final List<LimitUpAnalysis>? limitUpPoolOverride;
+  final SentimentResult? sentimentOverride;
 
   @override
   State<DiscoverScreen> createState() => DiscoverScreenState();
@@ -50,6 +73,12 @@ class DiscoverScreenState extends State<DiscoverScreen>
   StreamSubscription<SectorPickProgress>? _sectorPickSub;
 
   StreamSubscription<ExploreProgress>? _exploreSub;
+
+  // ─── 打板梯队状态 ──────────────────────────────────────────────
+  List<LimitUpAnalysis> _limitUpPool = [];
+  SentimentResult? _sentiment;
+  bool _limitUpScanLoading = false;
+  StreamSubscription<LimitUpScanProgress>? _limitUpScanSub;
 
   // ─── 生命周期 ──────────────────────────────────────────────────
 
@@ -100,12 +129,43 @@ class DiscoverScreenState extends State<DiscoverScreen>
     if (SectorPickEngine.instance.isRunning) {
       _isPickingSectors = true;
     }
+
+    // 订阅打板扫描进度（情绪温度计 + 打板池更新）
+    _limitUpScanSub = LimitUpScanEngine.instance.progressStream.listen((p) {
+      if (!mounted) return;
+      switch (p.stage) {
+        case 'fetching':
+        case 'analyzing':
+        case 'computing_sentiment':
+          setState(() => _limitUpScanLoading = true);
+          break;
+        case 'done':
+          setState(() => _limitUpScanLoading = false);
+          _loadLimitUpPoolFromDb();
+          break;
+        case 'error':
+          setState(() => _limitUpScanLoading = false);
+          break;
+        case 'already_running':
+          setState(() => _limitUpScanLoading = true);
+          break;
+      }
+    });
+    // 如果引擎已在运行，恢复状态
+    if (LimitUpScanEngine.instance.isRunning) {
+      _limitUpScanLoading = true;
+    }
+    // 延迟到首帧后加载打板池，避免在 initState 中同步调用 setState
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadLimitUpPoolFromDb();
+    });
   }
 
   @override
   void dispose() {
     _exploreSub?.cancel();
     _sectorPickSub?.cancel();
+    _limitUpScanSub?.cancel();
     _apiClient.dispose();
     _tabController.dispose();
     super.dispose();
@@ -153,6 +213,36 @@ class DiscoverScreenState extends State<DiscoverScreen>
       }
     } catch (e) {
       debugPrint('_loadSectorPicks failed: $e');
+    }
+  }
+
+  // ─── 打板梯队：加载/刷新 ──────────────────────────────────────
+
+  Future<void> _loadLimitUpPoolFromDb() async {
+    try {
+      final pool = await _dbService.getLimitUpPool();
+      if (mounted) setState(() => _limitUpPool = pool);
+    } catch (e) {
+      debugPrint('_loadLimitUpPoolFromDb failed: $e');
+    }
+  }
+
+  Future<void> _refreshLimitUpPool() async {
+    if (_limitUpScanLoading) return;
+    setState(() => _limitUpScanLoading = true);
+    try {
+      final sentiment = await LimitUpScanEngine.instance.scan();
+      final pool = await _dbService.getLimitUpPool();
+      if (mounted) {
+        setState(() {
+          _sentiment = sentiment;
+          _limitUpPool = pool;
+          _limitUpScanLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('_refreshLimitUpPool failed: $e');
+      if (mounted) setState(() => _limitUpScanLoading = false);
     }
   }
 
@@ -222,10 +312,53 @@ class DiscoverScreenState extends State<DiscoverScreen>
   }
 
   // ─── Tab 1: 打板梯队（涨停/连板标的） ─────────────────────────
-  List<ExploreResult> get _limitUpList {
-    final list = _exploreResults.where((r) => r.isLimitUpApprox).toList();
-    list.sort((a, b) => b.changePct.compareTo(a.changePct));
-    return list;
+
+  /// 打板梯队分组：龙头(≥4连板) / 高度板(3连板) / 中度板(2连板) / 首板 / 炸板
+  List<_LimitUpGroup> get _limitUpGroups {
+    final pool = widget.limitUpPoolOverride ?? _limitUpPool;
+    if (pool.isEmpty) return [];
+    return [
+      _LimitUpGroup(
+        title: '龙头',
+        subtitle: '≥4连板',
+        accentColor: const Color(0xFF9D2933),
+        items: pool.where((a) => a.consecutiveDays >= 4).toList()
+          ..sort((a, b) => b.consecutiveDays.compareTo(a.consecutiveDays)),
+      ),
+      _LimitUpGroup(
+        title: '高度板',
+        subtitle: '3连板',
+        accentColor: const Color(0xFFE74C3C),
+        items: pool.where((a) => a.consecutiveDays == 3).toList()
+          ..sort((a, b) => b.sealAmount.compareTo(a.sealAmount)),
+      ),
+      _LimitUpGroup(
+        title: '中度板',
+        subtitle: '2连板',
+        accentColor: const Color(0xFFE67E22),
+        items: pool.where((a) => a.consecutiveDays == 2).toList()
+          ..sort((a, b) => b.sealAmount.compareTo(a.sealAmount)),
+      ),
+      _LimitUpGroup(
+        title: '首板',
+        subtitle: '今日首封',
+        accentColor: const Color(0xFF58A6FF),
+        items: pool.where((a) => a.consecutiveDays == 1 && !a.isZhaBan).toList()
+          ..sort((a, b) {
+            final aT = a.firstLimitTime?.millisecondsSinceEpoch ?? 0;
+            final bT = b.firstLimitTime?.millisecondsSinceEpoch ?? 0;
+            return aT.compareTo(bT);
+          }),
+      ),
+      if (pool.any((a) => a.isZhaBan))
+        _LimitUpGroup(
+          title: '炸板',
+          subtitle: '曾封后开',
+          accentColor: const Color(0xFF8B5A5A),
+          items: pool.where((a) => a.isZhaBan).toList()
+            ..sort((a, b) => b.sealAmount.compareTo(a.sealAmount)),
+        ),
+    ].where((g) => g.items.isNotEmpty).toList();
   }
 
   // ─── Tab 2: 主线龙头（板块精选 + 主线标记） ───────────────────
@@ -460,34 +593,185 @@ class DiscoverScreenState extends State<DiscoverScreen>
   // ─── Tab 1: 打板梯队 ──────────────────────────────────────────
 
   Widget _buildLimitUpTab() {
-    final list = _limitUpList;
-    return Column(
+    final pool = widget.limitUpPoolOverride ?? _limitUpPool;
+    if (_limitUpScanLoading && pool.isEmpty) {
+      return _buildLoadingIndicator();
+    }
+    if (pool.isEmpty) {
+      return _buildEmptyState(
+        icon: Icons.local_fire_department_outlined,
+        text: '今日暂无涨停标的',
+        actionText: '刷新打板池',
+        onAction: _refreshLimitUpPool,
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 4),
       children: [
-        _buildTabHeader(
-          count: list.length,
-          hint: list.isEmpty
-              ? (_exploreResults.isEmpty ? '暂无探索数据，点击刷新' : '今日暂无涨停标的')
-              : '涨停/连板标的，按涨幅排序',
-          accentColor: _kLimitUpColor,
-          actionText: _exploreLoading ? '探索中...' : '刷新',
-          onAction: _exploreLoading ? null : () => _exploreEngine.explore(),
-        ),
-        Expanded(
-          child: list.isEmpty
-              ? _buildEmptyState(
-                  icon: Icons.local_fire_department_outlined,
-                  text: _exploreResults.isEmpty ? '暂无探索数据，请先刷新' : '今日暂无涨停标的',
-                  actionText: _exploreResults.isEmpty ? '开始探索' : null,
-                  onAction: _exploreResults.isEmpty ? () => _exploreEngine.explore() : null,
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: list.length,
-                  itemBuilder: (_, i) => _buildExploreCard(list[i], i + 1,
-                      accentTag: '涨停'),
-                ),
-        ),
+        _buildSentimentMiniCard(),
+        const SizedBox(height: 4),
+        for (final group in _limitUpGroups) ...[
+          _buildGroupHeader(group),
+          for (final item in group.items)
+            LimitUpCard(
+              analysis: item,
+              isWatched: _watchlistCodes.contains(item.code),
+              onTap: () => _navigateToQuote(item.code, item.name),
+              onWatchlistToggle: () => _toggleWatchlistByCode(item.code, item.name),
+            ),
+          const SizedBox(height: 8),
+        ],
       ],
+    );
+  }
+
+  /// 打板扫描加载指示器
+  Widget _buildLoadingIndicator() {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(color: _kLimitUpColor),
+          SizedBox(height: 12),
+          Text('扫描打板池中...', style: TextStyle(color: _kTextSecondary, fontSize: 13)),
+        ],
+      ),
+    );
+  }
+
+  /// 情绪温度计迷你卡（顶部摘要）
+  Widget _buildSentimentMiniCard() {
+    final s = widget.sentimentOverride ?? _sentiment;
+    if (s == null) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _kBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('情绪温度',
+                  style: TextStyle(color: _kTextSecondary, fontSize: 12)),
+              const SizedBox(width: 8),
+              Text('${s.temperature.toStringAsFixed(0)}°',
+                  style: TextStyle(
+                    color: _temperatureColor(s.temperature),
+                    fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 8),
+              _buildPhaseChip(s.phase),
+              const Spacer(),
+              Text('${s.limitUpCount}家涨停',
+                  style: const TextStyle(color: _kLimitUpColor, fontSize: 12)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              _buildMetricChip('炸板率', '${(s.zhabanRate * 100).toStringAsFixed(0)}%',
+                  s.zhabanRate < 0.3 ? const Color(0xFF2ECC71) : const Color(0xFFE74C3C)),
+              _buildMetricChip('晋级率', '${(s.continuationRate * 100).toStringAsFixed(0)}%',
+                  s.continuationRate > 0.4 ? const Color(0xFF2ECC71) : const Color(0xFFE67E22)),
+              _buildMetricChip('封板率', '${(s.sealSuccessRate * 100).toStringAsFixed(0)}%',
+                  const Color(0xFF58A6FF)),
+              _buildMetricChip('赚钱效应', '${s.moneyMakingEffect.toStringAsFixed(1)}%',
+                  s.moneyMakingEffect >= 0 ? const Color(0xFF2ECC71) : const Color(0xFFE74C3C)),
+              _buildMetricChip('最高连板', '${s.continuationHeight}板', const Color(0xFFFFB000)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPhaseChip(EmotionPhase phase) {
+    final (label, color) = switch (phase) {
+      EmotionPhase.startup => ('启动期', const Color(0xFF2ECC71)),
+      EmotionPhase.climax => ('高潮期', const Color(0xFFE74C3C)),
+      EmotionPhase.retreat => ('退潮期', const Color(0xFFE67E22)),
+      EmotionPhase.freezing => ('冰点期', const Color(0xFF58A6FF)),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        border: Border.all(color: color, width: 0.5),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(label, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600),
+          maxLines: 1, overflow: TextOverflow.ellipsis),
+    );
+  }
+
+  Widget _buildMetricChip(String label, String value, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text('$label $value', style: TextStyle(fontSize: 10, color: color),
+          maxLines: 1, overflow: TextOverflow.ellipsis),
+    );
+  }
+
+  Color _temperatureColor(double t) {
+    if (t >= 70) return const Color(0xFFE74C3C);
+    if (t >= 45) return const Color(0xFFE67E22);
+    if (t >= 25) return const Color(0xFFFFB000);
+    return const Color(0xFF58A6FF);
+  }
+
+  /// 分组头部：标题 + 副标题 + 数量
+  Widget _buildGroupHeader(_LimitUpGroup group) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 16,
+            decoration: BoxDecoration(
+              color: group.accentColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(group.title, style: TextStyle(
+              color: group.accentColor, fontSize: 14, fontWeight: FontWeight.bold)),
+          const SizedBox(width: 6),
+          Text(group.subtitle, style: const TextStyle(
+              color: _kTextSecondary, fontSize: 11),
+            maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+              color: group.accentColor.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text('${group.items.length}',
+                style: TextStyle(color: group.accentColor, fontSize: 10, fontWeight: FontWeight.w600),
+                maxLines: 1),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _navigateToQuote(String code, String name) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => QuoteScreen(code: code, name: name),
+      ),
     );
   }
 
