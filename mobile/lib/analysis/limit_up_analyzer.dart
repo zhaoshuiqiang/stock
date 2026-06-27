@@ -79,11 +79,79 @@ class LimitUpStock {
 
 class LimitUpAnalysis {
   final String code, name, quality, timeGrade, boardType, position;
+  final String? sector;              // 所属板块
   final int consecutiveDays;
+  final int zhabanCount;             // 炸板次数
+  final bool isZhaBan;               // 是否炸板
   final double qualityScore, sealRate, premiumProb;
+  final double sealAmount;           // 封单金额（万元）
+  final double price;                // 当前价
+  final double changePct;            // 涨跌幅
+  final DateTime? firstLimitTime;    // 首封时间
   final List<String> signals;
-  LimitUpAnalysis({required this.code, required this.name, this.consecutiveDays=1, this.quality='一般', this.qualityScore=5.0, this.timeGrade='未知', this.sealRate=0, this.boardType='', this.position='', this.premiumProb=0.5, this.signals=const[]});
-  Map<String, dynamic> toMap() => {'code':code,'name':name,'consecutive_days':consecutiveDays,'quality':quality,'quality_score':qualityScore,'time_grade':timeGrade,'seal_rate':sealRate,'board_type':boardType,'position':position,'premium_prob':premiumProb,'signals':signals};
+
+  LimitUpAnalysis({
+    required this.code,
+    required this.name,
+    this.consecutiveDays = 1,
+    this.quality = '一般',
+    this.qualityScore = 5.0,
+    this.timeGrade = '未知',
+    this.sealRate = 0,
+    this.boardType = '',
+    this.position = '',
+    this.premiumProb = 0.5,
+    this.signals = const [],
+    this.sector,
+    this.zhabanCount = 0,
+    this.isZhaBan = false,
+    this.sealAmount = 0,
+    this.price = 0,
+    this.changePct = 0,
+    this.firstLimitTime,
+  });
+
+  Map<String, dynamic> toMap() => {
+    'code': code,
+    'name': name,
+    'consecutive_days': consecutiveDays,
+    'quality': quality,
+    'quality_score': qualityScore,
+    'time_grade': timeGrade,
+    'seal_rate': sealRate,
+    'board_type': boardType,
+    'position': position,
+    'premium_prob': premiumProb,
+    'sector': sector ?? '',
+    'zhaban_count': zhabanCount,
+    'is_zhaban': isZhaBan ? 1 : 0,
+    'seal_amount': sealAmount,
+    'price': price,
+    'change_pct': changePct,
+    'first_limit_time': firstLimitTime?.millisecondsSinceEpoch,
+  };
+
+  factory LimitUpAnalysis.fromMap(Map<String, dynamic> m) => LimitUpAnalysis(
+    code: (m['code'] ?? '').toString(),
+    name: (m['name'] ?? '').toString(),
+    consecutiveDays: ((m['consecutive_days'] ?? 1) as num).toInt(),
+    quality: (m['quality'] ?? '一般').toString(),
+    qualityScore: (m['quality_score'] ?? 5.0) as double,
+    timeGrade: (m['time_grade'] ?? '未知').toString(),
+    sealRate: (m['seal_rate'] ?? 0) as double,
+    boardType: (m['board_type'] ?? '').toString(),
+    position: (m['position'] ?? '').toString(),
+    premiumProb: (m['premium_prob'] ?? 0.5) as double,
+    sector: m['sector'] as String?,
+    zhabanCount: ((m['zhaban_count'] ?? 0) as num).toInt(),
+    isZhaBan: ((m['is_zhaban'] ?? 0) as num) == 1,
+    sealAmount: (m['seal_amount'] ?? 0) as double,
+    price: (m['price'] ?? 0) as double,
+    changePct: (m['change_pct'] ?? 0) as double,
+    firstLimitTime: m['first_limit_time'] != null
+        ? DateTime.fromMillisecondsSinceEpoch(m['first_limit_time'] as int)
+        : null,
+  );
 }
 
 class LimitUpAnalyzer {
@@ -134,7 +202,15 @@ class LimitUpAnalyzer {
     String quality;
     if (score >= 8.0) quality='优质'; else if (score >= 6.5) quality='良好'; else if (score >= 4.5) quality='一般'; else quality='弱势';
     score = score.clamp(0.0, 10.0);
-    return LimitUpAnalysis(code:stock.code, name:stock.name, consecutiveDays:stock.consecutiveDays, quality:quality, qualityScore:score, timeGrade:timeGrade, sealRate:sealRate, boardType:boardType, premiumProb:prob, signals:signals);
+    return LimitUpAnalysis(code:stock.code, name:stock.name, consecutiveDays:stock.consecutiveDays, quality:quality, qualityScore:score, timeGrade:timeGrade, sealRate:sealRate, boardType:boardType, premiumProb:prob, signals:signals,
+      sector: stock.sector,
+      isZhaBan: stock.isZhaBan,
+      zhabanCount: stock.zhabanCount,
+      sealAmount: stock.sealAmount,
+      price: stock.price,
+      changePct: stock.changePct,
+      firstLimitTime: stock.firstLimitTime,
+    );
   }
 
   static Map<String, dynamic> analyzeBatch(List<LimitUpStock> stocks) {
@@ -145,6 +221,13 @@ class LimitUpAnalyzer {
     for (final s in stocks) { final k = s.consecutiveDays == 1 ? '首板' : '${s.consecutiveDays}连板'; dist[k] = (dist[k]??0)+1; }
     final avg = analyses.isEmpty ? 0 : double.parse((analyses.map((a)=>a.qualityScore).reduce((a,b)=>a+b)/analyses.length).toStringAsFixed(1));
     return {'analyses':analyses.map((a)=>a.toMap()).toList(), 'total':stocks.length, 'leaders':leaders.map((a)=>a.toMap()).toList(), 'distribution':dist, 'avg_quality':avg};
+  }
+
+  /// 批量分析涨停股，返回 List<LimitUpAnalysis>（激活 dead code 路径）
+  /// 与 analyzeBatch 的区别：返回强类型 List 而非 Map，便于下游消费
+  static List<LimitUpAnalysis> analyzeBatchList(List<LimitUpStock> stocks) {
+    if (stocks.isEmpty) return [];
+    return stocks.map((s) => analyzeSingle(s)).toList();
   }
 
   /// 从日K线推断打板信息（简化版，无首封时间和封单数据）。
