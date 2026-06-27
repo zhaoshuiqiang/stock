@@ -37,17 +37,18 @@ class LimitUpStock {
 
   /// 从东方财富 getTopicZTPool 接口的 pool 元素构造
   factory LimitUpStock.fromEastMoney(Map<String, dynamic> json) {
+    final zbc = (json['zbc'] ?? 0) as num;
     return LimitUpStock(
       code: (json['c'] ?? '').toString().padLeft(6, '0'),
       name: (json['n'] ?? '').toString(),
-      consecutiveDays: (json['lbc'] ?? 1) as int,
+      consecutiveDays: ((json['lbc'] ?? 1) as num).toInt(),
       firstLimitTime: _parseEastMoneyTime(json['fbt']),
       lastLimitTime: _parseEastMoneyTime(json['lbt']),
       sealAmount: ((json['fund'] ?? 0) as num).toDouble() / 10000,  // 元→万元
       turnoverRate: ((json['hs'] ?? 0) as num).toDouble(),
-      zhabanCount: (json['zbc'] ?? 0) as int,
-      isZhaBan: ((json['zbc'] ?? 0) as int) > 0,
-      sector: (json['hybk'] ?? '') as String,
+      zhabanCount: zbc.toInt(),
+      isZhaBan: zbc > 0,
+      sector: (json['hybk'] ?? '').toString(),
       totalValue: ((json['tshare'] ?? 0) as num).toDouble(),
       circulationValue: ((json['ltsz'] ?? 0) as num).toDouble(),
     );
@@ -93,14 +94,18 @@ class LimitUpAnalyzer {
     else if (stock.consecutiveDays >= 3) { score += 2.0; signals.add('${stock.consecutiveDays}连板，板块核心'); }
     else if (stock.consecutiveDays >= 2) { score += 1.0; signals.add('2连板，确认强势'); }
 
-    final tm = (stock.firstLimitTime?.hour ?? 0) * 60 + (stock.firstLimitTime?.minute ?? 0);
     String timeGrade;
-    if (tm < 9*60+25) { timeGrade='竞价涨停'; score+=2.0; signals.add('集合竞价即涨停'); }
-    else if (tm < 10*60) { timeGrade='早盘秒板'; score+=1.5; signals.add('早盘半小时内封板'); }
-    else if (tm < 11*60+30) { timeGrade='上午封板'; score+=0.8; }
-    else if (tm < 14*60) { timeGrade='下午封板'; score-=0.3; }
-    else if (tm < 14*60+30) { timeGrade='尾盘封板'; score-=0.8; signals.add('尾盘涨停，次日溢价不确定'); }
-    else { timeGrade='尾盘偷鸡'; score-=1.5; signals.add('尾盘急拉涨停，次日低开概率高'); }
+    if (stock.firstLimitTime == null) {
+      timeGrade = '未知';
+    } else {
+      final tm = stock.firstLimitTime!.hour * 60 + stock.firstLimitTime!.minute;
+      if (tm < 9*60+25) { timeGrade='竞价涨停'; score+=2.0; signals.add('集合竞价即涨停'); }
+      else if (tm < 10*60) { timeGrade='早盘秒板'; score+=1.5; signals.add('早盘半小时内封板'); }
+      else if (tm < 11*60+30) { timeGrade='上午封板'; score+=0.8; }
+      else if (tm < 14*60) { timeGrade='下午封板'; score-=0.3; }
+      else if (tm < 14*60+30) { timeGrade='尾盘封板'; score-=0.8; signals.add('尾盘涨停，次日溢价不确定'); }
+      else { timeGrade='尾盘偷鸡'; score-=1.5; signals.add('尾盘急拉涨停，次日低开概率高'); }
+    }
 
     final estimatedTurnover = stock.price * stock.turnoverRate * 100;
     final sealRate = estimatedTurnover > 0 ? stock.sealAmount / estimatedTurnover : 0.0;
@@ -116,9 +121,14 @@ class LimitUpAnalyzer {
     else { boardType='换手板'; if (stock.consecutiveDays >= 2 && stock.turnoverRate < 5) { score+=0.5; signals.add('低换手锁仓'); } }
 
     double prob = 0.5;
-    if (stock.consecutiveDays == 1) prob = tm < 10*60 ? 0.75 : tm < 13*60 ? 0.65 : 0.45;
-    else if (stock.consecutiveDays == 2) prob = tm < 10*60 ? 0.80 : 0.60;
-    else prob = _probByDays[stock.consecutiveDays.clamp(3,7)-3];
+    if (stock.firstLimitTime == null) {
+      if (stock.consecutiveDays >= 3) prob = _probByDays[stock.consecutiveDays.clamp(3,7)-3];
+    } else {
+      final tm = stock.firstLimitTime!.hour * 60 + stock.firstLimitTime!.minute;
+      if (stock.consecutiveDays == 1) prob = tm < 10*60 ? 0.75 : tm < 13*60 ? 0.65 : 0.45;
+      else if (stock.consecutiveDays == 2) prob = tm < 10*60 ? 0.80 : 0.60;
+      else prob = _probByDays[stock.consecutiveDays.clamp(3,7)-3];
+    }
     if (stock.limitUpType.contains('一字板')) prob += 0.1;
 
     String quality;

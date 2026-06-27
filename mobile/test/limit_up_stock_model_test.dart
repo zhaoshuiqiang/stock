@@ -29,6 +29,11 @@ void main() {
       expect(s.isZhaBan, isFalse);
       expect(s.zhabanCount, 0);
       expect(s.sector, '白酒');
+      expect(s.lastLimitTime, isNotNull);
+      expect(s.lastLimitTime!.hour, 14);
+      expect(s.lastLimitTime!.minute, 59);
+      expect(s.totalValue, 26543210000);
+      expect(s.circulationValue, 21234567890);
     });
 
     test('zbc > 0 marks as zhaban', () {
@@ -40,6 +45,15 @@ void main() {
     test('null fbt returns null firstLimitTime', () {
       final s = LimitUpStock.fromEastMoney({'c': '000001', 'n': 'X', 'fbt': null});
       expect(s.firstLimitTime, isNull);
+    });
+
+    test('string time format "HH:mm:ss" parsed correctly', () {
+      // This tests the string branch of _parseEastMoneyTime
+      // Note: fromEastMoney currently only receives int from API, but the helper supports strings
+      final s = LimitUpStock.fromEastMoney({'c': '000001', 'n': 'X', 'fbt': '09:25:00'});
+      expect(s.firstLimitTime, isNotNull);
+      expect(s.firstLimitTime!.hour, 9);
+      expect(s.firstLimitTime!.minute, 25);
     });
 
     test('missing fields use defaults', () {
