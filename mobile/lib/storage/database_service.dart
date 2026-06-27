@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
@@ -23,7 +24,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 10,
+      version: 11,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -188,6 +189,37 @@ class DatabaseService {
             'ALTER TABLE sector_pick_results ADD COLUMN sectorCode TEXT NOT NULL DEFAULT \'\'',
           );
         }
+        if (oldVersion < 11) {
+          // v2.34: 打板梯队池（情绪温度计 + 连板分组）
+          await db.execute('''
+            CREATE TABLE limit_up_pool (
+              code              TEXT    NOT NULL,
+              name              TEXT    NOT NULL,
+              trade_date        TEXT    NOT NULL,
+              limit_up_price    REAL    NOT NULL DEFAULT 0,
+              first_limit_time  INTEGER,
+              last_limit_time   INTEGER,
+              consecutive_days  INTEGER NOT NULL DEFAULT 1,
+              board_type        TEXT    NOT NULL DEFAULT '',
+              seal_amount       REAL    NOT NULL DEFAULT 0,
+              seal_ratio        REAL    NOT NULL DEFAULT 0,
+              volume_ratio      REAL    NOT NULL DEFAULT 0,
+              turnover_rate     REAL    NOT NULL DEFAULT 0,
+              is_zhaban         INTEGER NOT NULL DEFAULT 0,
+              zhaban_count      INTEGER NOT NULL DEFAULT 0,
+              sector            TEXT,
+              quality_score     REAL    NOT NULL DEFAULT 0,
+              premium_prob      REAL    NOT NULL DEFAULT 0,
+              price             REAL    NOT NULL DEFAULT 0,
+              change_pct        REAL    NOT NULL DEFAULT 0,
+              updated_at        INTEGER NOT NULL,
+              PRIMARY KEY (code, trade_date)
+            )
+          ''');
+          await db.execute('CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
+          await db.execute('CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
+          debugPrint('[DB] v10→v11: created limit_up_pool table');
+        }
       },
     );
   }
@@ -334,6 +366,33 @@ class DatabaseService {
       )
     ''');
     await db.execute('CREATE INDEX idx_positions_code ON positions(code)');
+    await db.execute('''
+      CREATE TABLE limit_up_pool (
+        code              TEXT    NOT NULL,
+        name              TEXT    NOT NULL,
+        trade_date        TEXT    NOT NULL,
+        limit_up_price    REAL    NOT NULL DEFAULT 0,
+        first_limit_time  INTEGER,
+        last_limit_time   INTEGER,
+        consecutive_days  INTEGER NOT NULL DEFAULT 1,
+        board_type        TEXT    NOT NULL DEFAULT '',
+        seal_amount       REAL    NOT NULL DEFAULT 0,
+        seal_ratio        REAL    NOT NULL DEFAULT 0,
+        volume_ratio      REAL    NOT NULL DEFAULT 0,
+        turnover_rate     REAL    NOT NULL DEFAULT 0,
+        is_zhaban         INTEGER NOT NULL DEFAULT 0,
+        zhaban_count      INTEGER NOT NULL DEFAULT 0,
+        sector            TEXT,
+        quality_score     REAL    NOT NULL DEFAULT 0,
+        premium_prob      REAL    NOT NULL DEFAULT 0,
+        price             REAL    NOT NULL DEFAULT 0,
+        change_pct        REAL    NOT NULL DEFAULT 0,
+        updated_at        INTEGER NOT NULL,
+        PRIMARY KEY (code, trade_date)
+      )
+    ''');
+    await db.execute('CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
+    await db.execute('CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
   }
 
   Future<void> addToWatchlist(String code, String name) async {
