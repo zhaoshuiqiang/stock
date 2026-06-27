@@ -1377,3 +1377,35 @@ class ExploreResult {
     );
   }
 }
+
+/// 情绪周期阶段
+enum EmotionPhase { startup, climax, retreat, freezing }
+
+/// 情绪温度计计算结果
+class SentimentResult {
+  final double temperature;          // 0-100
+  final EmotionPhase phase;
+  final double zhabanRate;           // 炸板率 [0,1]
+  final double continuationRate;     // 连板晋级率 [0,1]
+  final double sealSuccessRate;      // 涨停封板成功率 [0,1]
+  final double moneyMakingEffect;    // 赚钱效应（%）
+  final int limitUpCount;
+  final int limitDownCount;
+  final int continuationHeight;      // 最高连板数
+  final List<String> signals;
+  final DateTime timestamp;
+
+  const SentimentResult({
+    required this.temperature,
+    required this.phase,
+    required this.zhabanRate,
+    required this.continuationRate,
+    required this.sealSuccessRate,
+    required this.moneyMakingEffect,
+    required this.limitUpCount,
+    required this.limitDownCount,
+    required this.continuationHeight,
+    required this.signals,
+    required this.timestamp,
+  });
+}
