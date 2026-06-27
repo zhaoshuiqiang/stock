@@ -248,12 +248,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       int limitUp = 0;
       int lowBuy = 0;
       for (final r in exploreResults) {
-        final code = r.code;
-        final isStar = code.startsWith('688');
-        final isChiNext = code.startsWith('30');
-        final isBse = code.startsWith('8') || code.startsWith('43');
-        final threshold = isBse ? 29.0 : (isStar || isChiNext ? 19.0 : 9.5);
-        if (r.changePct >= threshold) limitUp++;
+        if (r.isLimitUpApprox) limitUp++;
         if (r.recommendation.contains('买入') &&
             r.changePct >= -3 && r.changePct <= 5 && r.score >= 6) {
           lowBuy++;

@@ -33,6 +33,8 @@ void main() async {
                 '${details.exception}',
                 style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
                 textAlign: TextAlign.center,
+                maxLines: 5,
+                overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 16),
               const Text('请下拉刷新或重启应用',

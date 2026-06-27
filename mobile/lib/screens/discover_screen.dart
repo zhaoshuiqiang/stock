@@ -151,7 +151,9 @@ class DiscoverScreenState extends State<DiscoverScreen>
       if (mounted) {
         setState(() => _sectorPickResults = results);
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('_loadSectorPicks failed: $e');
+    }
   }
 
   /// 触发板块精选引擎：获取热门板块 → SectorPickEngine.pick()
@@ -220,18 +222,8 @@ class DiscoverScreenState extends State<DiscoverScreen>
   }
 
   // ─── Tab 1: 打板梯队（涨停/连板标的） ─────────────────────────
-  /// 涨停近似判定：主板≥9.5%, 创业板/科创板≥19%, 北交所≥29%
-  bool _isLimitUpApprox(ExploreResult r) {
-    final code = r.code;
-    final isStar = code.startsWith('688');
-    final isChiNext = code.startsWith('30');
-    final isBse = code.startsWith('8') || code.startsWith('43');
-    final threshold = isBse ? 29.0 : (isStar || isChiNext ? 19.0 : 9.5);
-    return r.changePct >= threshold;
-  }
-
   List<ExploreResult> get _limitUpList {
-    final list = _exploreResults.where(_isLimitUpApprox).toList();
+    final list = _exploreResults.where((r) => r.isLimitUpApprox).toList();
     list.sort((a, b) => b.changePct.compareTo(a.changePct));
     return list;
   }

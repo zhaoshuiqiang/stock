@@ -73,7 +73,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
     // 订阅自选分析进度
     _oppSub = _oppEngine.progressStream.listen(_onOppProgress);
     if (_oppEngine.latestProgress != null) {
-      _onOppProgress(_oppEngine.latestProgress!);
+      // 延迟到首帧后再恢复进度，避免在 initState 中调用 setState
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _onOppProgress(_oppEngine.latestProgress!);
+      });
     }
   }
 

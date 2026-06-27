@@ -1326,6 +1326,15 @@ class ExploreResult {
     this.marketStructure,
   });
 
+  /// 涨停近似判定：主板≥9.5%, 创业板/科创板≥19%, 北交所≥29%
+  bool get isLimitUpApprox {
+    final isStar = code.startsWith('688');
+    final isChiNext = code.startsWith('30');
+    final isBse = code.startsWith('8') || code.startsWith('43');
+    final threshold = isBse ? 29.0 : (isStar || isChiNext ? 19.0 : 9.5);
+    return changePct >= threshold;
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'code': code,
