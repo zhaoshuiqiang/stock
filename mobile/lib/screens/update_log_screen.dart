@@ -10,6 +10,21 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.34.0',
+        'date': '2026-06-28',
+        'changes': [
+          '情绪温度计引擎：5维指标（炸板率/连板晋级率/封板成功率/赚钱效应/连板高度）合成0-100温度，4阶段情绪周期（启动/高潮/退潮/冰点）',
+          '打板梯队Tab重画：按连板高度分5组（龙头≥4连板/高度板/中度板/首板/炸板），情绪迷你卡置顶+LimitUpCard卡片',
+          '首页工作台升级：顶部新增情绪温度计大卡（阶段渐变+温度条+5维指标），保留原2×2网格',
+          '详情页K线打板标识（Stage 8）：涨停日三角标记+连板数+一字板金色矩形+打板信息浮层卡片',
+          '打板扫描引擎：封装东财涨停板API→分析→情绪计算→落库完整链路，进度广播+防重入',
+          '涨停池数据采集器：API拉取+行情补全+去重，30只分片+批次容错',
+          '数据库升级至v11：新增limit_up_pool表（复合主键code+trade_date）',
+          '激活LimitUpAnalyzer.analyzeBatchList：板型/时段/封单质量评分',
+          '东财涨停板接口：getLimitUpBoard+getYesterdayLimitUpPool，UTF-8解码',
+        ],
+      },
+      {
         'version': 'v2.33.0',
         'date': '2026-06-27',
         'changes': [
