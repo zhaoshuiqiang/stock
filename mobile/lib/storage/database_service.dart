@@ -202,7 +202,7 @@ class DatabaseService {
               consecutive_days  INTEGER NOT NULL DEFAULT 1,
               board_type        TEXT    NOT NULL DEFAULT '',
               seal_amount       REAL    NOT NULL DEFAULT 0,
-              seal_ratio        REAL    NOT NULL DEFAULT 0,
+              seal_rate         REAL    NOT NULL DEFAULT 0,
               volume_ratio      REAL    NOT NULL DEFAULT 0,
               turnover_rate     REAL    NOT NULL DEFAULT 0,
               is_zhaban         INTEGER NOT NULL DEFAULT 0,
