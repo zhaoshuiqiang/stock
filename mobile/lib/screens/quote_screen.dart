@@ -7,6 +7,8 @@ import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import '../analysis/indicators.dart';
 import '../analysis/signal_engine.dart';
+import '../analysis/backtest_engine.dart';
+import '../analysis/limit_up_analyzer.dart';
 import '../storage/database_service.dart';
 import '../widgets/signal_card.dart';
 import '../widgets/technical_indicators_panel.dart';
@@ -1643,6 +1645,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       minPrice: minPrice,
                       maxPrice: maxPrice,
                       showBoll: _showBoll,
+                      code: widget.code,
+                      limitUpAnalysis: _analysis?.limitUpAnalysis,
                     ),
                   ),
                 ),
@@ -1652,6 +1656,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             );
           }),
         ),
+        // 打板信息浮层卡片（仅在存在涨停分析时渲染）
+        _buildLimitUpSummaryCard(),
         Column(
           children: [
             Padding(
@@ -2034,6 +2040,79 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     }
   }
 
+  /// 打板信息浮层卡片：连板数 + 板型 + 时间评级 + 次日溢价/质量
+  Widget _buildLimitUpSummaryCard() {
+    final a = _analysis?.limitUpAnalysis;
+    if (a == null) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFFFB000), width: 0.5),
+      ),
+      child: Row(children: [
+        _buildLimitUpBadge('${a.consecutiveDays}连板', const Color(0xFFFFB000)),
+        const SizedBox(width: 8),
+        if (a.boardType.isNotEmpty) ...[
+          _buildLimitUpBadge(a.boardType, _boardTypeColor(a.boardType)),
+          const SizedBox(width: 8),
+        ],
+        if (a.timeGrade.isNotEmpty) ...[
+          _buildLimitUpBadge(a.timeGrade, _timeGradeColor(a.timeGrade)),
+          const SizedBox(width: 8),
+        ],
+        const Spacer(),
+        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Text('次日溢价 ${(a.premiumProb * 100).toStringAsFixed(0)}%',
+              style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFFFFB000),
+                  fontWeight: FontWeight.w600)),
+          Text('质量 ${a.qualityScore.toStringAsFixed(1)}',
+              style: const TextStyle(fontSize: 10, color: Color(0xFF8B949E))),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _buildLimitUpBadge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withOpacity(0.5)),
+      ),
+      child: Text(text,
+          style: TextStyle(
+              fontSize: 11, color: color, fontWeight: FontWeight.w600),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis),
+    );
+  }
+
+  Color _boardTypeColor(String boardType) {
+    switch (boardType) {
+      case '一字板':
+        return const Color(0xFFE74C3C);
+      case 'T字板':
+        return const Color(0xFFE67E22);
+      case '换手板':
+        return const Color(0xFFFFB000);
+      default:
+        return const Color(0xFF8B949E);
+    }
+  }
+
+  Color _timeGradeColor(String timeGrade) {
+    if (timeGrade.contains('竞价')) return const Color(0xFFFFB000);
+    if (timeGrade.contains('早盘')) return const Color(0xFFE74C3C);
+    if (timeGrade.contains('上午')) return const Color(0xFFE67E22);
+    return const Color(0xFF8B949E); // 尾盘
+  }
+
   @override
   void dispose() {
     _apiClient.dispose();
@@ -2058,6 +2137,8 @@ class _KlinePainter extends CustomPainter {
   final double minPrice;
   final double maxPrice;
   final bool showBoll;
+  final String code;
+  final LimitUpAnalysis? limitUpAnalysis;
 
   final Paint _upPaint = Paint()..color = const Color(0xFFef5350);
   final Paint _downPaint = Paint()..color = const Color(0xFF26a69a);
@@ -2084,6 +2165,8 @@ class _KlinePainter extends CustomPainter {
     required this.minPrice,
     required this.maxPrice,
     this.showBoll = false,
+    required this.code,
+    this.limitUpAnalysis,
   });
 
   @override
@@ -2179,6 +2262,9 @@ class _KlinePainter extends CustomPainter {
     if (showBoll) {
       _drawBollBands(canvas, size, padding, chartWidth, chartHeight, priceRange, barWidth, gap);
     }
+
+    // 打板标识层：涨停三角 + 连板数 + 一字板矩形
+    _drawLimitUpMarks(canvas, size, padding, chartWidth, chartHeight, barWidth, gap, priceRange);
   }
 
   void _drawBollBands(Canvas canvas, Size size, double padding, double chartWidth,
@@ -2229,6 +2315,88 @@ class _KlinePainter extends CustomPainter {
     canvas.drawPath(upperPath, _bollUpperPaint);
     canvas.drawPath(midPath, _bollMidPaint);
     canvas.drawPath(lowerPath, _bollUpperPaint);
+  }
+
+  /// 涨停近似判定阈值：主板9.5%，创业板/科创板20%，北交所30%
+  double _limitPctForCode() {
+    final isStar = code.startsWith('688');
+    final isChiNext = code.startsWith('30');
+    final isBse = code.startsWith('8') || code.startsWith('43');
+    return isBse ? 0.30 : (isStar || isChiNext ? 0.20 : 0.095);
+  }
+
+  /// 打板标识层：在涨停K线上方绘制三角标记、连板数、一字板矩形
+  void _drawLimitUpMarks(Canvas canvas, Size size, double padding, double chartWidth,
+      double chartHeight, double barWidth, double gap, double priceRange) {
+    if (data.isEmpty || priceRange == 0) return;
+    final limitPct = _limitPctForCode();
+    for (var i = 1; i < data.length; i++) {
+      final k = data[i];
+      final prev = data[i - 1];
+      if (!KlineValidator.isLimitUp(k, prev, limitPct)) continue;
+
+      final x = padding + i * (barWidth + gap) + barWidth / 2;
+      final color = _limitUpMarkColor(i, limitPct);
+
+      // 涨停三角标记（位于K线最高价上方）
+      final highY = chartHeight - ((k.high - minPrice) / priceRange) * chartHeight;
+      final y = highY - 8;
+      final path = Path()
+        ..moveTo(x, y - 6)
+        ..lineTo(x - 5, y + 2)
+        ..lineTo(x + 5, y + 2)
+        ..close();
+      canvas.drawPath(path, Paint()..color = color..style = PaintingStyle.fill);
+
+      // 连板数（仅2连板及以上显示）
+      final consec = _countConsecutiveLimitUps(i, limitPct);
+      if (consec >= 2) {
+        final tp = TextPainter(
+          text: TextSpan(
+              text: '$consec',
+              style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.bold)),
+          textDirection: ui.TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, Offset(x - tp.width / 2, y - 18));
+      }
+
+      // 一字板特殊标记：金色小矩形
+      if (KlineValidator.isYiZiBan(k, prev, limitPct)) {
+        canvas.drawRect(
+          Rect.fromCenter(center: Offset(x, y - 14), width: 14, height: 8),
+          Paint()..color = const Color(0xFFFFB000)..style = PaintingStyle.fill,
+        );
+      }
+    }
+  }
+
+  /// 统计截至索引 i（含）的连续涨停天数
+  int _countConsecutiveLimitUps(int i, double limitPct) {
+    int count = 0;
+    for (var j = i; j >= 1; j--) {
+      if (KlineValidator.isLimitUp(data[j], data[j - 1], limitPct)) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    return count;
+  }
+
+  /// 打板标记颜色：炸板红 / 龙头金 / 高度红 / 首板橙
+  Color _limitUpMarkColor(int i, double limitPct) {
+    final k = data[i];
+    final prev = data[i - 1];
+    final upPrice = KlineValidator.limitUpPrice(prev.close, limitPct);
+    // 炸板：盘中触及涨停但收盘未封住
+    if (k.high >= upPrice * 0.999 && k.close < upPrice * 0.999) {
+      return const Color(0xFFE74C3C);
+    }
+    final analysis = limitUpAnalysis;
+    if (analysis == null) return const Color(0xFFE67E22);
+    if (analysis.consecutiveDays >= 4) return const Color(0xFFFFB000);
+    if (analysis.consecutiveDays == 3) return const Color(0xFFE74C3C);
+    return const Color(0xFFE67E22);
   }
 
   void _drawDashedLine(Canvas canvas, Offset start, Offset end, Color color) {
@@ -2305,7 +2473,9 @@ class _KlinePainter extends CustomPainter {
     oldDelegate.supportLevels != supportLevels ||
     oldDelegate.resistanceLevels != resistanceLevels ||
     oldDelegate.fibonacciLevels != fibonacciLevels ||
-    oldDelegate.showBoll != showBoll;
+    oldDelegate.showBoll != showBoll ||
+    oldDelegate.code != code ||
+    oldDelegate.limitUpAnalysis != limitUpAnalysis;
 }
 
 class _MacdHistogramPainter extends CustomPainter {
