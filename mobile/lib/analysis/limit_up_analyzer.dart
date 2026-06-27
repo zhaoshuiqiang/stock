@@ -4,9 +4,76 @@ import 'backtest_engine.dart';
 class LimitUpStock {
   final String code, name, sector, limitUpType;
   final double price, changePct, sealAmount, turnoverRate, volumeRatio;
+  final double sealRatio;           // 封成比
+  final double limitUpPrice;        // 涨停价
+  final double totalValue;          // 总市值
+  final double circulationValue;    // 流通市值
   final int consecutiveDays;
-  final DateTime firstLimitUpTime;
-  LimitUpStock({required this.code, required this.name, this.price=0, this.changePct=0, this.consecutiveDays=1, DateTime? firstLimitUpTime, this.sealAmount=0, this.turnoverRate=0, this.volumeRatio=1.0, this.sector='', this.limitUpType=''}) : firstLimitUpTime = firstLimitUpTime ?? DateTime.now();
+  final int zhabanCount;            // 炸板次数
+  final bool isZhaBan;              // 是否炸板
+  final DateTime? firstLimitTime;   // 首封时间（nullable）
+  final DateTime? lastLimitTime;    // 最后封板时间
+
+  LimitUpStock({
+    required this.code,
+    required this.name,
+    this.price = 0,
+    this.changePct = 0,
+    this.consecutiveDays = 1,
+    this.firstLimitTime,
+    this.lastLimitTime,
+    this.sealAmount = 0,
+    this.turnoverRate = 0,
+    this.volumeRatio = 1.0,
+    this.sector = '',
+    this.limitUpType = '',
+    this.sealRatio = 0,
+    this.limitUpPrice = 0,
+    this.totalValue = 0,
+    this.circulationValue = 0,
+    this.zhabanCount = 0,
+    this.isZhaBan = false,
+  });
+
+  /// 从东方财富 getTopicZTPool 接口的 pool 元素构造
+  factory LimitUpStock.fromEastMoney(Map<String, dynamic> json) {
+    return LimitUpStock(
+      code: (json['c'] ?? '').toString().padLeft(6, '0'),
+      name: (json['n'] ?? '').toString(),
+      consecutiveDays: (json['lbc'] ?? 1) as int,
+      firstLimitTime: _parseEastMoneyTime(json['fbt']),
+      lastLimitTime: _parseEastMoneyTime(json['lbt']),
+      sealAmount: ((json['fund'] ?? 0) as num).toDouble() / 10000,  // 元→万元
+      turnoverRate: ((json['hs'] ?? 0) as num).toDouble(),
+      zhabanCount: (json['zbc'] ?? 0) as int,
+      isZhaBan: ((json['zbc'] ?? 0) as int) > 0,
+      sector: (json['hybk'] ?? '') as String,
+      totalValue: ((json['tshare'] ?? 0) as num).toDouble(),
+      circulationValue: ((json['ltsz'] ?? 0) as num).toDouble(),
+    );
+  }
+
+  /// 解析东财时间格式：整数 92500 → DateTime(09:25:00)
+  static DateTime? _parseEastMoneyTime(dynamic val) {
+    if (val == null || val == '-' || val == '') return null;
+    if (val is int) {
+      final s = val.toString().padLeft(6, '0');
+      if (s.length != 6) return null;
+      final now = DateTime.now();
+      return DateTime(now.year, now.month, now.day,
+          int.parse(s.substring(0, 2)),
+          int.parse(s.substring(2, 4)),
+          int.parse(s.substring(4, 6)));
+    }
+    if (val is String && val.contains(':')) {
+      final parts = val.split(':');
+      final now = DateTime.now();
+      return DateTime(now.year, now.month, now.day,
+          int.parse(parts[0]), int.parse(parts[1]),
+          parts.length > 2 ? int.parse(parts[2]) : 0);
+    }
+    return null;
+  }
 }
 
 class LimitUpAnalysis {
@@ -26,7 +93,7 @@ class LimitUpAnalyzer {
     else if (stock.consecutiveDays >= 3) { score += 2.0; signals.add('${stock.consecutiveDays}连板，板块核心'); }
     else if (stock.consecutiveDays >= 2) { score += 1.0; signals.add('2连板，确认强势'); }
 
-    final tm = stock.firstLimitUpTime.hour * 60 + stock.firstLimitUpTime.minute;
+    final tm = (stock.firstLimitTime?.hour ?? 0) * 60 + (stock.firstLimitTime?.minute ?? 0);
     String timeGrade;
     if (tm < 9*60+25) { timeGrade='竞价涨停'; score+=2.0; signals.add('集合竞价即涨停'); }
     else if (tm < 10*60) { timeGrade='早盘秒板'; score+=1.5; signals.add('早盘半小时内封板'); }
