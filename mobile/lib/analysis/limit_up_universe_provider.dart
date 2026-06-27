@@ -44,7 +44,7 @@ class LimitUpUniverseProvider {
         consecutiveDays: s.consecutiveDays,
         firstLimitTime: s.firstLimitTime, lastLimitTime: s.lastLimitTime,
         sealAmount: s.sealAmount, turnoverRate: s.turnoverRate,
-        volumeRatio: q.turnover > 0 ? q.turnover : s.volumeRatio,
+        volumeRatio: s.volumeRatio,
         sector: s.sector, limitUpType: s.limitUpType,
         sealRatio: s.sealRatio, limitUpPrice: s.limitUpPrice,
         totalValue: s.totalValue, circulationValue: s.circulationValue,
@@ -64,11 +64,16 @@ class LimitUpUniverseProvider {
       const batchSize = 30;
       final allQuotes = <QuoteData>[];
       for (var i = 0; i < pool.length; i += batchSize) {
-        final batch = pool.skip(i).take(batchSize).map((s) => s.code).toList();
-        // 复用 ApiClient.addMarketPrefix 实例方法（返回 sh600519 无点格式，腾讯接口要求）
-        final prefixed = batch.map((c) => api.addMarketPrefix(c)).toList();
-        final quotes = await api.getBatchRealtimeQuotes(prefixed);
-        allQuotes.addAll(quotes);
+        try {
+          final batch = pool.skip(i).take(batchSize).map((s) => s.code).toList();
+          // 复用 ApiClient.addMarketPrefix 实例方法（返回 sh600519 无点格式，腾讯接口要求）
+          final prefixed = batch.map((c) => api.addMarketPrefix(c)).toList();
+          final quotes = await api.getBatchRealtimeQuotes(prefixed);
+          allQuotes.addAll(quotes);
+        } catch (e) {
+          // 批次失败不阻塞后续批次，部分行情数据仍可用于补充
+          debugPrint('LimitUpUniverseProvider.fetchLatest batch $i failed: $e');
+        }
       }
       return supplementQuotes(pool, allQuotes);
     } catch (e) {
