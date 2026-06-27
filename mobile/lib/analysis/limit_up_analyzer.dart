@@ -122,6 +122,7 @@ class LimitUpAnalysis {
     'board_type': boardType,
     'position': position,
     'premium_prob': premiumProb,
+    'signals': signals,
     'sector': sector ?? '',
     'zhaban_count': zhabanCount,
     'is_zhaban': isZhaBan ? 1 : 0,
@@ -136,20 +137,23 @@ class LimitUpAnalysis {
     name: (m['name'] ?? '').toString(),
     consecutiveDays: ((m['consecutive_days'] ?? 1) as num).toInt(),
     quality: (m['quality'] ?? '一般').toString(),
-    qualityScore: (m['quality_score'] ?? 5.0) as double,
+    qualityScore: ((m['quality_score'] ?? 5.0) as num).toDouble(),
     timeGrade: (m['time_grade'] ?? '未知').toString(),
-    sealRate: (m['seal_rate'] ?? 0) as double,
+    sealRate: ((m['seal_rate'] ?? 0) as num).toDouble(),
     boardType: (m['board_type'] ?? '').toString(),
     position: (m['position'] ?? '').toString(),
-    premiumProb: (m['premium_prob'] ?? 0.5) as double,
+    premiumProb: ((m['premium_prob'] ?? 0.5) as num).toDouble(),
+    signals: (m['signals'] as List?)
+        ?.map((e) => e.toString())
+        .toList() ?? const [],
     sector: m['sector'] as String?,
     zhabanCount: ((m['zhaban_count'] ?? 0) as num).toInt(),
     isZhaBan: ((m['is_zhaban'] ?? 0) as num) == 1,
-    sealAmount: (m['seal_amount'] ?? 0) as double,
-    price: (m['price'] ?? 0) as double,
-    changePct: (m['change_pct'] ?? 0) as double,
+    sealAmount: ((m['seal_amount'] ?? 0) as num).toDouble(),
+    price: ((m['price'] ?? 0) as num).toDouble(),
+    changePct: ((m['change_pct'] ?? 0) as num).toDouble(),
     firstLimitTime: m['first_limit_time'] != null
-        ? DateTime.fromMillisecondsSinceEpoch(m['first_limit_time'] as int)
+        ? DateTime.fromMillisecondsSinceEpoch((m['first_limit_time'] as num).toInt())
         : null,
   );
 }
@@ -215,7 +219,7 @@ class LimitUpAnalyzer {
 
   static Map<String, dynamic> analyzeBatch(List<LimitUpStock> stocks) {
     if (stocks.isEmpty) return {'analyses':[], 'total':0, 'leaders':[]};
-    final analyses = stocks.map((s) => analyzeSingle(s)).toList();
+    final analyses = analyzeBatchList(stocks);  // 复用 analyzeBatchList (DRY)
     final leaders = analyses.where((a) => a.qualityScore >= 8.0).toList();
     final dist = <String,int>{};
     for (final s in stocks) { final k = s.consecutiveDays == 1 ? '首板' : '${s.consecutiveDays}连板'; dist[k] = (dist[k]??0)+1; }
