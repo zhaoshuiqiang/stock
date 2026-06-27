@@ -401,7 +401,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
       ),
       child: TabBar(
         controller: _tabController,
-        isScrollable: true,
+        isScrollable: false,
         labelColor: Colors.white,
         unselectedLabelColor: _kTextSecondary,
         indicatorSize: TabBarIndicatorSize.tab,
