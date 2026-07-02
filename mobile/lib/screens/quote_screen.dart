@@ -411,11 +411,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         pb: prev.pb,
         totalMarketCap: prev.totalMarketCap,
         circulatingMarketCap: prev.circulatingMarketCap,
-        // 主力资金：如果轮询返回了有效数据则更新，否则保留原值
-        mainInflow: quote.mainInflow != 0 ? quote.mainInflow : prev.mainInflow,
-        mainOutflow: quote.mainOutflow != 0 ? quote.mainOutflow : prev.mainOutflow,
-        mainNetFlow: quote.mainNetFlow != 0 ? quote.mainNetFlow : prev.mainNetFlow,
-        mainNetFlowRate: quote.mainNetFlowRate != 0 ? quote.mainNetFlowRate : prev.mainNetFlowRate,
+        mainInflow: quote.mainInflow,
+        mainOutflow: quote.mainOutflow,
+        mainNetFlow: quote.mainNetFlow,
+        mainNetFlowRate: quote.mainNetFlowRate,
         volumeRatio: quote.volumeRatio > 0 ? quote.volumeRatio : prev.volumeRatio,
       );
     } else {

@@ -10,6 +10,14 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.44.0',
+        'date': '2026-07-02',
+        'changes': [
+          '修复主力资金四个指标全部为0：quote_screen.dart轮询逻辑中主力资金字段被条件判断过滤，已改为直接使用新数据',
+          '添加主力资金单元测试：验证copyWith合并逻辑、净流入为0但流入流出不为0的情况、轮询数据更新逻辑',
+        ],
+      },
+      {
         'version': 'v2.43.0',
         'date': '2026-07-02',
         'changes': [
