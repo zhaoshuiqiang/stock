@@ -10,6 +10,13 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.43.0',
+        'date': '2026-07-02',
+        'changes': [
+          '修复主力资金四个指标全部为0：getRealtimeQuoteWithValidation()条件判断错误，即使净流入为0也应合并主力资金数据',
+        ],
+      },
+      {
         'version': 'v2.42.0',
         'date': '2026-07-02',
         'changes': [

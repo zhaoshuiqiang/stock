@@ -542,7 +542,7 @@ class ApiClient {
     }
 
     // 合并主力资金数据
-    if (fundFlowQuote != null && (fundFlowQuote.mainNetFlow != 0 || fundFlowQuote.mainNetFlowRate != 0)) {
+    if (fundFlowQuote != null) {
       mergedQuote = mergedQuote.copyWith(
         mainNetFlow: fundFlowQuote.mainNetFlow,
         mainNetFlowRate: fundFlowQuote.mainNetFlowRate,
