@@ -1,5 +1,6 @@
-$version = (Select-String -Path "pubspec.yaml" -Pattern "^version:").Line.Split(":")[1].Trim()
-cd d:\MyProjects\stock\mobile
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$version = (Select-String -Path "$scriptDir\pubspec.yaml" -Pattern "^version:").Line.Split(":")[1].Trim()
+cd $scriptDir
 flutter build apk --release 2>&1 | Select-Object -Last 20
 $apkPath = "build\app\outputs\flutter-apk\app-release.apk"
 if (Test-Path $apkPath) {

@@ -10,6 +10,16 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.47.0',
+        'date': '2026-07-03',
+        'changes': [
+          '代码评审优化：修复build_release.ps1脚本版本号读取bug，用\$PSScriptRoot定位pubspec.yaml，从任何目录运行都能正确生成带版本号的APK文件名',
+          '代码评审优化：_parseDouble添加trim()处理，提高外部API字符串数据的解析鲁棒性',
+          '代码评审确认：getMainFundFlow解析逻辑正确（f52=净流入额，f57=净流入率），推算公式数学正确（流入-流出=净流入）',
+          '代码评审确认：getGlobalIndices并行请求正确，涨跌幅计算从最近2条日K线收盘价推导',
+        ],
+      },
+      {
         'version': 'v2.46.0',
         'date': '2026-07-03',
         'changes': [
