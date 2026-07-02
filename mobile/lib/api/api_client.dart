@@ -524,25 +524,44 @@ class ApiClient {
     final results = await Future.wait([
       getRealtimeQuote(code),
       _fetchQuoteFromEastMoney(code),
+      getMainFundFlow(code),
     ]);
 
     final tencentQuote = results[0];
     final eastMoneyQuote = results[1];
+    final fundFlowQuote = results[2];
 
     // 如果两个源都获取失败，返回null
     if (tencentQuote == null && eastMoneyQuote == null) return null;
 
+    QuoteData mergedQuote;
+    if (tencentQuote != null) {
+      mergedQuote = tencentQuote;
+    } else {
+      mergedQuote = eastMoneyQuote!;
+    }
+
+    // 合并主力资金数据
+    if (fundFlowQuote != null && (fundFlowQuote.mainNetFlow != 0 || fundFlowQuote.mainNetFlowRate != 0)) {
+      mergedQuote = mergedQuote.copyWith(
+        mainNetFlow: fundFlowQuote.mainNetFlow,
+        mainNetFlowRate: fundFlowQuote.mainNetFlowRate,
+        mainInflow: fundFlowQuote.mainInflow,
+        mainOutflow: fundFlowQuote.mainOutflow,
+      );
+    }
+
     // 如果只有一个源成功，直接使用该数据，置信度为low
     if (tencentQuote == null) {
       return ValidatedQuoteData(
-        quote: eastMoneyQuote!,
+        quote: mergedQuote,
         confidence: DataConfidence.low,
         validationNote: '仅东方财富数据源可用',
       );
     }
     if (eastMoneyQuote == null) {
       return ValidatedQuoteData(
-        quote: tencentQuote,
+        quote: mergedQuote,
         confidence: DataConfidence.low,
         validationNote: '仅腾讯数据源可用',
       );
@@ -568,9 +587,9 @@ class ApiClient {
       validationNote = '价格偏差${priceDiffPct.toStringAsFixed(2)}%过大，使用腾讯数据';
     }
 
-    // 使用腾讯数据作为主数据源
+    // 使用合并后的数据作为主数据源
     return ValidatedQuoteData(
-      quote: tencentQuote,
+      quote: mergedQuote,
       confidence: confidence,
       validationNote: validationNote,
     );

@@ -121,10 +121,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _sectors = cachedSectors;
       });
     }
-    // 任一缓存为空时从API加载
-    if (cachedQuotes.isEmpty || cachedSectors.isEmpty) {
-      await _loadData();
-    }
+    await _loadData();
   }
 
   /// 从API加载数据并保存到缓存

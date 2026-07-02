@@ -10,6 +10,17 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.41.0',
+        'date': '2026-07-02',
+        'changes': [
+          '修复首页环球市场数据不显示：_loadFromCache()条件判断错误，已改为始终调用_loadData()',
+          '修复主力资金数据全部为0：getRealtimeQuoteWithValidation()增加getMainFundFlow()调用，合并主力资金字段',
+          '情绪温度计加载优化：扫描引擎未运行时自动触发扫描补全数据',
+          '个股详情性能优化：减少不必要的缓存检查和重复API调用',
+          '修复分时页面布局问题：确保分时图下方的成交量柱和主力资金栏正常显示',
+        ],
+      },
+      {
         'version': 'v2.40.0',
         'date': '2026-07-02',
         'changes': [
