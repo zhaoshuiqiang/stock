@@ -27,13 +27,13 @@ class ApiClient {
   /// 获取共享的fallback HttpClient
   HttpClient _getFallbackClient() {
     _fallbackClient ??= HttpClient()
-      ..connectionTimeout = const Duration(seconds: 15)
+      ..connectionTimeout = const Duration(seconds: 8)
       ..idleTimeout = const Duration(seconds: 5);
     return _fallbackClient!;
   }
 
   /// 公共 HTTP GET 请求方法，统一处理超时、重试和异常捕获
-  Future<http.Response?> _httpGet(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 15), int retries = 2}) async {
+  Future<http.Response?> _httpGet(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 8), int retries = 2}) async {
     if (_disposed) return null;
     for (var attempt = 0; attempt < retries; attempt++) {
       try {
@@ -56,7 +56,7 @@ class ApiClient {
   }
 
   /// 备用HTTP GET：使用dart:io HttpClient，避免http包连接池问题
-  Future<http.Response?> _httpGetFallback(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 15)}) async {
+  Future<http.Response?> _httpGetFallback(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 8)}) async {
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         final client = _getFallbackClient();
@@ -406,7 +406,12 @@ class ApiClient {
     final url = Uri.parse('https://push2.eastmoney.com/api/qt/ulist.np/get?fields=f62,f184,f66,f69,f72,f75,f78,f81,f84,f87&secids=$secid');
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
+      'Referer': 'https://quote.eastmoney.com/',
     });
+    if (response == null) {
+      debugPrint('[API] getMainFundFlow($code) HTTP failed');
+      return null;
+    }
     if (response != null) {
       final body = response.body;
       Map<String, dynamic> data;
@@ -1382,9 +1387,8 @@ class ApiClient {
       }
       if (result.isNotEmpty) {
         _setCached(cacheKey, result, duration: const Duration(minutes: 2));
-      } else {
-        _setCached(cacheKey, result, duration: const Duration(minutes: 1));
       }
+      // 空结果不缓存，避免持续无数据
       return result;
     } catch (e) {
       debugPrint('getGlobalIndices failed: $e');

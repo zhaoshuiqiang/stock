@@ -151,15 +151,15 @@ void main() {
           reason: 'Uptrend should produce more buy strategies');
     });
 
-    test('downtrend produces fewer buy strategies', () {
+    test('downtrend produces fewer active buy strategies', () {
       final data = calcAllIndicators(generateDowntrend(60));
       final signals = SignalLayer.detectAllSignals(data);
       final strategies = evaluateStrategies(data, signals);
-      final buys = strategies.where((s) => s.type == 'buy' && !s.id.startsWith('conflict_'));
-      final sells = strategies.where((s) => s.type == 'sell' && !s.id.startsWith('conflict_'));
-      // Downtrend should not be dominated by buy strategies
-      expect(buys.length, lessThanOrEqualTo(3),
-          reason: 'Downtrend should have few buy strategies, got $buys');
+      // 只统计活跃的买入策略（v2.45: 未激活策略也展示，isActive=false）
+      final activeBuys = strategies.where((s) => s.isActive && s.type == 'buy' && !s.id.startsWith('conflict_'));
+      // Downtrend should not be dominated by active buy strategies
+      expect(activeBuys.length, lessThanOrEqualTo(3),
+          reason: 'Downtrend should have few active buy strategies, got $activeBuys');
     });
   });
 

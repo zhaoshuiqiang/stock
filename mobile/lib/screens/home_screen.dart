@@ -53,10 +53,10 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_pickEngine.isRunning) {
       _subscribeToPickProgress();
     }
-    // 订阅打板扫描进度：扫描完成/失败时刷新 _sentiment 并清除 _isScanning
+    // 订阅打板扫描进度：扫描完成/失败/已在运行时刷新 _sentiment 并清除 _isScanning
     _limitUpScanSub = LimitUpScanEngine.instance.progressStream.listen((progress) {
       if (!mounted) return;
-      if (progress.stage == 'done' || progress.stage == 'error') {
+      if (progress.stage == 'done' || progress.stage == 'error' || progress.stage == 'already_running') {
         setState(() {
           _sentiment = LimitUpScanEngine.instance.lastSentiment;
           _isScanning = false;
@@ -131,54 +131,38 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _loadError = '';
     });
 
-    // 大盘数据和板块数据分开加载，互不影响
+    // 并行加载大盘、板块、环球市场数据
     try {
       final codes = ['sh000001', 'sz399001', 'sz399006'];
-      final futures = codes.map((code) => _apiClient.getRealtimeQuote(code));
-      final results = await Future.wait(futures);
-      final quotes = results.where((q) => q != null).cast<QuoteData>().toList();
+      final results = await Future.wait<dynamic>([
+        Future.wait(codes.map((code) => _apiClient.getRealtimeQuote(code))),
+        _apiClient.getHotSectors(),
+        _apiClient.getGlobalIndices(),
+      ]);
+
+      final quotes = (results[0] as List).whereType<QuoteData>().toList();
+      final sectors = results[1] as List<SectorInfo>;
+      final indices = results[2] as List<GlobalIndex>;
+
       if (mounted) {
         setState(() {
           _quotes = quotes;
-        });
-      }
-      // 保存到缓存
-      if (quotes.isNotEmpty) {
-        await _dbService.saveMarketQuotesCache(quotes);
-      }
-    } catch (e) {
-      debugPrint('Load market data failed: $e');
-    }
-
-    try {
-      final sectors = await _apiClient.getHotSectors();
-      if (mounted) {
-        setState(() {
           _sectors = sectors;
+          _globalIndices = indices;
           if (sectors.isEmpty) _loadError = '板块数据加载失败，下拉刷新重试';
+          if (indices.isEmpty && _loadError.isEmpty) _loadError = '环球市场数据加载失败，下拉刷新重试';
         });
       }
       // 保存到缓存
-      if (sectors.isNotEmpty) {
-        await _dbService.saveSectorsCache(sectors);
-      }
+      if (quotes.isNotEmpty) await _dbService.saveMarketQuotesCache(quotes);
+      if (sectors.isNotEmpty) await _dbService.saveSectorsCache(sectors);
     } catch (e) {
-      debugPrint('Load sectors failed: $e');
+      debugPrint('Load data failed: $e');
       if (mounted) {
         setState(() {
-          _loadError = '板块数据加载失败：$e';
+          _loadError = '数据加载失败：$e';
         });
       }
-    }
-
-    // 加载全球指数（美股/港股/亚太/欧洲）
-    try {
-      final indices = await _apiClient.getGlobalIndices();
-      if (mounted) {
-        setState(() => _globalIndices = indices);
-      }
-    } catch (e) {
-      debugPrint('Load global indices failed: $e');
     } finally {
       if (mounted) {
         setState(() {

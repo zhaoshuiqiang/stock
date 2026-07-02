@@ -490,29 +490,20 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     });
 
     try {
-      // 渐进式加载：先获取核心数据（行情+主力资金），快速显示页面
-      final validatedQuote = await _apiClient.getRealtimeQuoteWithValidation(widget.code);
-      var quote = validatedQuote?.quote;
-
-      if (quote != null && mounted) {
-        setState(() {
-          _quote = quote;
-          _isLoading = false; // 先显示行情数据
-        });
-      }
-
-      // 然后并行加载其余数据
+      // 并行加载所有数据（不再串行等待）
       final results = await Future.wait([
+        _apiClient.getRealtimeQuoteWithValidation(widget.code),
         _apiClient.getStockHistory(widget.code, days: 120),
         _apiClient.getStockSector(widget.code),
         _apiClient.getHotSectors(),
         _apiClient.getTimeshareData(widget.code),
       ]);
 
-      final klines = results[0] as List<HistoryKline>;
-      final sectorName = results[1] as String;
-      final hotSectors = results[2] as List<SectorInfo>;
-      final timeshareResult = results[3] as Map<String, dynamic>?;
+      var quote = (results[0] as ValidatedQuoteData?)?.quote;
+      final klines = results[1] as List<HistoryKline>;
+      final sectorName = results[2] as String;
+      final hotSectors = results[3] as List<SectorInfo>;
+      final timeshareResult = results[4] as Map<String, dynamic>?;
 
       final calculated = calcAllIndicators(klines);
 
@@ -1428,7 +1419,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           borderRadius: BorderRadius.circular(8),
         ),
         child: const Center(
-          child: Text('主力资金数据加载中...', style: TextStyle(color: Colors.white38, fontSize: 12)),
+          child: Text('主力资金数据加载中...', style: TextStyle(color: Colors.grey, fontSize: 12)),
         ),
       );
     }

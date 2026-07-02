@@ -29,7 +29,7 @@ class StrategyBuilder {
   ) {
     final strategies = <TradingStrategy>[];
 
-    // 短线策略库（6-8种）
+    // 短线策略库（6-8种）—— 始终生成所有策略，条件不满足时isActive=false
     strategies.addAll(_buildShortTermStrategies(data, signals));
 
     // 长线策略库（6-8种）
@@ -38,17 +38,59 @@ class StrategyBuilder {
     // 特殊策略（2-3种）
     strategies.addAll(_buildSpecialStrategies(data, signals));
 
+    // 补充所有未触发的策略定义（条件不满足但仍展示）
+    strategies.addAll(_buildInactiveStrategies(data, strategies));
+
+    // 去重（按id）
+    final seen = <String>{};
+    strategies.removeWhere((s) => !seen.add(s.id));
+
     // 按策略类型和活跃度排序
     strategies.sort((a, b) {
-      // 优先显示与用户偏好匹配的策略
-      if (a.strategyType == 'short' && preferredDuration == SignalDuration.shortTerm) return -1;
-      if (b.strategyType == 'long' && preferredDuration == SignalDuration.longTerm) return -1;
       if (a.isActive && !b.isActive) return -1;
       if (!a.isActive && b.isActive) return 1;
       return b.signalStrength.compareTo(a.signalStrength);
     });
 
     return strategies;
+  }
+
+  /// 补充所有策略定义（条件不满足时isActive=false），确保面板不会为空
+  static List<TradingStrategy> _buildInactiveStrategies(
+      List<HistoryKline> data, List<TradingStrategy> existing) {
+    final existingIds = existing.map((s) => s.id).toSet();
+    final all = <TradingStrategy>[];
+    final last = data.isNotEmpty ? data.last : null;
+
+    final definitions = [
+      ('kdj_short_buy', 'KDJ超卖金叉', '短线', 'KDJ在超卖区（K<30）形成金叉，短线反弹信号', 'K线上穿D线且K值<30', 'K值>80或K线下穿D线', '跌破入场价-1.5xATR'),
+      ('macd_short_divergence', 'MACD底背离短线', '短线', '股价创新低但MACD不创新低，短线反弹机会', '底背离确认后DIF拐头向上', 'DIF再次向下拐头', '跌破入场价-1xATR'),
+      ('shrink_pullback_short', '缩量回调', '短线', '上涨趋势中缩量回调，短线逢低买入机会', '量能萎缩至均量70%以下', '放量下跌或跌破MA20', '跌破入场价-1xATR'),
+      ('rsi_oversold_short', 'RSI超卖反弹', '短线', 'RSI从超卖区回升突破30，短线反弹信号', 'RSI6从30以下回升突破30', 'RSI6>70或跌破50', '跌破入场价-1xATR'),
+      ('ma_breakout_short', '均线突破', '短线', '股价向上突破5日均线，短期走势转强', '股价站上MA5', '股价跌破MA5', '跌破入场价-1xATR'),
+      ('volume_breakout_short', '放量突破', '短线', '成交量放大至均量2倍以上，短线买入信号', '量比>2且股价上涨', '连续3日缩量', '跌破入场价-1xATR'),
+      ('ma_multi_head_long', '均线多头排列', '长线', 'MA5>MA10>MA20，长期上升趋势', '多头排列形成后回踩MA10', 'MA5下穿MA10', '跌破入场价-2xATR'),
+      ('macd_zero_above_cross', 'MACD零轴上方金叉', '长线', 'MACD在零轴上方形成金叉，多头趋势强劲', '零轴上方DIF上穿DEA', 'DIF下穿DEA', '跌破入场价-2xATR'),
+      ('rsi_support_long', 'RSI中轨支撑', '长线', 'RSI在40-60区间运行，中轨附近企稳', 'RSI12在40-60区间回踩', 'RSI12>70或<30', '跌破入场价-2xATR'),
+      ('boll_breakout_long', '布林带突破', '长线', '布林带收口后放量突破上轨', '布林带收口后放量突破', '回落至中轨下方', '跌破入场价-2xATR'),
+      ('adx_trend_long', '趋势强度确认', '长线', 'ADX>25，趋势明确', 'ADX>25趋势强劲', 'ADX<20趋势转弱', '跌破入场价-2xATR'),
+      ('breakout_pullback_confirm', '突破+回踩确认', '长线', '均线多头排列后回踩MA10企稳', '多头排列后回踩MA10', 'MA5下穿MA10', '跌破入场价-2xATR'),
+      ('volume_stop_drop', '缩量止跌', '特殊', '前期大幅下跌后量能萎缩，价格企稳', '跌幅超10%后量能萎缩50%', '放量上涨或跌破企稳价', '跌破入场价-1.5xATR'),
+      ('ma20_break_defense', 'MA20破位防守', '防守', '股价跌破MA20，趋势可能转弱', '收盘价跌破MA20', '股价重新站回MA20', '跌破入场价-1.5xATR'),
+      ('high_volume_stall', '高位放量滞涨止盈', '防守', '大幅上涨后放量滞涨，主力派发信号', '20日涨>20%+放量滞涨', '放量跌破MA10', '跌破入场价-1.5xATR'),
+    ];
+
+    for (final (id, name, category, desc, entry, exit, stop) in definitions) {
+      if (!existingIds.contains(id)) {
+        all.add(TradingStrategy(
+          id: id, name: name, category: category, description: desc,
+          entryRule: entry, exitRule: exit, stopLossRule: stop,
+          isActive: false, signalStrength: 0, strategyType: category == '短线' ? 'short' : 'long',
+          entryPrice: last?.close ?? 0,
+        ));
+      }
+    }
+    return all;
   }
 
   /// 短线策略库（1-5天操作）

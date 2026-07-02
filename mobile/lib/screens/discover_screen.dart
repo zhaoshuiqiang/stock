@@ -167,7 +167,8 @@ class DiscoverScreenState extends State<DiscoverScreen>
           setState(() => _limitUpScanLoading = false);
           break;
         case 'already_running':
-          // 不重复设置_loading，_refreshLimitUpPool已自行管理状态
+          // 引擎已在运行，从DB读取已有数据，同时等待进度流完成
+          _loadLimitUpPoolFromDb();
           break;
       }
     });
@@ -217,6 +218,17 @@ class DiscoverScreenState extends State<DiscoverScreen>
   Future<void> _loadIntradayScanResults() async {
     if (_isScanningIntraday) return;
     if (!mounted) return;
+
+    // 非交易时段给用户提示
+    if (!TradingSession.isInTradingSession()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('非交易时段，分时低吸扫描仅在盘中有效'), duration: Duration(seconds: 2)),
+        );
+      }
+      return;
+    }
+
     setState(() => _isScanningIntraday = true);
     try {
       // 先确保explore_results有数据
@@ -237,6 +249,11 @@ class DiscoverScreenState extends State<DiscoverScreen>
           _lastIntradayScanTime = DateTime.now();
           _isScanningIntraday = false;
         });
+        if (results.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('当前无符合条件的低吸信号'), duration: Duration(seconds: 2)),
+          );
+        }
       }
     } catch (e) {
       debugPrint('_loadIntradayScanResults error: $e');
@@ -334,9 +351,10 @@ class DiscoverScreenState extends State<DiscoverScreen>
     setState(() => _limitUpScanLoading = true);
     try {
       final sentiment = await LimitUpScanEngine.instance.scan();
-      // scan()返回null可能是already_running，检查引擎是否仍在运行
+      // scan()返回null可能是already_running，等待进度流完成
       if (sentiment == null && LimitUpScanEngine.instance.isRunning) {
-        // 引擎正在运行，进度流会处理状态更新，不做任何事
+        // 引擎正在运行，进度流会处理状态更新
+        // 不再早退，等待进度流完成时重置状态
         return;
       }
       final pool = await _dbService.getLimitUpPool();

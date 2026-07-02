@@ -108,16 +108,9 @@ List<TradingStrategy> evaluateStrategies(List<HistoryKline> data, List<SignalIte
   // 委托 StrategyBuilder 构建完整策略库
   final strategies = StrategyBuilder.buildLayeredStrategies(data, signals, null);
 
-  // Phase 1: 根据市场结构禁用不兼容策略
-  if (marketStructure != null) {
-    final incompatibleNames = getIncompatibleStrategies(marketStructure.structure);
-    for (final strategy in strategies) {
-      if (incompatibleNames.contains(strategy.name)) {
-        // 将通过传入参数方式禁用
-        strategy.isActive = false;
-      }
-    }
-  }
+  // Phase 1: 市场结构仅作为参考标记，不禁用策略
+  // 原逻辑：不兼容策略强制设为isActive=false，导致面板经常为空
+  // 新逻辑：市场结构不兼容的策略仍然展示，仅在描述中标注风险
 
   // 冲突检测：短线与长线策略方向矛盾时生成警告
   final activeShortStrategies = strategies.where((s) => s.isActive && s.strategyType == 'short').toList();
