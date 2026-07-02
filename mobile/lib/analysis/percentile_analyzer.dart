@@ -238,6 +238,7 @@ class PercentileAnalyzer {
     if (value <= fairLow) return 10 + (value - low) / (fairLow - low) * 20; // 低估: 10-30
     if (value <= fairHigh) return 30 + (value - fairLow) / (fairHigh - fairLow) * 40; // 合理: 30-70
     if (value <= high) return 70 + (value - fairHigh) / (high - fairHigh) * 20; // 高估: 70-90
+    if (high <= 0) return 50.0;
     return 90 + ((value - high) / (high * 0.5)).clamp(0, 1) * 10; // 极度高估: 90-100
   }
 

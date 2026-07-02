@@ -194,6 +194,10 @@ class PatternRecognizer {
 
     if (minima.length < 3) return null;
 
+    // 预剪枝：当前价未高于窗口最低点5%，不可能形成有效突破
+    final windowLow = windowData.map((e) => e.low).reduce((a, b) => a < b ? a : b);
+    if (data.last.close <= windowLow * 1.05) return null;
+
     // 2. Search for head-and-shoulders sequence among minima
     for (int left = 0; left < minima.length - 2; left++) {
       final lsIdx = minima[left];
@@ -212,6 +216,9 @@ class PatternRecognizer {
 
           // Head must be deeper than right shoulder
           if (hLow >= rsLow) continue;
+
+          // 右肩必须在最近20根K线内
+          if (rsIdx < windowData.length - 20) continue;
 
           // Shoulders within 5% of each other
           final avgShoulder = (lsLow + rsLow) / 2;

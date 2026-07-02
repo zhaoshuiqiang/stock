@@ -18,6 +18,7 @@ class QuotePollingClient {
   Timer? _pollingTimer;
   final Set<String> _subscriptions = {};
   bool _shouldPoll = false;
+  bool _isPolling = false;
   http.Client? _httpClient;
 
   /// 兼容旧名称的引用
@@ -41,9 +42,11 @@ class QuotePollingClient {
     });
   }
 
-  void _pollQuotes() async {
-    if (_subscriptions.isEmpty || !_shouldPoll) return;
+  Future<void> _pollQuotes() async {
+    if (_isPolling) return; // 防止重入
+    _isPolling = true;
     try {
+      if (_subscriptions.isEmpty || !_shouldPoll) return;
       // 批量请求：使用腾讯批量接口一次获取所有订阅股票行情
       final codes = _subscriptions.toList();
       if (codes.isEmpty) return;
@@ -71,6 +74,8 @@ class QuotePollingClient {
       }
     } catch (e) {
       debugPrint('Polling error: $e');
+    } finally {
+      _isPolling = false;
     }
   }
 
@@ -98,7 +103,7 @@ class QuotePollingClient {
     final amplitude = preClose > 0 ? (high - low) / preClose * 100 : 0.0;
 
     return QuoteData(
-      code: code,
+      code: _addMarketPrefix(code),
       name: parts[1] ?? '',
       price: _parseDouble(parts[3]),
       open: _parseDouble(parts[5]),
@@ -126,6 +131,16 @@ class QuotePollingClient {
     return 0;
   }
 
+  /// 为裸代码添加市场前缀（sh/sz/bj）
+  String _addMarketPrefix(String code) {
+    if (code.startsWith('sh') || code.startsWith('sz') || code.startsWith('bj')) {
+      return code;
+    }
+    if (code.startsWith('6')) return 'sh$code';
+    if (code.startsWith('8') || code.startsWith('43') || code.startsWith('9')) return 'bj$code';
+    return 'sz$code';
+  }
+
   void subscribe(String code) {
     _subscriptions.add(code);
   }
@@ -140,6 +155,7 @@ class QuotePollingClient {
     _subscriptions.clear();
     _httpClient?.close();
     _httpClient = null;
+    onQuoteUpdate = null;
   }
 
   /// 释放资源

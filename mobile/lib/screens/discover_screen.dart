@@ -6,7 +6,10 @@ import '../analysis/explore_engine.dart';
 import '../analysis/sector_pick_engine.dart';
 import '../analysis/limit_up_analyzer.dart';
 import '../analysis/limit_up_scan_engine.dart';
+import '../analysis/intraday_scan_engine.dart';
+import '../analysis/intraday_level_analyzer.dart';
 import '../api/api_client.dart';
+import '../core/trading_session.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
 import '../widgets/limit_up_card.dart';
@@ -71,6 +74,8 @@ class DiscoverScreenState extends State<DiscoverScreen>
   List<Map<String, dynamic>> _sectorPickResults = [];
   bool _isPickingSectors = false; // 板块精选引擎运行中
   StreamSubscription<SectorPickProgress>? _sectorPickSub;
+  // 主线龙头实时行情缓存（裸code → QuoteData），用于显示价格/涨跌幅
+  Map<String, QuoteData> _mainLineQuotes = {};
 
   StreamSubscription<ExploreProgress>? _exploreSub;
 
@@ -80,12 +85,27 @@ class DiscoverScreenState extends State<DiscoverScreen>
   bool _limitUpScanLoading = false;
   StreamSubscription<LimitUpScanProgress>? _limitUpScanSub;
 
+  // ─── 缓存的列表数据（避免 build 中重复计算） ──────────────────
+  List<_LimitUpGroup> _cachedLimitUpGroups = [];
+  List<Map<String, dynamic>> _cachedMainLinePicks = [];
+  // 分时低吸 Tab：基于 IntradayScanEngine 的分时扫描结果
+  List<IntradayScanResult> _cachedIntradayBuyList = [];
+  bool _isScanningIntraday = false;
+  DateTime? _lastIntradayScanTime;
+  List<ExploreResult> _cachedProcessedExploreResults = [];
+
   // ─── 生命周期 ──────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _tabController.addListener(() {
+      // 切到分时低吸 Tab（index=2）时触发懒加载扫描
+      if (!_tabController.indexIsChanging && _tabController.index == 2) {
+        _maybeRefreshIntradayScan();
+      }
+    });
     _loadExploreFromDb();
     _loadWatchlistCodes();
     _loadSectorPicks();
@@ -159,6 +179,12 @@ class DiscoverScreenState extends State<DiscoverScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadLimitUpPoolFromDb();
     });
+
+    // 如果通过 override 直接传入打板池数据（测试或外部注入场景），立即初始化缓存
+    // 避免异步加载失败时缓存为空导致 UI 不渲染分组
+    if (widget.limitUpPoolOverride != null) {
+      _updateCachedLists();
+    }
   }
 
   @override
@@ -177,6 +203,38 @@ class DiscoverScreenState extends State<DiscoverScreen>
     _loadSectorPicks();
   }
 
+  /// 检查是否需要刷新分时低吸扫描
+  /// 仅在交易时段内、距上次扫描超过 1 分钟时刷新
+  void _maybeRefreshIntradayScan() {
+    if (!TradingSession.isInTradingSession()) return;
+    if (_isScanningIntraday) return;
+    final now = DateTime.now();
+    if (_lastIntradayScanTime != null &&
+        now.difference(_lastIntradayScanTime!).inMinutes < 1) return;
+    _loadIntradayScanResults();
+  }
+
+  Future<void> _loadIntradayScanResults() async {
+    if (_isScanningIntraday) return;
+    if (!mounted) return;
+    setState(() => _isScanningIntraday = true);
+    try {
+      final results = await IntradayScanEngine.scan();
+      if (mounted) {
+        setState(() {
+          _cachedIntradayBuyList = results;
+          _lastIntradayScanTime = DateTime.now();
+          _isScanningIntraday = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('_loadIntradayScanResults error: $e');
+      if (mounted) {
+        setState(() => _isScanningIntraday = false);
+      }
+    }
+  }
+
   // ─── 数据加载 ──────────────────────────────────────────────────
 
   Future<void> _loadExploreFromDb() async {
@@ -185,6 +243,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
       if (mounted) {
         setState(() {
           _exploreResults = results;
+          _updateCachedLists();
         });
       }
     } catch (e) {
@@ -209,10 +268,37 @@ class DiscoverScreenState extends State<DiscoverScreen>
     try {
       final results = await _dbService.getSectorPickResults();
       if (mounted) {
-        setState(() => _sectorPickResults = results);
+        setState(() {
+          _sectorPickResults = results;
+          _updateCachedLists();
+        });
+        _fetchMainLineQuotes(); // fire-and-forget 补充实时行情
       }
     } catch (e) {
       debugPrint('_loadSectorPicks failed: $e');
+    }
+  }
+
+  /// 批量获取主线龙头的实时行情（显示价格/涨跌幅用）
+  Future<void> _fetchMainLineQuotes() async {
+    final picks = _cachedMainLinePicks;
+    if (picks.isEmpty) return;
+    try {
+      final codes = picks
+          .map((p) => (p['code'] as String?) ?? '')
+          .where((c) => c.isNotEmpty)
+          .toList();
+      if (codes.isEmpty) return;
+      final prefixed = codes.map((c) => _apiClient.addMarketPrefix(c)).toList();
+      final quotes = await _apiClient.getBatchRealtimeQuotes(prefixed);
+      // key 用带前缀的 quote.code，与 _buildMainLineCard 中 addMarketPrefix(code) 匹配
+      final map = <String, QuoteData>{};
+      for (final q in quotes) {
+        map[q.code] = q;
+      }
+      if (mounted) setState(() => _mainLineQuotes = map);
+    } catch (e) {
+      debugPrint('_fetchMainLineQuotes failed: $e');
     }
   }
 
@@ -221,7 +307,12 @@ class DiscoverScreenState extends State<DiscoverScreen>
   Future<void> _loadLimitUpPoolFromDb() async {
     try {
       final pool = await _dbService.getLimitUpPool();
-      if (mounted) setState(() => _limitUpPool = pool);
+      if (mounted) {
+        setState(() {
+          _limitUpPool = pool;
+          _updateCachedLists();
+        });
+      }
     } catch (e) {
       debugPrint('_loadLimitUpPoolFromDb failed: $e');
     }
@@ -238,6 +329,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
           _sentiment = sentiment;
           _limitUpPool = pool;
           _limitUpScanLoading = false;
+          _updateCachedLists();
         });
       }
     } catch (e) {
@@ -298,6 +390,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
           if (p.results != null) {
             _exploreResults = p.results!;
           }
+          _updateCachedLists();
           break;
         case ExploreStatus.error:
           _exploreLoading = false;
@@ -313,124 +406,111 @@ class DiscoverScreenState extends State<DiscoverScreen>
 
   // ─── Tab 1: 打板梯队（涨停/连板标的） ─────────────────────────
 
-  /// 打板梯队分组：龙头(≥4连板) / 高度板(3连板) / 中度板(2连板) / 首板 / 炸板
-  List<_LimitUpGroup> get _limitUpGroups {
+  /// 重新计算所有缓存的列表（在数据变更的 setState 内调用）
+  void _updateCachedLists() {
+    // 打板梯队分组：龙头(≥4连板) / 高度板(3连板) / 中度板(2连板) / 首板 / 炸板
     final pool = widget.limitUpPoolOverride ?? _limitUpPool;
-    if (pool.isEmpty) return [];
-    return [
-      _LimitUpGroup(
-        title: '龙头',
-        subtitle: '≥4连板',
-        accentColor: const Color(0xFF9D2933),
-        items: pool.where((a) => a.consecutiveDays >= 4).toList()
-          ..sort((a, b) => b.consecutiveDays.compareTo(a.consecutiveDays)),
-      ),
-      _LimitUpGroup(
-        title: '高度板',
-        subtitle: '3连板',
-        accentColor: const Color(0xFFE74C3C),
-        items: pool.where((a) => a.consecutiveDays == 3).toList()
-          ..sort((a, b) => b.sealAmount.compareTo(a.sealAmount)),
-      ),
-      _LimitUpGroup(
-        title: '中度板',
-        subtitle: '2连板',
-        accentColor: const Color(0xFFE67E22),
-        items: pool.where((a) => a.consecutiveDays == 2).toList()
-          ..sort((a, b) => b.sealAmount.compareTo(a.sealAmount)),
-      ),
-      _LimitUpGroup(
-        title: '首板',
-        subtitle: '今日首封',
-        accentColor: const Color(0xFF58A6FF),
-        items: pool.where((a) => a.consecutiveDays == 1 && !a.isZhaBan).toList()
-          ..sort((a, b) {
-            final aT = a.firstLimitTime?.millisecondsSinceEpoch ?? 0;
-            final bT = b.firstLimitTime?.millisecondsSinceEpoch ?? 0;
-            return aT.compareTo(bT);
-          }),
-      ),
-      if (pool.any((a) => a.isZhaBan))
+    if (pool.isEmpty) {
+      _cachedLimitUpGroups = [];
+    } else {
+      _cachedLimitUpGroups = [
         _LimitUpGroup(
-          title: '炸板',
-          subtitle: '曾封后开',
-          accentColor: const Color(0xFF8B5A5A),
-          items: pool.where((a) => a.isZhaBan).toList()
+          title: '龙头',
+          subtitle: '≥4连板',
+          accentColor: const Color(0xFF9D2933),
+          items: pool.where((a) => a.consecutiveDays >= 4).toList()
+            ..sort((a, b) => b.consecutiveDays.compareTo(a.consecutiveDays)),
+        ),
+        _LimitUpGroup(
+          title: '高度板',
+          subtitle: '3连板',
+          accentColor: const Color(0xFFE74C3C),
+          items: pool.where((a) => a.consecutiveDays == 3).toList()
             ..sort((a, b) => b.sealAmount.compareTo(a.sealAmount)),
         ),
-    ].where((g) => g.items.isNotEmpty).toList();
-  }
+        _LimitUpGroup(
+          title: '中度板',
+          subtitle: '2连板',
+          accentColor: const Color(0xFFE67E22),
+          items: pool.where((a) => a.consecutiveDays == 2).toList()
+            ..sort((a, b) => b.sealAmount.compareTo(a.sealAmount)),
+        ),
+        _LimitUpGroup(
+          title: '首板',
+          subtitle: '今日首封',
+          accentColor: const Color(0xFF58A6FF),
+          items: pool.where((a) => a.consecutiveDays == 1 && !a.isZhaBan).toList()
+            ..sort((a, b) {
+              // 按首封时间升序，未知时间(null)排到末尾
+              final aT = a.firstLimitTime?.millisecondsSinceEpoch;
+              final bT = b.firstLimitTime?.millisecondsSinceEpoch;
+              if (aT == null && bT == null) return 0;
+              if (aT == null) return 1;
+              if (bT == null) return -1;
+              return aT.compareTo(bT);
+            }),
+        ),
+        if (pool.any((a) => a.isZhaBan))
+          _LimitUpGroup(
+            title: '炸板',
+            subtitle: '曾封后开',
+            accentColor: const Color(0xFF8B5A5A),
+            items: pool.where((a) => a.isZhaBan).toList()
+              ..sort((a, b) => b.sealAmount.compareTo(a.sealAmount)),
+          ),
+      ].where((g) => g.items.isNotEmpty).toList();
+    }
 
-  // ─── Tab 2: 主线龙头（板块精选 + 主线标记） ───────────────────
-  /// 主线板块个股优先；若无主线命中，回退展示全部板块精选（避免Tab常空）
-  List<Map<String, dynamic>> get _mainLinePicks {
+    // 主线龙头：仅展示主线板块个股；无主线命中时显示空状态，不回退展示全部精选
     final all = _sectorPickResults;
     // mainLine 经 SQLite 往返后为 int(0/1)，从引擎直接获取时为 bool
     var picks = all.where((p) => p['mainLine'] == 1 || p['mainLine'] == true).toList();
-    // 无主线命中时回退到全部精选
     // 注意：db.query() 返回的 QueryResultSet 是只读的（operator []= 抛 read-only），
     // 不能直接赋值后 sort，必须创建可变副本
-    if (picks.isEmpty && all.isNotEmpty) {
-      picks = List<Map<String, dynamic>>.from(all);
+    if (picks.isNotEmpty) {
+      picks = List<Map<String, dynamic>>.from(picks);
     }
     picks.sort((a, b) =>
         (b['score'] as num? ?? 0).toInt().compareTo((a['score'] as num? ?? 0).toInt()));
-    return picks;
-  }
+    _cachedMainLinePicks = picks;
 
-  /// 是否有主线板块命中（用于UI提示区分"无主线"与"回退展示"）
-  bool get _hasMainLineHit => _sectorPickResults
-      .any((p) => p['mainLine'] == 1 || p['mainLine'] == true);
+    // 分时低吸：由 IntradayScanEngine 独立扫描，此处不再基于日线 ExploreResult 筛选
 
-  // ─── Tab 3: 分时低吸（买入推荐 + 涨幅温和 + 评分高） ─────────
-  /// 低吸筛选：买入推荐 且 涨幅在 [-3%, +5%] 区间 且 评分≥6
-  List<ExploreResult> get _lowBuyList {
-    final list = _exploreResults.where((r) =>
-        r.recommendation.contains('买入') &&
-        r.changePct >= -3 &&
-        r.changePct <= 5 &&
-        r.score >= 6).toList();
-    list.sort((a, b) => b.score.compareTo(a.score));
-    return list;
-  }
-
-  // ─── Tab 4: 全市场（原探索结果，排序+筛选） ──────────────────
-  List<ExploreResult> get _processedExploreResults {
-    var list = List<ExploreResult>.from(_exploreResults);
-
-    // 过滤
+    // 全市场：排序+筛选
+    var processedList = List<ExploreResult>.from(_exploreResults);
     switch (_exploreFilter) {
       case '买入':
-        list = list
+        processedList = processedList
             .where((r) =>
                 r.recommendation.contains('买入') ||
                 r.recommendation.contains('强烈买入'))
             .toList();
         break;
       case '观望':
-        list = list
+        processedList = processedList
             .where((r) =>
                 !r.recommendation.contains('买入') &&
                 !r.recommendation.contains('卖出'))
             .toList();
         break;
     }
-
-    // 排序
     switch (_exploreSort) {
       case '评分':
-        list.sort((a, b) => b.score.compareTo(a.score));
+        processedList.sort((a, b) => b.score.compareTo(a.score));
         break;
       case '涨幅':
-        list.sort((a, b) => b.changePct.compareTo(a.changePct));
+        processedList.sort((a, b) => b.changePct.compareTo(a.changePct));
         break;
       case '名称':
-        list.sort((a, b) => a.name.compareTo(b.name));
+        processedList.sort((a, b) => a.name.compareTo(b.name));
         break;
     }
-
-    return list;
+    _cachedProcessedExploreResults = processedList;
   }
+
+  /// 是否有主线板块命中（用于UI提示区分"无主线"与"回退展示"）
+  bool get _hasMainLineHit => _sectorPickResults
+      .any((p) => p['mainLine'] == 1 || p['mainLine'] == true);
 
   // ─── 智能探索：自选切换 ────────────────────────────────────────
 
@@ -454,10 +534,11 @@ class DiscoverScreenState extends State<DiscoverScreen>
     await _loadWatchlistCodes();
   }
 
-  // ─── 智能探索：一键加自选 ──────────────────────────────────────
+  // ─── 一键加自选（4个Tab通用） ──────────────────────────────────
 
-  Future<void> _batchAddToWatchlist() async {
-    final notInList = _processedExploreResults
+  /// 批量加入自选：接收任意来源的 WatchlistItem 列表
+  Future<void> _batchAddToWatchlist(List<WatchlistItem> allStocks) async {
+    final notInList = allStocks
         .where((r) => !_watchlistCodes.contains(r.code))
         .toList();
     if (notInList.isEmpty) {
@@ -470,20 +551,59 @@ class DiscoverScreenState extends State<DiscoverScreen>
       );
       return;
     }
-    final items = notInList
-        .map((r) => WatchlistItem(code: r.code, name: r.name))
-        .toList();
-    await _dbService.batchAddToWatchlist(items);
+    await _dbService.batchAddToWatchlist(notInList);
     await _loadWatchlistCodes();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已添加 ${items.length} 只股票到自选'),
+          content: Text('已添加 ${notInList.length} 只股票到自选'),
           backgroundColor: _kAccent,
           duration: const Duration(seconds: 1),
         ),
       );
     }
+  }
+
+  /// 一键加自选条（置于各Tab顶部）：显示总数+未加自选数+按钮
+  Widget _buildBatchAddBar(List<WatchlistItem> allStocks) {
+    final notInList = allStocks
+        .where((r) => !_watchlistCodes.contains(r.code))
+        .length;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: const BoxDecoration(
+        color: _kCard,
+        border: Border(bottom: BorderSide(color: _kBorder)),
+      ),
+      child: Row(
+        children: [
+          Text(
+            '共 ${allStocks.length} 只 · $notInList 只未加自选',
+            style: const TextStyle(color: _kTextSecondary, fontSize: 12),
+          ),
+          const Spacer(),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('一键加自选', style: TextStyle(fontSize: 12)),
+            onPressed: notInList > 0
+                ? () => _batchAddToWatchlist(allStocks)
+                : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _kAccent,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: const Color(0xFF21262D),
+              disabledForegroundColor: _kTextSecondary,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(6),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ─── Build ─────────────────────────────────────────────────────
@@ -605,22 +725,41 @@ class DiscoverScreenState extends State<DiscoverScreen>
         onAction: _refreshLimitUpPool,
       );
     }
-    return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+    final sealedCount = pool.where((a) => !a.isZhaBan).length;
+    return Column(
       children: [
-        _buildSentimentMiniCard(),
-        const SizedBox(height: 4),
-        for (final group in _limitUpGroups) ...[
-          _buildGroupHeader(group),
-          for (final item in group.items)
-            LimitUpCard(
-              analysis: item,
-              isWatched: _watchlistCodes.contains(item.code),
-              onTap: () => _navigateToQuote(item.code, item.name),
-              onWatchlistToggle: () => _toggleWatchlistByCode(item.code, item.name),
-            ),
-          const SizedBox(height: 8),
-        ],
+        _buildTabHeader(
+          count: sealedCount,
+          hint: _sentiment != null
+              ? '情绪${_sentiment!.temperature.toStringAsFixed(0)}° · $sealedCount只涨停'
+              : '$sealedCount只涨停 · 点击刷新',
+          accentColor: _kLimitUpColor,
+          actionText: _limitUpScanLoading ? '扫描中...' : '刷新打板池',
+          onAction: _limitUpScanLoading ? null : _refreshLimitUpPool,
+        ),
+        _buildBatchAddBar(
+          pool.map((a) => WatchlistItem(code: a.code, name: a.name)).toList(),
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            children: [
+              _buildSentimentMiniCard(),
+              const SizedBox(height: 4),
+              for (final group in _cachedLimitUpGroups) ...[
+                _buildGroupHeader(group),
+                for (final item in group.items)
+                  LimitUpCard(
+                    analysis: item,
+                    isWatched: _watchlistCodes.contains(item.code),
+                    onTap: () => _navigateToQuote(item.code, item.name),
+                    onWatchlistToggle: () => _toggleWatchlistByCode(item.code, item.name),
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -767,10 +906,12 @@ class DiscoverScreenState extends State<DiscoverScreen>
   }
 
   void _navigateToQuote(String code, String name) {
+    // 确保代码带市场前缀（打板池存的是裸6位代码，API 需要 sh/sz/bj 前缀）
+    final prefixedCode = _apiClient.addMarketPrefix(code);
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => QuoteScreen(code: code, name: name),
+        builder: (_) => QuoteScreen(code: prefixedCode, name: name),
       ),
     );
   }
@@ -778,7 +919,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
   // ─── Tab 2: 主线龙头 ──────────────────────────────────────────
 
   Widget _buildMainLineTab() {
-    final list = _mainLinePicks;
+    final list = _cachedMainLinePicks;
     String hint;
     if (_isPickingSectors) {
       hint = '板块精选分析中...';
@@ -787,7 +928,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
     } else if (_hasMainLineHit) {
       hint = '主线板块内精选个股，含轮动加成';
     } else {
-      hint = '暂无主线命中，展示全部板块精选';
+      hint = '暂无主线命中，盘后更新';
     }
     return Column(
       children: [
@@ -803,13 +944,22 @@ class DiscoverScreenState extends State<DiscoverScreen>
             backgroundColor: Color(0xFF21262D),
             valueColor: AlwaysStoppedAnimation<Color>(_kMainLineColor),
           ),
+        _buildBatchAddBar(
+          list
+              .map((p) => WatchlistItem(
+                    code: (p['code'] as String?) ?? '',
+                    name: (p['name'] as String?) ?? '',
+                  ))
+              .where((w) => w.code.isNotEmpty)
+              .toList(),
+        ),
         Expanded(
           child: list.isEmpty
               ? _buildEmptyState(
                   icon: Icons.military_tech_outlined,
                   text: _sectorPickResults.isEmpty
                       ? '暂无板块精选数据'
-                      : '当前无主线板块命中',
+                      : '当前无明确主线板块，盘后更新',
                   actionText: _sectorPickResults.isEmpty && !_isPickingSectors
                       ? '开始精选' : null,
                   onAction: _sectorPickResults.isEmpty && !_isPickingSectors
@@ -828,44 +978,205 @@ class DiscoverScreenState extends State<DiscoverScreen>
   // ─── Tab 3: 分时低吸 ──────────────────────────────────────────
 
   Widget _buildLowBuyTab() {
-    final list = _lowBuyList;
+    final list = _cachedIntradayBuyList;
+    final inSession = TradingSession.isInTradingSession();
+    final hint = _isScanningIntraday
+        ? '分时扫描中...'
+        : list.isEmpty
+            ? (inSession ? '当前无高可信度低吸信号' : '非交易时段，盘后显示最近一次扫描结果')
+            : '高可信度低吸信号 · 按置信度排序';
     return Column(
       children: [
         _buildTabHeader(
           count: list.length,
-          hint: list.isEmpty
-              ? (_exploreResults.isEmpty ? '暂无探索数据，点击刷新' : '当前无低吸信号')
-              : '买入推荐 · 涨幅[-3%,+5%] · 评分≥6',
+          hint: hint,
           accentColor: _kLowBuyColor,
-          actionText: _exploreLoading ? '探索中...' : '刷新',
-          onAction: _exploreLoading ? null : () => _exploreEngine.explore(),
+          actionText: _isScanningIntraday ? '扫描中...' : '刷新扫描',
+          onAction: _isScanningIntraday ? null : _loadIntradayScanResults,
+        ),
+        if (_isScanningIntraday)
+          const LinearProgressIndicator(
+            backgroundColor: Color(0xFF21262D),
+            valueColor: AlwaysStoppedAnimation<Color>(_kLowBuyColor),
+          ),
+        _buildBatchAddBar(
+          list.map((r) => WatchlistItem(code: r.code, name: r.name)).toList(),
         ),
         Expanded(
           child: list.isEmpty
               ? _buildEmptyState(
                   icon: Icons.trending_down_outlined,
-                  text: _exploreResults.isEmpty ? '暂无探索数据，请先刷新' : '当前无低吸信号',
-                  actionText: _exploreResults.isEmpty ? '开始探索' : null,
-                  onAction: _exploreResults.isEmpty ? () => _exploreEngine.explore() : null,
+                  text: inSession ? '当前无分时低吸信号' : '非交易时段，无分时低吸信号',
+                  actionText: inSession && !_isScanningIntraday ? '手动扫描' : null,
+                  onAction: inSession && !_isScanningIntraday
+                      ? _loadIntradayScanResults
+                      : null,
                 )
               : ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: list.length,
-                  itemBuilder: (_, i) => _buildExploreCard(list[i], i + 1,
-                      accentTag: '低吸'),
+                  itemBuilder: (_, i) => _buildIntradayScanCard(list[i], i + 1),
                 ),
         ),
       ],
     );
   }
 
+  /// 分时低吸信号卡片
+  Widget _buildIntradayScanCard(IntradayScanResult r, int rank) {
+    final isUp = r.changePct >= 0;
+    final trendLabel = r.trend == IntradayTrend.bullish
+        ? '日内上涨'
+        : r.trend == IntradayTrend.bearish
+            ? '日内下跌'
+            : '日内震荡';
+    final trendColor = r.trend == IntradayTrend.bullish
+        ? _kUp
+        : r.trend == IntradayTrend.bearish
+            ? _kDown
+            : _kTextSecondary;
+    return Card(
+      color: _kCard,
+      margin: const EdgeInsets.only(bottom: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: _kBorder, width: 0.5),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _navigateToQuote(r.code, r.name),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              // 排名
+              Container(
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _kLowBuyColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '$rank',
+                  style: const TextStyle(
+                    color: _kLowBuyColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              // 股票信息
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          r.name,
+                          style: const TextStyle(
+                            color: _kTextPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          r.code,
+                          style: const TextStyle(
+                            color: _kTextSecondary,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _kLowBuyColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            r.topBuySignal.shortLabel,
+                            style: const TextStyle(
+                              color: _kLowBuyColor,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          trendLabel,
+                          style: TextStyle(
+                            color: trendColor,
+                            fontSize: 11,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '置信度 ${(r.topBuySignal.confidence * 100).toInt()}%',
+                          style: const TextStyle(
+                            color: _kTextSecondary,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // 右侧：价格 + 涨跌幅
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '¥${r.currentPrice.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      color: _kTextPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${isUp ? '+' : ''}${r.changePct.toStringAsFixed(2)}%',
+                    style: TextStyle(
+                      color: isUp ? _kUp : _kDown,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ─── Tab 4: 全市场 ────────────────────────────────────────────
 
   Widget _buildAllMarketTab() {
-    final processed = _processedExploreResults;
+    final processed = _cachedProcessedExploreResults;
     return Column(
       children: [
         _buildExploreHeader(),
+        _buildBatchAddBar(
+          processed
+              .map((r) => WatchlistItem(code: r.code, name: r.name))
+              .toList(),
+        ),
         Expanded(
           child: processed.isEmpty
               ? _buildEmptyState(
@@ -882,7 +1193,6 @@ class DiscoverScreenState extends State<DiscoverScreen>
                   itemBuilder: (_, i) => _buildExploreCard(processed[i], i + 1),
                 ),
         ),
-        if (!_exploreLoading && processed.isNotEmpty) _buildExploreBottomBar(),
       ],
     );
   }
@@ -975,7 +1285,10 @@ class DiscoverScreenState extends State<DiscoverScreen>
                     );
                   }).toList(),
                   onChanged: (v) {
-                    if (v != null) setState(() => _exploreSort = v);
+                    if (v != null) setState(() {
+                      _exploreSort = v;
+                      _updateCachedLists();
+                    });
                   },
                 ),
               ),
@@ -1016,7 +1329,10 @@ class DiscoverScreenState extends State<DiscoverScreen>
                     );
                   }).toList(),
                   onChanged: (v) {
-                    if (v != null) setState(() => _exploreFilter = v);
+                    if (v != null) setState(() {
+                      _exploreFilter = v;
+                      _updateCachedLists();
+                    });
                   },
                 ),
               ),
@@ -1168,24 +1484,19 @@ class DiscoverScreenState extends State<DiscoverScreen>
         SignalTag(text: '原$originalScore分', color: _kTextSecondary),
     ];
 
-    // 主线龙头卡片没有现价/涨跌幅（SectorPickEngine 未保存），用评分驱动
+    // 主线龙头实时行情（从 _mainLineQuotes 缓存读取，异步补充）
+    // key 统一用带前缀的 code，与 _fetchMainLineQuotes 的 map key 一致
+    final quote = _mainLineQuotes[_apiClient.addMarketPrefix(code)];
     return StockCard(
       name: name,
       code: code,
-      price: 0,
-      changePct: 0,
+      price: quote?.price ?? 0,
+      changePct: quote?.changePct ?? 0,
       score: score,
       recommendation: rec,
       rank: rank,
       tags: tags,
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => QuoteScreen(code: code, name: name),
-          ),
-        );
-      },
+      onTap: () => _navigateToQuote(code, name),
       trailing: IconButton(
         icon: Icon(
           isInWatchlist ? Icons.star : Icons.star_border,
@@ -1193,43 +1504,6 @@ class DiscoverScreenState extends State<DiscoverScreen>
           size: 22,
         ),
         onPressed: () => _toggleWatchlistByCode(code, name),
-      ),
-    );
-  }
-
-  Widget _buildExploreBottomBar() {
-    final notInList = _processedExploreResults
-        .where((r) => !_watchlistCodes.contains(r.code))
-        .length;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: _kCard,
-        border: Border(top: BorderSide(color: _kBorder)),
-      ),
-      child: Row(
-        children: [
-          Text(
-            '共 ${_processedExploreResults.length} 只 · $notInList 只未加自选',
-            style: const TextStyle(color: _kTextSecondary, fontSize: 13),
-          ),
-          const Spacer(),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('一键加自选'),
-            onPressed: notInList > 0 ? _batchAddToWatchlist : null,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _kAccent,
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: const Color(0xFF21262D),
-              disabledForegroundColor: _kTextSecondary,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

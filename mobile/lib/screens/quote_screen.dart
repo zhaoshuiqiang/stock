@@ -16,8 +16,21 @@ import '../widgets/strategy_panel.dart';
 import '../widgets/trading_dashboard.dart';
 import '../core/trading_session.dart';
 import '../analysis/intraday_level_analyzer.dart';
+import '../analysis/sector_rotation.dart';
 
 const _kChartLeftReservedSize = 42.0;
+
+// ─── 颜色常量 ──────────────────────────────────────────
+const Color _kUpColor = Color(0xFFef5350);      // A股上涨红
+const Color _kDownColor = Color(0xFF26a69a);    // A股下跌绿
+const Color _kCardColor = Color(0xFF161B22);    // 卡片背景
+const Color _kLimitUpGold = Color(0xFFFFB000);  // 涨停金
+const Color _kBgColor = Color(0xFF0D1117);      // 主背景
+const Color _kTextSecondary = Color(0xFF8B949E); // 次要文字
+const Color _kStrongRed = Color(0xFFE74C3C);    // 强红
+const Color _kOrange = Color(0xFFE67E22);       // 橙色
+const Color _kBollColor = Color(0xFF00BCD4);    // BOLL紫青
+const Color _kGoldCross = Color(0xFFFFD700);    // 黄金交叉
 
 class QuoteScreen extends StatefulWidget {
   final String code;
@@ -58,15 +71,25 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   Map<int, double> _timeshareMinuteVolumes = {};
   // 分时低吸高抛分析结果
   IntradayLevelResult? _intradayLevelResult;
+  // 已弹窗提醒过的信号 minuteOffset（避免重复提醒）
+  final Set<int> _notifiedSignalOffsets = {};
   int _lastAnalyzedOffset = -1;
   // 用于计算每分钟成交量的累积基准
   double _lastCumulativeVolume = 0;
   double _lastCumulativeAmount = 0;
+  // 分时累计量的日期标记，跨日重置
+  String? _lastTimeshareDate;
   int? _selectedKlineIndex;
   bool _showFibonacci = false;
   bool _showBoll = false;
   Map<String, dynamic>? _techAnalysis;
   bool _timeshareLoadFailed = false;
+  // 打板池缓存的 limitUpAnalysis（含真实首封时间），优先于 analyzeFromDaily 的结果
+  // 保证 K线图页与打板梯队页的次日溢价等显示一致
+  LimitUpAnalysis? _limitUpAnalysisFromPool;
+  /// 当前生效的打板分析：优先用打板池缓存（有首封时间更准确），无则回退到日K推断
+  LimitUpAnalysis? get _effectiveLimitUpAnalysis =>
+      _limitUpAnalysisFromPool ?? _analysis?.limitUpAnalysis;
 
   @override
   void initState() {
@@ -79,6 +102,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
   Future<void> _checkFavorite() async {
     _isFavorite = await _dbService.isInWatchlist(widget.code);
+    if (!mounted) return;
     setState(() {});
   }
 
@@ -139,7 +163,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             }
 
             return Dialog(
-              backgroundColor: const Color(0xFF0D1117),
+              backgroundColor: _kBgColor,
               insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 48),
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -160,7 +184,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                               )
                             : null,
                         filled: true,
-                        fillColor: const Color(0xFF161B22),
+                        fillColor: _kCardColor,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide.none,
@@ -188,7 +212,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                                 dense: true,
                                 leading: Icon(
                                   isCurrent ? Icons.radio_button_checked : Icons.radio_button_off,
-                                  color: isCurrent ? const Color(0xFFef5350) : Colors.white38,
+                                  color: isCurrent ? _kUpColor : Colors.white38,
                                   size: 20,
                                 ),
                                 title: Text(item.name, style: TextStyle(
@@ -258,34 +282,35 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       if (pollCount % 6 == 0) {
         final timeshareResult = await _apiClient.getTimeshareData(widget.code, bypassCache: true);
         if (timeshareResult != null && mounted) {
-          setState(() {
-            final apiPrices = timeshareResult['prices'] ?? {};
-            final apiVolumes = timeshareResult['volumes'] ?? <int, double>{};
-            final apiAmounts = timeshareResult['amounts'] ?? <int, double>{};
-            // API数据作为基础，轮询数据覆盖同一分钟槽位
-            _timeshareData = {...apiPrices, ..._timeshareData};
-            // 重新计算累计VWAP
-            final preCloseVal = _quote?.preClose ?? 0;
-            final sortedOffsets = _timeshareData.keys.toList()..sort();
-            double cumAmount = 0;
-            double cumVolume = 0;
-            _timeshareAvgData.clear();
-            for (final offset in sortedOffsets) {
-              cumAmount += apiAmounts[offset] ?? 0;
-              cumVolume += apiVolumes[offset] ?? 0;
-              if (cumVolume > 0) {
-                _timeshareAvgData[offset] = cumAmount / (cumVolume * 100);
-              } else {
-                _timeshareAvgData[offset] = preCloseVal;
-              }
+          // ─── 在 setState 外执行 VWAP 重算和分时分析（耗时操作），避免 build 期间卡顿 ───
+          final apiPrices = timeshareResult['prices'] ?? {};
+          final apiVolumes = timeshareResult['volumes'] ?? <int, double>{};
+          final apiAmounts = timeshareResult['amounts'] ?? <int, double>{};
+          // API数据作为基础，轮询数据覆盖同一分钟槽位
+          _timeshareData = {...apiPrices, ..._timeshareData};
+          // 重新计算累计VWAP
+          final preCloseVal = _quote?.preClose ?? 0;
+          final sortedOffsets = _timeshareData.keys.toList()..sort();
+          double cumAmount = 0;
+          double cumVolume = 0;
+          _timeshareAvgData.clear();
+          for (final offset in sortedOffsets) {
+            cumAmount += apiAmounts[offset] ?? 0;
+            cumVolume += apiVolumes[offset] ?? 0;
+            if (cumVolume > 0) {
+              _timeshareAvgData[offset] = cumAmount / (cumVolume * 100);
+            } else {
+              _timeshareAvgData[offset] = preCloseVal;
             }
-            // 保存分钟成交量
-            _timeshareMinuteVolumes = Map<int, double>.from(apiVolumes);
-            // VWAP累计计算完成
-            _timeshareLoadFailed = false;
-            _lastAnalyzedOffset = -1; // 强制重新分析
-            _analyzeIntradayLevels(); // 在setState内分析，避免build中产生副作用
-          });
+          }
+          // 保存分钟成交量
+          _timeshareMinuteVolumes = Map<int, double>.from(apiVolumes);
+          // VWAP累计计算完成
+          _timeshareLoadFailed = false;
+          _lastAnalyzedOffset = -1; // 强制重新分析
+          _analyzeIntradayLevels(); // 在setState外分析，数据已就绪
+          // setState 仅触发重建
+          setState(() {});
         }
       }
 
@@ -332,134 +357,132 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         _techAnalysis = tech;
         _isAnalysisRefreshing = false;
       });
+      _refreshLimitUpAnalysisFromPool(); // 异步用打板池缓存覆盖
     } catch (e) {
       if (mounted) setState(() { _isAnalysisRefreshing = false; });
     }
   }
 
+  /// 从打板池缓存加载该股票的 LimitUpAnalysis（含真实首封时间），
+  /// 保证与打板梯队页显示一致。打板池存裸6位代码，需去掉市场前缀。
+  Future<void> _refreshLimitUpAnalysisFromPool() async {
+    try {
+      final code = widget.code;
+      final bareCode = (code.startsWith('sh') || code.startsWith('sz') || code.startsWith('bj'))
+          ? code.substring(2)
+          : code;
+      final poolAnalysis = await _dbService.getLimitUpAnalysisByCode(bareCode);
+      if (mounted && poolAnalysis != null) {
+        setState(() => _limitUpAnalysisFromPool = poolAnalysis);
+      }
+    } catch (e) {
+      debugPrint('_refreshLimitUpAnalysisFromPool failed: $e');
+    }
+  }
+
   void _handleQuoteUpdate(QuoteData quote) {
     if (!mounted) return;
-    if (quote.code == widget.code) {
-      setState(() {
-        // 合并数据：保留原有PE/PB等字段，更新价格和主力资金字段
-        if (_quote != null) {
-          final newHigh = quote.high > 0 ? quote.high : _quote!.high;
-          final newLow = quote.low > 0 ? quote.low : _quote!.low;
-          final newPreClose = quote.preClose > 0 ? quote.preClose : _quote!.preClose;
-          _quote = QuoteData(
-            code: _quote!.code,
-            name: _quote!.name,
-            price: quote.price,
-            change: quote.change,
-            changePct: quote.changePct,
-            open: quote.open > 0 ? quote.open : _quote!.open,
-            high: newHigh,
-            low: newLow,
-            preClose: newPreClose,
-            volume: quote.volume > 0 ? quote.volume : _quote!.volume,
-            amount: quote.amount > 0 ? quote.amount : _quote!.amount,
-            amplitude: newPreClose > 0 ? (newHigh - newLow) / newPreClose * 100 : 0.0,
-            turnover: quote.turnover > 0 ? quote.turnover : _quote!.turnover,
-            pe: _quote!.pe,
-            pb: _quote!.pb,
-            totalMarketCap: _quote!.totalMarketCap,
-            circulatingMarketCap: _quote!.circulatingMarketCap,
-            // 主力资金：如果轮询返回了有效数据则更新，否则保留原值
-            mainInflow: quote.mainInflow != 0 ? quote.mainInflow : _quote!.mainInflow,
-            mainOutflow: quote.mainOutflow != 0 ? quote.mainOutflow : _quote!.mainOutflow,
-            mainNetFlow: quote.mainNetFlow != 0 ? quote.mainNetFlow : _quote!.mainNetFlow,
-            mainNetFlowRate: quote.mainNetFlowRate != 0 ? quote.mainNetFlowRate : _quote!.mainNetFlowRate,
-          );
-        } else {
-          _quote = quote;
-        }
-        _isRealtime = true;
-        _lastUpdateTime = DateFormat('HH:mm:ss').format(DateTime.now());
-        
-        // 分时图：按交易时间分钟映射价格
-        _addTimesharePoint(quote.price, quote.volume, quote.amount);
+    if (quote.code != widget.code) return;
 
-        // 更新分析结果中的quote引用，使分析页显示最新价格
-        _updateCount++;
+    // ─── 在 setState 外执行耗时计算，避免 build 期间阻塞 UI ───
 
-        // 检测涨跌幅显著变化（超过1%），触发即时完整分析刷新
-        final changeDiff = _lastChangePct != null
-            ? (quote.changePct - _lastChangePct!).abs()
-            : 0.0;
-        _lastChangePct = quote.changePct;
-
-        if (_analysis != null) {
-          if ((_updateCount % 5 == 0 || changeDiff > 1.0) && _klines.isNotEmpty) {
-            // 每5次轮询（约30秒）重新生成完整分析，确保风险与机会实时更新
-            try {
-              _analysis = generateAnalysis(_klines, _quote);
-            } catch (e) {
-              // 重新生成失败时仅更新quote引用，保留所有已有分析字段
-              final prev = _analysis;
-              if (prev != null) {
-                _analysis = AnalysisResult(
-                  quote: _quote,
-                  indicators: prev.indicators,
-                  signals: prev.signals,
-                  score: prev.score,
-                  recommendation: prev.recommendation,
-                  riskLevel: prev.riskLevel,
-                  riskFactors: prev.riskFactors,
-                  suggestions: prev.suggestions,
-                  tradeLevels: prev.tradeLevels,
-                  confluenceScore: prev.confluenceScore,
-                  confluenceDetails: prev.confluenceDetails,
-                  reasons: prev.reasons,
-                  opportunities: prev.opportunities,
-                  shortTermStrategies: prev.shortTermStrategies,
-                  longTermStrategies: prev.longTermStrategies,
-                  marketContext: prev.marketContext,
-                  confidenceScore: prev.confidenceScore,
-                  detailedReasons: prev.detailedReasons,
-                  backtestResults: prev.backtestResults,
-                  backtestSummary: prev.backtestSummary,
-                  fundamentalScore: prev.fundamentalScore,
-                  newsSentiment: prev.newsSentiment,
-                  validatedSignals: prev.validatedSignals,
-                  confidenceBreakdown: prev.confidenceBreakdown,
-                );
-              }
-            }
-          } else {
-            // 非刷新周期仅更新quote引用，保留所有已有分析字段
-            final prev = _analysis;
-            if (prev != null) {
-              _analysis = AnalysisResult(
-                quote: _quote,
-                indicators: prev.indicators,
-                signals: prev.signals,
-                score: prev.score,
-                recommendation: prev.recommendation,
-                riskLevel: prev.riskLevel,
-                riskFactors: prev.riskFactors,
-                suggestions: prev.suggestions,
-                tradeLevels: prev.tradeLevels,
-                confluenceScore: prev.confluenceScore,
-                confluenceDetails: prev.confluenceDetails,
-                reasons: prev.reasons,
-                opportunities: prev.opportunities,
-                shortTermStrategies: prev.shortTermStrategies,
-                longTermStrategies: prev.longTermStrategies,
-                marketContext: prev.marketContext,
-                confidenceScore: prev.confidenceScore,
-                detailedReasons: prev.detailedReasons,
-                backtestResults: prev.backtestResults,
-                backtestSummary: prev.backtestSummary,
-                fundamentalScore: prev.fundamentalScore,
-                newsSentiment: prev.newsSentiment,
-                validatedSignals: prev.validatedSignals,
-                confidenceBreakdown: prev.confidenceBreakdown,
-              );
-            }
-          }
-        }
-      });
+    // 1. 合并数据：保留原有PE/PB等字段，更新价格和主力资金字段
+    final QuoteData mergedQuote;
+    if (_quote != null) {
+      final prev = _quote!;
+      final newHigh = quote.high > 0 ? quote.high : prev.high;
+      final newLow = quote.low > 0 ? quote.low : prev.low;
+      final newPreClose = quote.preClose > 0 ? quote.preClose : prev.preClose;
+      mergedQuote = QuoteData(
+        code: prev.code,
+        name: prev.name,
+        price: quote.price,
+        change: quote.change,
+        changePct: quote.changePct,
+        open: quote.open > 0 ? quote.open : prev.open,
+        high: newHigh,
+        low: newLow,
+        preClose: newPreClose,
+        volume: quote.volume > 0 ? quote.volume : prev.volume,
+        amount: quote.amount > 0 ? quote.amount : prev.amount,
+        amplitude: newPreClose > 0 ? (newHigh - newLow) / newPreClose * 100 : 0.0,
+        turnover: quote.turnover > 0 ? quote.turnover : prev.turnover,
+        pe: prev.pe,
+        pb: prev.pb,
+        totalMarketCap: prev.totalMarketCap,
+        circulatingMarketCap: prev.circulatingMarketCap,
+        // 主力资金：如果轮询返回了有效数据则更新，否则保留原值
+        mainInflow: quote.mainInflow != 0 ? quote.mainInflow : prev.mainInflow,
+        mainOutflow: quote.mainOutflow != 0 ? quote.mainOutflow : prev.mainOutflow,
+        mainNetFlow: quote.mainNetFlow != 0 ? quote.mainNetFlow : prev.mainNetFlow,
+        mainNetFlowRate: quote.mainNetFlowRate != 0 ? quote.mainNetFlowRate : prev.mainNetFlowRate,
+        volumeRatio: quote.volumeRatio > 0 ? quote.volumeRatio : prev.volumeRatio,
+      );
+    } else {
+      mergedQuote = quote;
     }
+
+    // 2. 检测涨跌幅显著变化（超过1%），触发即时完整分析刷新
+    _updateCount++;
+    final changeDiff = _lastChangePct != null
+        ? (quote.changePct - _lastChangePct!).abs()
+        : 0.0;
+    _lastChangePct = quote.changePct;
+
+    // 3. 在 setState 外执行完整分析管道（耗时操作），避免 build 期间卡顿
+    AnalysisResult? newAnalysis;
+    if (_analysis != null &&
+        (_updateCount % 5 == 0 || changeDiff > 1.0) &&
+        _klines.isNotEmpty) {
+      try {
+        newAnalysis = generateAnalysis(_klines, mergedQuote);
+      } catch (e) {
+        debugPrint('generateAnalysis 失败: $e');
+      }
+    }
+
+    // 4. setState 内仅做轻量赋值
+    setState(() {
+      _quote = mergedQuote;
+      _isRealtime = true;
+      _lastUpdateTime = DateFormat('HH:mm:ss').format(DateTime.now());
+
+      // 分时图：按交易时间分钟映射价格
+      _addTimesharePoint(quote.price, quote.volume, quote.amount);
+
+      if (newAnalysis != null) {
+        _analysis = newAnalysis;
+      } else if (_analysis != null) {
+        // 非刷新周期或重算失败：仅更新 quote 引用，保留所有已有分析字段
+        final prev = _analysis!;
+        _analysis = AnalysisResult(
+          quote: mergedQuote,
+          indicators: prev.indicators,
+          signals: prev.signals,
+          score: prev.score,
+          recommendation: prev.recommendation,
+          riskLevel: prev.riskLevel,
+          riskFactors: prev.riskFactors,
+          suggestions: prev.suggestions,
+          tradeLevels: prev.tradeLevels,
+          confluenceScore: prev.confluenceScore,
+          confluenceDetails: prev.confluenceDetails,
+          reasons: prev.reasons,
+          opportunities: prev.opportunities,
+          shortTermStrategies: prev.shortTermStrategies,
+          longTermStrategies: prev.longTermStrategies,
+          marketContext: prev.marketContext,
+          confidenceScore: prev.confidenceScore,
+          detailedReasons: prev.detailedReasons,
+          backtestResults: prev.backtestResults,
+          backtestSummary: prev.backtestSummary,
+          fundamentalScore: prev.fundamentalScore,
+          newsSentiment: prev.newsSentiment,
+          validatedSignals: prev.validatedSignals,
+          confidenceBreakdown: prev.confidenceBreakdown,
+        );
+      }
+    });
   }
 
   Future<void> _loadData() async {
@@ -472,7 +495,14 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       final mainFundFlow = await _apiClient.getMainFundFlow(widget.code);
       final klines = await _apiClient.getStockHistory(widget.code, days: 120);
       final calculated = calcAllIndicators(klines);
-      final analysis = generateAnalysis(calculated, quote);
+
+      final sectorName = await _apiClient.getStockSector(widget.code);
+      final hotSectors = await _apiClient.getHotSectors();
+      final sectorData = hotSectors.map((s) => SectorData(
+        name: s.name, code: s.code, changePct: s.changePct,
+        limitUpCount: s.stockCount, mainNetFlow: 0,
+      )).toList();
+      final sectorRotationResult = SectorRotation.analyze(sectorList: sectorData);
 
       if (quote != null && mainFundFlow != null) {
         quote = QuoteData(
@@ -484,8 +514,14 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           totalMarketCap: quote.totalMarketCap, circulatingMarketCap: quote.circulatingMarketCap,
           mainInflow: mainFundFlow.mainInflow, mainOutflow: mainFundFlow.mainOutflow,
           mainNetFlow: mainFundFlow.mainNetFlow, mainNetFlowRate: mainFundFlow.mainNetFlowRate,
+          sectorName: sectorName,
         );
       }
+
+      final analysis = generateAnalysis(calculated, quote,
+        sectorName: sectorName,
+        sectorAnalysis: sectorRotationResult.topSectors,
+      );
 
       // 计算支撑压力位和斐波那契
       final tech = <String, dynamic>{};
@@ -535,6 +571,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           _timeshareLoadFailed = true;
         }
       });
+      _refreshLimitUpAnalysisFromPool(); // 异步用打板池缓存覆盖
     } catch (e) {
       // ignore
     } finally {
@@ -762,7 +799,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFF161B22),
+              color: _kCardColor,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Column(
@@ -817,31 +854,6 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     );
   }
 
-  /// 将当前时间转换为交易分钟偏移量
-  /// 9:30 -> 0, 9:31 -> 1, ... 11:30 -> 120, 13:00 -> 121, ... 15:00 -> 239
-  int? _timeToMinuteOffset(DateTime time) {
-    final hour = time.hour;
-    final minute = time.minute;
-    final totalMinutes = hour * 60 + minute;
-
-    // 上午盘 9:30 ~ 11:30 (共120分钟, offset 0~119)
-    const morningStart = 9 * 60 + 30; // 570
-    const morningEnd = 11 * 60 + 30;  // 690
-    // 下午盘 13:00 ~ 15:00 (共120分钟, offset 120~239)
-    const afternoonStart = 13 * 60;    // 780
-    const afternoonEnd = 15 * 60;      // 900
-
-    if (totalMinutes >= morningStart && totalMinutes <= morningEnd) {
-      return totalMinutes - morningStart; // 0 ~ 120
-    } else if (totalMinutes > morningEnd && totalMinutes < afternoonStart) {
-      // 午休期间的数据归到上午最后一分钟
-      return 120;
-    } else if (totalMinutes >= afternoonStart && totalMinutes <= afternoonEnd) {
-      return 120 + (totalMinutes - afternoonStart); // 120 ~ 240
-    }
-    return null; // 非交易时间
-  }
-
   /// 对K线数据进行降采样，减少渲染数据点数量
   List<HistoryKline> _downsampleKlines(List<HistoryKline> klines, int maxPoints) {
     if (klines.length <= maxPoints) return klines;
@@ -878,7 +890,15 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   /// [volume] 和 [amount] 是当日累计值，内部计算每分钟差值
   void _addTimesharePoint(double price, double volume, double amount) {
     final now = DateTime.now();
-    final offset = _timeToMinuteOffset(now);
+    // 检测日期变更，重置累计量
+    final today = now.toUtc().add(const Duration(hours: 8));
+    final todayStr = today.toIso8601String().substring(0, 10);
+    if (_lastTimeshareDate != null && _lastTimeshareDate != todayStr) {
+      _lastCumulativeVolume = 0;
+      _lastCumulativeAmount = 0;
+    }
+    _lastTimeshareDate = todayStr;
+    final offset = IntradayLevelAnalyzer.timeToMinuteOffset(now);
     if (offset == null) return; // 非交易时间不记录
 
     // 限制范围
@@ -902,7 +922,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   void _analyzeIntradayLevels() {
     if (_timeshareData.isEmpty) return;
     final now = DateTime.now();
-    final currentOffset = _timeToMinuteOffset(now) ?? 240;
+    final currentOffset = IntradayLevelAnalyzer.timeToMinuteOffset(now) ?? 240;
 
     // 下午开盘时强制重新分析（午休后offset都是120，需特殊处理）
     if (now.hour >= 13 && _lastAnalyzedOffset < 120) {
@@ -914,6 +934,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     _lastAnalyzedOffset = currentOffset;
 
     try {
+      final oldResult = _intradayLevelResult;
       _intradayLevelResult = IntradayLevelAnalyzer.analyze(
         prices: _timeshareData,
         volumes: _timeshareMinuteVolumes,
@@ -925,9 +946,60 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         currentOffset: currentOffset,
         estimatedAmplitude: _quote?.amplitude,
       );
+      // 检测新增高置信度信号并弹窗提醒
+      _notifyNewIntradaySignals(oldResult);
     } catch (_) {
       // 分析失败不阻塞UI
     }
+  }
+
+  /// 检测新增的高置信度做T信号，弹窗提醒
+  void _notifyNewIntradaySignals(IntradayLevelResult? oldResult) {
+    final result = _intradayLevelResult;
+    if (result == null || !mounted) return;
+
+    final newSignals = <IntradayLevelPoint>[];
+    // 检查买入信号（低吸）
+    for (final s in result.buySignals) {
+      if (!s.isHighConfidence) continue;
+      if (_notifiedSignalOffsets.contains(s.minuteOffset)) continue;
+      final isNew = oldResult == null ||
+          !oldResult.buySignals.any((o) => o.minuteOffset == s.minuteOffset);
+      if (isNew) {
+        newSignals.add(s);
+        _notifiedSignalOffsets.add(s.minuteOffset);
+      }
+    }
+    // 检查卖出信号（高抛）
+    for (final s in result.sellSignals) {
+      if (!s.isHighConfidence) continue;
+      if (_notifiedSignalOffsets.contains(s.minuteOffset)) continue;
+      final isNew = oldResult == null ||
+          !oldResult.sellSignals.any((o) => o.minuteOffset == s.minuteOffset);
+      if (isNew) {
+        newSignals.add(s);
+        _notifiedSignalOffsets.add(s.minuteOffset);
+      }
+    }
+    if (newSignals.isEmpty) return;
+
+    // 延迟到帧结束后显示 SnackBar（避免在 setState 内调用 ScaffoldMessenger）
+    final s = newSignals.first;
+    final isBuy = s.direction == IntradayDirection.buy;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${isBuy ? "低吸信号" : "高抛信号"}: ${s.shortLabel} ¥${s.price.toStringAsFixed(2)}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          duration: const Duration(seconds: 4),
+          backgroundColor: isBuy ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
+        ),
+      );
+    });
   }
 
   Widget _buildRealtimeChart() {
@@ -979,7 +1051,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
     // 涨跌颜色
     final isUp = currentPrice >= preClose;
-    final priceColor = isUp ? const Color(0xFFef5350) : const Color(0xFF26a69a);
+    final priceColor = isUp ? _kUpColor : _kDownColor;
 
     // 昨收价参考线
     List<HorizontalLine> horizontalLines = [];
@@ -1055,8 +1127,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       getTitlesWidget: (value, meta) {
                         final pct = preClose > 0 ? (value - preClose) / preClose * 100 : 0.0;
                         Color c = Colors.white38;
-                        if (value > preClose) c = const Color(0xFFef5350);
-                        if (value < preClose) c = const Color(0xFF26a69a);
+                        if (value > preClose) c = _kUpColor;
+                        if (value < preClose) c = _kDownColor;
                         return Text(
                           '${value.toStringAsFixed(2)}\n${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%',
                           style: TextStyle(color: c, fontSize: 9),
@@ -1071,8 +1143,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       getTitlesWidget: (value, meta) {
                         final pct = preClose > 0 ? (value - preClose) / preClose * 100 : 0.0;
                         Color c = Colors.white38;
-                        if (pct > 0) c = const Color(0xFFef5350);
-                        if (pct < 0) c = const Color(0xFF26a69a);
+                        if (pct > 0) c = _kUpColor;
+                        if (pct < 0) c = _kDownColor;
                         return Text(
                           '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%',
                           style: TextStyle(color: c, fontSize: 9),
@@ -1111,7 +1183,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                         final pct = preClose > 0 ? (spot.y - preClose) / preClose * 100 : 0.0;
                         return LineTooltipItem(
                           '$timeStr  ${spot.y.toStringAsFixed(2)}  ${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%',
-                          TextStyle(color: spot.y >= preClose ? const Color(0xFFef5350) : const Color(0xFF26a69a), fontSize: 12),
+                          TextStyle(color: spot.y >= preClose ? _kUpColor : _kDownColor, fontSize: 12),
                         );
                       }).toList();
                     },
@@ -1209,7 +1281,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
+        color: _kCardColor,
         borderRadius: BorderRadius.circular(6),
       ),
       child: Column(
@@ -1227,9 +1299,9 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                         ? '偏空'
                         : '震荡';
                 final trendColor = result.trend == IntradayTrend.bullish
-                    ? const Color(0xFFef5350)
+                    ? _kUpColor
                     : result.trend == IntradayTrend.bearish
-                        ? const Color(0xFF26a69a)
+                        ? _kDownColor
                         : Colors.grey;
                 return Text(
                   trendLabel,
@@ -1343,7 +1415,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
+        color: _kCardColor,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -1356,7 +1428,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               Text(
                 '${isBuyDominant ? '买入' : '卖出'}主导 ${(inflowRatio * 100).toStringAsFixed(1)}%',
                 style: TextStyle(
-                  color: isBuyDominant ? const Color(0xFFef5350) : const Color(0xFF26a69a),
+                  color: isBuyDominant ? _kUpColor : _kDownColor,
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
                 ),
@@ -1372,7 +1444,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                   flex: (inflowRatio * 1000).round().clamp(1, 1000),
                   child: Container(
                     height: 20,
-                    color: const Color(0xFFef5350),
+                    color: _kUpColor,
                     alignment: Alignment.center,
                     child: inflowRatio >= 0.05
                         ? Text(
@@ -1388,7 +1460,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                   flex: (outflowRatio * 1000).round().clamp(1, 1000),
                   child: Container(
                     height: 20,
-                    color: const Color(0xFF26a69a),
+                    color: _kDownColor,
                     alignment: Alignment.center,
                     child: outflowRatio >= 0.05
                         ? Text(
@@ -1409,19 +1481,19 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             children: [
               Text(
                 '流入 ${_formatAmount(inflow)}',
-                style: const TextStyle(color: Color(0xFFef5350), fontSize: 11),
+                style: const TextStyle(color: _kUpColor, fontSize: 11),
               ),
               Text(
                 '净流量 ${netFlow >= 0 ? "+" : ""}${_formatAmount(netFlow)}',
                 style: TextStyle(
-                  color: netFlow >= 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a),
+                  color: netFlow >= 0 ? _kUpColor : _kDownColor,
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               Text(
                 '流出 ${_formatAmount(outflow)}',
-                style: const TextStyle(color: Color(0xFF26a69a), fontSize: 11),
+                style: const TextStyle(color: _kDownColor, fontSize: 11),
               ),
             ],
           ),
@@ -1460,24 +1532,38 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       padding: const EdgeInsets.only(right: 8),
       child: GestureDetector(
         onTap: () {
-          setState(() {
-            _showFibonacci = !_showFibonacci;
-            if (_showFibonacci && _klines.isNotEmpty) {
-              final fib = calcFibonacci(_klines);
+          // 在 setState 外执行 calcFibonacci 计算，避免 build 期间卡顿
+          final newShowFibonacci = !_showFibonacci;
+          if (newShowFibonacci && _klines.isNotEmpty) {
+            final fib = calcFibonacci(_klines);
+            setState(() {
+              _showFibonacci = true;
               if (_techAnalysis != null) {
                 _techAnalysis!['fibonacci'] = fib;
               } else {
                 _techAnalysis = {'fibonacci': fib};
               }
-            }
-          });
+            });
+          } else if (!newShowFibonacci) {
+            setState(() {
+              _showFibonacci = false;
+              if (_techAnalysis != null) {
+                // 关闭时清除斐波那契数据，避免继续绘制
+                _techAnalysis!.remove('fibonacci');
+              }
+            });
+          } else {
+            setState(() {
+              _showFibonacci = newShowFibonacci;
+            });
+          }
         },
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: _showFibonacci ? const Color(0xFF26a69a) : const Color(0xFF161B22),
+            color: _showFibonacci ? _kDownColor : _kCardColor,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _showFibonacci ? const Color(0xFF26a69a) : Colors.white24),
+            border: Border.all(color: _showFibonacci ? _kDownColor : Colors.white24),
           ),
           child: Text(
             '斐波那契',
@@ -1501,9 +1587,9 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: _showBoll ? const Color(0xFF00BCD4) : const Color(0xFF161B22),
+            color: _showBoll ? _kBollColor : _kCardColor,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _showBoll ? const Color(0xFF00BCD4) : Colors.white24),
+            border: Border.all(color: _showBoll ? _kBollColor : Colors.white24),
           ),
           child: Text(
             'BOLL',
@@ -1524,7 +1610,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       final color = isUp ? Colors.red : Colors.green;
       selectedInfo = Container(
         padding: const EdgeInsets.all(8),
-        color: const Color(0xFF161B22),
+        color: _kCardColor,
         child: Column(
           children: [
             Row(
@@ -1609,7 +1695,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                     lineBarsData: [
                       if (displayKlines.any((k) => k.ma5 > 0))
                         LineChartBarData(
-                          spots: displayKlines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.ma5)).toList(),
+                          spots: displayKlines.asMap().entries
+                              .where((e) => e.value.ma5 > 0)
+                              .map((e) => FlSpot(e.key.toDouble(), e.value.ma5))
+                              .toList(),
                           isCurved: false,
                           color: Colors.yellow,
                           barWidth: 1,
@@ -1617,7 +1706,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                         ),
                       if (displayKlines.any((k) => k.ma10 > 0))
                         LineChartBarData(
-                          spots: displayKlines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.ma10)).toList(),
+                          spots: displayKlines.asMap().entries
+                              .where((e) => e.value.ma10 > 0)
+                              .map((e) => FlSpot(e.key.toDouble(), e.value.ma10))
+                              .toList(),
                           isCurved: false,
                           color: Colors.orange,
                           barWidth: 1,
@@ -1625,7 +1717,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                         ),
                       if (displayKlines.any((k) => k.ma20 > 0))
                         LineChartBarData(
-                          spots: displayKlines.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.ma20)).toList(),
+                          spots: displayKlines.asMap().entries
+                              .where((e) => e.value.ma20 > 0)
+                              .map((e) => FlSpot(e.key.toDouble(), e.value.ma20))
+                              .toList(),
                           isCurved: false,
                           color: Colors.purpleAccent,
                           barWidth: 1,
@@ -1646,7 +1741,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       maxPrice: maxPrice,
                       showBoll: _showBoll,
                       code: widget.code,
-                      limitUpAnalysis: _analysis?.limitUpAnalysis,
+                      limitUpAnalysis: _effectiveLimitUpAnalysis,
                     ),
                   ),
                 ),
@@ -1753,7 +1848,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                   const SizedBox(width: 4),
                   const Text('DEA', style: TextStyle(color: Colors.white, fontSize: 10)),
                   const SizedBox(width: 8),
-                  Container(width: 8, height: 8, color: const Color(0xFFef5350)),
+                  Container(width: 8, height: 8, color: _kUpColor),
                   const SizedBox(width: 4),
                   const Text('MACD柱', style: TextStyle(color: Colors.white, fontSize: 10)),
                 ],
@@ -2042,24 +2137,24 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
   /// 打板信息浮层卡片：连板数 + 板型 + 时间评级 + 次日溢价/质量
   Widget _buildLimitUpSummaryCard() {
-    final a = _analysis?.limitUpAnalysis;
+    final a = _effectiveLimitUpAnalysis;
     if (a == null) return const SizedBox.shrink();
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
+        color: _kCardColor,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFFFB000), width: 0.5),
+        border: Border.all(color: _kLimitUpGold, width: 0.5),
       ),
       child: Row(children: [
-        _buildLimitUpBadge('${a.consecutiveDays}连板', const Color(0xFFFFB000)),
+        _buildLimitUpBadge('${a.consecutiveDays}连板', _kLimitUpGold),
         const SizedBox(width: 8),
         if (a.boardType.isNotEmpty) ...[
           _buildLimitUpBadge(a.boardType, _boardTypeColor(a.boardType)),
           const SizedBox(width: 8),
         ],
-        if (a.timeGrade.isNotEmpty) ...[
+        if (a.timeGrade.isNotEmpty && a.timeGrade != '未知') ...[
           _buildLimitUpBadge(a.timeGrade, _timeGradeColor(a.timeGrade)),
           const SizedBox(width: 8),
         ],
@@ -2068,10 +2163,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           Text('次日溢价 ${(a.premiumProb * 100).toStringAsFixed(0)}%',
               style: const TextStyle(
                   fontSize: 12,
-                  color: Color(0xFFFFB000),
+                  color: _kLimitUpGold,
                   fontWeight: FontWeight.w600)),
           Text('质量 ${a.qualityScore.toStringAsFixed(1)}',
-              style: const TextStyle(fontSize: 10, color: Color(0xFF8B949E))),
+              style: const TextStyle(fontSize: 10, color: _kTextSecondary)),
         ]),
       ]),
     );
@@ -2096,21 +2191,21 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   Color _boardTypeColor(String boardType) {
     switch (boardType) {
       case '一字板':
-        return const Color(0xFFE74C3C);
+        return _kStrongRed;
       case 'T字板':
-        return const Color(0xFFE67E22);
+        return _kOrange;
       case '换手板':
-        return const Color(0xFFFFB000);
+        return _kLimitUpGold;
       default:
-        return const Color(0xFF8B949E);
+        return _kTextSecondary;
     }
   }
 
   Color _timeGradeColor(String timeGrade) {
-    if (timeGrade.contains('竞价')) return const Color(0xFFFFB000);
-    if (timeGrade.contains('早盘')) return const Color(0xFFE74C3C);
-    if (timeGrade.contains('上午')) return const Color(0xFFE67E22);
-    return const Color(0xFF8B949E); // 尾盘
+    if (timeGrade.contains('竞价')) return _kLimitUpGold;
+    if (timeGrade.contains('早盘')) return _kStrongRed;
+    if (timeGrade.contains('上午')) return _kOrange;
+    return _kTextSecondary; // 尾盘
   }
 
   @override
@@ -2140,12 +2235,12 @@ class _KlinePainter extends CustomPainter {
   final String code;
   final LimitUpAnalysis? limitUpAnalysis;
 
-  final Paint _upPaint = Paint()..color = const Color(0xFFef5350);
-  final Paint _downPaint = Paint()..color = const Color(0xFF26a69a);
+  final Paint _upPaint = Paint()..color = _kUpColor;
+  final Paint _downPaint = Paint()..color = _kDownColor;
   final Paint _linePaint = Paint()..strokeWidth = 1;
   final Paint _selectedPaint = Paint()..color = Colors.white.withOpacity(0.2);
   final Paint _bollUpperPaint = Paint()
-    ..color = const Color(0xFF00BCD4)
+    ..color = _kBollColor
     ..strokeWidth = 1
     ..style = PaintingStyle.stroke;
   final Paint _bollMidPaint = Paint()
@@ -2153,7 +2248,7 @@ class _KlinePainter extends CustomPainter {
     ..strokeWidth = 0.8
     ..style = PaintingStyle.stroke;
   final Paint _bollFillPaint = Paint()
-    ..color = const Color(0xFF00BCD4).withOpacity(0.05)
+    ..color = _kBollColor.withOpacity(0.05)
     ..style = PaintingStyle.fill;
 
   _KlinePainter(
@@ -2183,15 +2278,15 @@ class _KlinePainter extends CustomPainter {
     // 绘制支撑位（绿色虚线）并标注价格
     for (final level in supportLevels) {
       final y = chartHeight - ((level - minPrice) / priceRange) * chartHeight;
-      _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), const Color(0xFF26a69a));
-      _drawPriceLabel(canvas, size, level, y, const Color(0xFF26a69a));
+      _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), _kDownColor);
+      _drawPriceLabel(canvas, size, level, y, _kDownColor);
     }
 
     // 绘制阻力位（红色虚线）并标注价格
     for (final level in resistanceLevels) {
       final y = chartHeight - ((level - minPrice) / priceRange) * chartHeight;
-      _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), const Color(0xFFef5350));
-      _drawPriceLabel(canvas, size, level, y, const Color(0xFFef5350));
+      _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), _kUpColor);
+      _drawPriceLabel(canvas, size, level, y, _kUpColor);
     }
 
     // 绘制斐波那契回撤位并标注价格和比例
@@ -2201,7 +2296,7 @@ class _KlinePainter extends CustomPainter {
         final ratio = entry.key;
         final y = chartHeight - ((level - minPrice) / priceRange) * chartHeight;
         final isGolden = ratio == '61.8%';
-        final color = isGolden ? const Color(0xFFFFD700) : Colors.white54;
+        final color = isGolden ? _kGoldCross : Colors.white54;
         _drawDashedLine(canvas, Offset(padding, y), Offset(size.width, y), color);
         _drawFibonacciLabel(canvas, size, level, ratio, y, color);
       }
@@ -2364,7 +2459,7 @@ class _KlinePainter extends CustomPainter {
       if (KlineValidator.isYiZiBan(k, prev, limitPct)) {
         canvas.drawRect(
           Rect.fromCenter(center: Offset(x, y - 14), width: 14, height: 8),
-          Paint()..color = const Color(0xFFFFB000)..style = PaintingStyle.fill,
+          Paint()..color = _kLimitUpGold..style = PaintingStyle.fill,
         );
       }
     }
@@ -2390,13 +2485,13 @@ class _KlinePainter extends CustomPainter {
     final upPrice = KlineValidator.limitUpPrice(prev.close, limitPct);
     // 炸板：盘中触及涨停但收盘未封住
     if (k.high >= upPrice * 0.999 && k.close < upPrice * 0.999) {
-      return const Color(0xFFE74C3C);
+      return _kStrongRed;
     }
     final analysis = limitUpAnalysis;
-    if (analysis == null) return const Color(0xFFE67E22);
-    if (analysis.consecutiveDays >= 4) return const Color(0xFFFFB000);
-    if (analysis.consecutiveDays == 3) return const Color(0xFFE74C3C);
-    return const Color(0xFFE67E22);
+    if (analysis == null) return _kOrange;
+    if (analysis.consecutiveDays >= 4) return _kLimitUpGold;
+    if (analysis.consecutiveDays == 3) return _kStrongRed;
+    return _kOrange;
   }
 
   void _drawDashedLine(Canvas canvas, Offset start, Offset end, Color color) {
@@ -2482,8 +2577,8 @@ class _MacdHistogramPainter extends CustomPainter {
   final List<HistoryKline> data;
   final double macdAbsMax;
 
-  final Paint _upPaint = Paint()..color = const Color(0xFFef5350);
-  final Paint _downPaint = Paint()..color = const Color(0xFF26a69a);
+  final Paint _upPaint = Paint()..color = _kUpColor;
+  final Paint _downPaint = Paint()..color = _kDownColor;
   final Paint _axisPaint = Paint()
     ..color = Colors.white24
     ..strokeWidth = 0.5;
@@ -2529,8 +2624,8 @@ class _MacdHistogramPainter extends CustomPainter {
 class _VolumeHistogramPainter extends CustomPainter {
   final List<HistoryKline> data;
 
-  final Paint _upPaint = Paint()..color = const Color(0xFFef5350);
-  final Paint _downPaint = Paint()..color = const Color(0xFF26a69a);
+  final Paint _upPaint = Paint()..color = _kUpColor;
+  final Paint _downPaint = Paint()..color = _kDownColor;
 
   _VolumeHistogramPainter(this.data);
 

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../models/stock_models.dart';
 import 'position_manager.dart';
 import 'market_structure_analyzer.dart';
@@ -108,7 +109,7 @@ class SuggestionGenerator {
     // 仓位建议（基于ATR波动率）
     try {
       suggestions.add(PositionManager.getPositionAdvice(suggestedPosition));
-    } catch (_) {}
+    } catch (e) { debugPrint('[建议生成器] getPositionAdvice 失败: $e'); }
 
     // 熊市结构额外警告
     if (marketStructure != null && marketStructure.structure == MarketStructure.bearTrend) {

@@ -199,7 +199,8 @@ class MarketStructureAnalyzer {
     if (ma60 > 0 && last.close > 0) {
       nearMa60 = (last.close - ma60).abs() / ma60;
     }
-    final isNearMA60 = ma60 > 0 && nearMa60 < 0.03;
+    final bool ma60DataSufficient = data.length >= 60;
+    final isNearMA60 = ma60DataSufficient && ma60 > 0 && nearMa60 < 0.03;
 
     // 判断趋势
     MarketStructure structure;

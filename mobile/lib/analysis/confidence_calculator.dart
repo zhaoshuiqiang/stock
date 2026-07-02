@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../models/stock_models.dart';
 import 'signal_validator.dart';
 import 'market_structure_analyzer.dart';
@@ -55,6 +56,12 @@ class ConfidenceCalculator {
         fundamentalSupport = 0.3; // 技术面看多但基本面差，降低置信度
       } else if (totalScore <= 4 && fundamentalScore.totalScore > 6) {
         fundamentalSupport = 0.3; // 技术面看空但基本面好，降低置信度
+      } else if (fundamentalScore.totalScore >= 5) {
+        fundamentalSupport = 0.5;
+      } else if (fundamentalScore.totalScore >= 4) {
+        fundamentalSupport = 0.3;
+      } else {
+        fundamentalSupport = 0.0;
       }
     }
 
@@ -144,8 +151,8 @@ class ConfidenceCalculator {
     List<ValidatedSignal> validatedSignals = [];
     try {
       validatedSignals = SignalValidator.validate(signals, quote, last);
-    } catch (_) {
-      // 对抗验证失败不影响主流程
+    } catch (e) {
+      debugPrint('[置信度] 信号验证失败，降级使用原始信号: $e');
     }
 
     // 对抗验证结果反馈到置信度：根据反对点数量和强度调整
@@ -205,6 +212,12 @@ class ConfidenceCalculator {
         fundamentalSupport = 0.3;
       } else if (totalScore <= 4 && fundamentalScore.totalScore > 6) {
         fundamentalSupport = 0.3;
+      } else if (fundamentalScore.totalScore >= 5) {
+        fundamentalSupport = 0.5;
+      } else if (fundamentalScore.totalScore >= 4) {
+        fundamentalSupport = 0.3;
+      } else {
+        fundamentalSupport = 0.0;
       }
     }
 

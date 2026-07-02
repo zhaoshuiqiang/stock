@@ -5,7 +5,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:stock_analyzer/api/api_client.dart';
 import 'package:stock_analyzer/storage/database_service.dart';
 import 'package:stock_analyzer/core/navigator_key.dart';
+import 'package:stock_analyzer/core/trading_session.dart';
 import 'package:stock_analyzer/screens/webview_screen.dart';
+import 'package:stock_analyzer/screens/quote_screen.dart';
+import 'package:stock_analyzer/analysis/intraday_level_analyzer.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 
 class NotificationService {
@@ -18,6 +21,7 @@ class NotificationService {
   final DatabaseService _dbService = DatabaseService();
 
   Timer? _pollTimer;
+  Timer? _intradayPollTimer;
   String _lastNewsId = '';
   bool _initialized = false;
 
@@ -31,8 +35,22 @@ class NotificationService {
   static const String _alertChannelName = '预警通知';
   static const String _alertChannelDesc = '自选股价格和指标预警通知';
 
+  // 日内高抛低吸信号通道
+  static const String _intradayChannelId = 'stock_intraday';
+  static const String _intradayChannelName = '高抛低吸信号';
+  static const String _intradayChannelDesc = '持仓股分时高抛低吸信号推送';
+
   // 预警冷却时间：同一预警5分钟内不重复触发
   static const int _alertCooldownMinutes = 5;
+
+  // 日内信号时效：信号产生后超过此分钟数不再推送
+  static const int _intradaySignalMaxAgeMinutes = 3;
+  // 日内信号轮询间隔（分钟）
+  static const int _intradayPollIntervalMinutes = 1;
+  // 日内信号单次扫描持仓股上限
+  static const int _intradayMaxPositions = 10;
+
+  static const String _intradayPrefKeyEnabled = 'intraday_notification_enabled';
 
   Future<void> init() async {
     if (_initialized) return;
@@ -61,13 +79,37 @@ class NotificationService {
 
   void _onNotificationTapped(NotificationResponse response) {
     final payload = response.payload;
-    if (payload != null && payload.isNotEmpty) {
+    if (payload == null || payload.isEmpty) return;
+
+    // 高抛低吸信号：payload 格式 "quote|{code}|{name}"
+    if (payload.startsWith('quote|')) {
       final parts = payload.split('|');
-      final url = parts[0];
-      final title = parts.length > 1 ? parts[1] : '';
-      if (url.isNotEmpty) {
-        _navigateToWebView(url, title);
+      final code = parts.length > 1 ? parts[1] : '';
+      final name = parts.length > 2 ? parts[2] : '';
+      if (code.isNotEmpty) {
+        _navigateToQuoteScreen(code, name);
       }
+      return;
+    }
+
+    // 资讯/预警：payload 格式 "{url}|{title}"
+    final parts = payload.split('|');
+    final url = parts[0];
+    final title = parts.length > 1 ? parts[1] : '';
+    if (url.isNotEmpty) {
+      _navigateToWebView(url, title);
+    }
+  }
+
+  void _navigateToQuoteScreen(String code, String name) {
+    final context = navigatorKey.currentContext;
+    if (context != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => QuoteScreen(code: code, name: name),
+        ),
+      );
     }
   }
 
@@ -93,8 +135,28 @@ class NotificationService {
     await prefs.setBool(_prefKeyEnabled, enabled);
     if (enabled) {
       startPolling();
+      // 日内信号轮询独立于资讯轮询，按用户开关启动
+      if (await isIntradayEnabled()) {
+        startIntradayPolling();
+      }
     } else {
       stopPolling();
+      stopIntradayPolling();
+    }
+  }
+
+  Future<bool> isIntradayEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_intradayPrefKeyEnabled) ?? true;
+  }
+
+  Future<void> setIntradayEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_intradayPrefKeyEnabled, enabled);
+    if (enabled) {
+      startIntradayPolling();
+    } else {
+      stopIntradayPolling();
     }
   }
 
@@ -132,6 +194,24 @@ class NotificationService {
   void stopPolling() {
     _pollTimer?.cancel();
     _pollTimer = null;
+  }
+
+  /// 启动日内高抛低吸信号轮询（1分钟间隔）
+  void startIntradayPolling() async {
+    stopIntradayPolling();
+    if (!await isIntradayEnabled()) return;
+
+    _intradayPollTimer = Timer.periodic(
+      const Duration(minutes: _intradayPollIntervalMinutes),
+      (_) => _checkIntradaySignals(),
+    );
+    // 启动时立即检查一次
+    _checkIntradaySignals();
+  }
+
+  void stopIntradayPolling() {
+    _intradayPollTimer?.cancel();
+    _intradayPollTimer = null;
   }
 
   Future<void> _checkForNewNews() async {
@@ -188,7 +268,7 @@ class NotificationService {
         }
       }
     } catch (e) {
-      print('News poll error: $e');
+      debugPrint('News poll error: $e');
     }
   }
 
@@ -349,6 +429,125 @@ class NotificationService {
       iOS: iosDetails,
     );
     await _plugin.show(id, title, body, details, payload: payload);
+  }
+
+  Future<void> _showIntradayNotification({
+    required int id,
+    required String title,
+    required String body,
+    String? payload,
+    required bool isBuy,
+  }) async {
+    final androidDetails = AndroidNotificationDetails(
+      _intradayChannelId,
+      _intradayChannelName,
+      channelDescription: _intradayChannelDesc,
+      importance: Importance.high,
+      priority: Priority.high,
+      showWhen: true,
+      color: isBuy ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
+    );
+    const iosDetails = DarwinNotificationDetails();
+    final details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+    await _plugin.show(id, title, body, details, payload: payload);
+  }
+
+  /// 检查持仓股的日内高抛低吸信号并推送通知
+  ///
+  /// 仅在交易时段执行；仅推送产生时间在 3 分钟内的高置信度信号；
+  /// 同一信号（股票+类型+minuteOffset）当天只推送一次。
+  Future<void> _checkIntradaySignals() async {
+    if (!TradingSession.isInTradingSession()) return;
+    try {
+      final positions = await _dbService.getPositions();
+      if (positions.isEmpty) return;
+
+      final now = DateTime.now();
+      final currentOffset = IntradayLevelAnalyzer.timeToMinuteOffset(now);
+      if (currentOffset == null) return;
+
+      final dateStr = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+      final prefs = await SharedPreferences.getInstance();
+
+      int notificationId = 200; // 日内信号通知 ID 区间 200+
+      final positionsToScan = positions.take(_intradayMaxPositions).toList();
+
+      for (final pos in positionsToScan) {
+        if (pos.quantity <= 0) continue;
+
+        // 获取分时数据
+        final timeshare = await _apiClient.getTimeshareData(pos.code);
+        if (timeshare == null) continue;
+        final prices = timeshare['prices'] ?? {};
+        final volumes = timeshare['volumes'] ?? {};
+        final vwapData = timeshare['vwapData'] ?? {};
+        if (prices.isEmpty) continue;
+
+        // 获取实时行情（取 preClose/open/high/low/amplitude）
+        QuoteData? quote;
+        try {
+          quote = await _apiClient.getRealtimeQuote(_apiClient.addMarketPrefix(pos.code));
+        } catch (_) {
+          continue;
+        }
+        if (quote == null || quote.price <= 0) continue;
+
+        final result = IntradayLevelAnalyzer.analyze(
+          prices: prices,
+          volumes: volumes,
+          vwapData: vwapData,
+          preClose: quote.preClose,
+          openPrice: quote.open,
+          dayHigh: quote.high,
+          dayLow: quote.low,
+          currentOffset: currentOffset,
+          estimatedAmplitude: quote.amplitude,
+        );
+
+        // 检查买入（低吸）信号
+        for (final sig in result.buySignals) {
+          if (!sig.isHighConfidence) continue;
+          // 时效性：信号产生时间超过 3 分钟则跳过
+          final ageMinutes = currentOffset - sig.minuteOffset;
+          if (ageMinutes > _intradaySignalMaxAgeMinutes || ageMinutes < 0) continue;
+          // 当天去重
+          final key = 'intraday_notified_${pos.code}_buy_${sig.minuteOffset}_$dateStr';
+          if (prefs.getBool(key) == true) continue;
+
+          await _showIntradayNotification(
+            id: notificationId++,
+            title: '低吸信号 · ${pos.name}',
+            body: '${sig.shortLabel} ¥${sig.price.toStringAsFixed(2)}（${quote.changePct.toStringAsFixed(2)}%）',
+            payload: 'quote|${pos.code}|${pos.name}',
+            isBuy: true,
+          );
+          await prefs.setBool(key, true);
+        }
+
+        // 检查卖出（高抛）信号
+        for (final sig in result.sellSignals) {
+          if (!sig.isHighConfidence) continue;
+          final ageMinutes = currentOffset - sig.minuteOffset;
+          if (ageMinutes > _intradaySignalMaxAgeMinutes || ageMinutes < 0) continue;
+          final key = 'intraday_notified_${pos.code}_sell_${sig.minuteOffset}_$dateStr';
+          if (prefs.getBool(key) == true) continue;
+
+          await _showIntradayNotification(
+            id: notificationId++,
+            title: '高抛信号 · ${pos.name}',
+            body: '${sig.shortLabel} ¥${sig.price.toStringAsFixed(2)}（${quote.changePct.toStringAsFixed(2)}%）',
+            payload: 'quote|${pos.code}|${pos.name}',
+            isBuy: false,
+          );
+          await prefs.setBool(key, true);
+        }
+      }
+    } catch (e) {
+      debugPrint('Intraday signal poll error: $e');
+    }
   }
 
   Future<void> requestPermission() async {

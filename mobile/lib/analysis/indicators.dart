@@ -377,10 +377,16 @@ List<HistoryKline> calcBIAS(List<HistoryKline> data, List<int> periods) {
   final result = List<HistoryKline>.from(data);
 
   for (final period in periods) {
+    if (data.length < period) continue;
+
+    double sum = 0;
+    for (int i = 0; i < period; i++) {
+      sum += data[i].close;
+    }
+
     for (int i = period - 1; i < data.length; i++) {
-      double sum = 0;
-      for (int j = i - period + 1; j <= i; j++) {
-        sum += data[j].close;
+      if (i >= period) {
+        sum = sum - data[i - period].close + data[i].close;
       }
       final ma = sum / period;
       final bias = ma > 0 ? (data[i].close - ma) / ma * 100 : 0;
@@ -516,22 +522,31 @@ List<HistoryKline> calcCCI(List<HistoryKline> data, {int period = 14}) {
   if (data.length < period) return data;
   final result = List<HistoryKline>.from(data);
 
+  // 预计算 TP 数组，避免重复计算 (high+low+close)/3
+  final List<double> tp = List.filled(data.length, 0);
+  for (int i = 0; i < data.length; i++) {
+    tp[i] = (data[i].high + data[i].low + data[i].close) / 3;
+  }
+
+  // 初始化前 period 个 tp 的和
+  double tpSum = 0;
+  for (int i = 0; i < period; i++) {
+    tpSum += tp[i];
+  }
+
   for (int i = period - 1; i < data.length; i++) {
-    double tpSum = 0;
-    for (int j = i - period + 1; j <= i; j++) {
-      tpSum += (data[j].high + data[j].low + data[j].close) / 3;
+    if (i >= period) {
+      tpSum = tpSum - tp[i - period] + tp[i];
     }
     final tpMa = tpSum / period;
 
     double md = 0;
     for (int j = i - period + 1; j <= i; j++) {
-      final tp = (data[j].high + data[j].low + data[j].close) / 3;
-      md += (tp - tpMa).abs();
+      md += (tp[j] - tpMa).abs();
     }
     md /= period;
 
-    final tp = (data[i].high + data[i].low + data[i].close) / 3;
-    final cci = md > 0 ? (tp - tpMa) / (0.015 * md) : 0.0;
+    final cci = md > 0 ? (tp[i] - tpMa) / (0.015 * md) : 0.0;
     result[i] = result[i].copyWith(cci14: cci);
   }
   return result;

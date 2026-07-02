@@ -26,6 +26,9 @@ const _limitUpPoolSchema = '''
     premium_prob      REAL    NOT NULL DEFAULT 0,
     price             REAL    NOT NULL DEFAULT 0,
     change_pct        REAL    NOT NULL DEFAULT 0,
+    time_grade        TEXT    NOT NULL DEFAULT '未知',
+    quality           TEXT    NOT NULL DEFAULT '一般',
+    position          TEXT    NOT NULL DEFAULT '',
     updated_at        INTEGER NOT NULL,
     PRIMARY KEY (code, trade_date)
   )

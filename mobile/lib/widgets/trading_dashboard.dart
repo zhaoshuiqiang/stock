@@ -141,13 +141,21 @@ class TradingDashboard extends StatelessWidget {
 
   Widget _buildScoreRow() {
     final a = analysis!;
-    final scoreColor = a.score >= 7
-        ? const Color(0xFFE74C3C)
-        : a.score >= 5
-            ? const Color(0xFF58A6FF)
-            : a.score >= 3
-                ? const Color(0xFF8B949E)
-                : const Color(0xFF2ECC71);
+    final scoreColor = a.score >= 8
+        ? const Color(0xFF26a69a)
+        : a.score >= 7
+            ? const Color(0xFF4caf50)
+            : a.score >= 6
+                ? const Color(0xFF8bc34a)
+                : a.score >= 5
+                    ? const Color(0xFFffb74d)
+                    : a.score >= 4
+                        ? const Color(0xFFff9800)
+                        : a.score >= 3
+                            ? const Color(0xFFF44336)
+                            : a.score >= 2
+                                ? const Color(0xFFe57373)
+                                : const Color(0xFFc62828);
 
     return Row(
       children: [

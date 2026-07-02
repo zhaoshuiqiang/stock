@@ -88,6 +88,10 @@ class LimitUpAnalysis {
   final double price;                // 当前价
   final double changePct;            // 涨跌幅
   final DateTime? firstLimitTime;    // 首封时间
+  final double limitUpPrice;         // 涨停价
+  final DateTime? lastLimitTime;     // 最后封板时间
+  final double volumeRatio;          // 量比
+  final double turnoverRate;         // 换手率
   final List<String> signals;
 
   LimitUpAnalysis({
@@ -109,6 +113,10 @@ class LimitUpAnalysis {
     this.price = 0,
     this.changePct = 0,
     this.firstLimitTime,
+    this.limitUpPrice = 0,
+    this.lastLimitTime,
+    this.volumeRatio = 0,
+    this.turnoverRate = 0,
   });
 
   Map<String, dynamic> toMap() => {
@@ -130,6 +138,10 @@ class LimitUpAnalysis {
     'price': price,
     'change_pct': changePct,
     'first_limit_time': firstLimitTime?.millisecondsSinceEpoch,
+    'limit_up_price': limitUpPrice,
+    'last_limit_time': lastLimitTime?.millisecondsSinceEpoch,
+    'volume_ratio': volumeRatio,
+    'turnover_rate': turnoverRate,
   };
 
   factory LimitUpAnalysis.fromMap(Map<String, dynamic> m) => LimitUpAnalysis(
@@ -155,6 +167,12 @@ class LimitUpAnalysis {
     firstLimitTime: m['first_limit_time'] != null
         ? DateTime.fromMillisecondsSinceEpoch((m['first_limit_time'] as num).toInt())
         : null,
+    limitUpPrice: (m['limit_up_price'] as num?)?.toDouble() ?? 0,
+    lastLimitTime: m['last_limit_time'] != null
+        ? DateTime.fromMillisecondsSinceEpoch((m['last_limit_time'] as num).toInt())
+        : null,
+    volumeRatio: (m['volume_ratio'] as num?)?.toDouble() ?? 0,
+    turnoverRate: (m['turnover_rate'] as num?)?.toDouble() ?? 0,
   );
 }
 

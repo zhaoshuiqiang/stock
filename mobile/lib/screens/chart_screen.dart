@@ -29,6 +29,12 @@ class _ChartScreenState extends State<ChartScreen> {
     _loadData();
   }
 
+  @override
+  void dispose() {
+    _api.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     final data = await _api.getStockHistory(widget.code, days: _selectedRange);

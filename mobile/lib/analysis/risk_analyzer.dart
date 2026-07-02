@@ -8,6 +8,8 @@ class RiskAnalysisResult {
 }
 
 class RiskAnalyzer {
+  static const String kPriceBelowMa20 = '价格低于20日均线';
+
   static RiskAnalysisResult analyze(
       List<HistoryKline> data, HistoryKline last, QuoteData? quote) {
     final riskFactors = _collectRiskFactors(data, last, quote);
@@ -24,7 +26,7 @@ class RiskAnalyzer {
     if (last.rsi6 < 30 && last.rsi6 > 0) riskFactors.add('RSI超卖(${last.rsi6.toStringAsFixed(1)})，可能继续探底');
     if (last.close > last.bollUpper && last.bollUpper > 0) riskFactors.add('价格突破布林上轨，短期过热');
     if (last.close < last.bollLower && last.bollLower > 0) riskFactors.add('价格跌破布林下轨，波动加剧');
-    if (last.close < last.ma20 && last.ma20 > 0) riskFactors.add('价格低于20日均线，趋势偏弱');
+    if (last.close < last.ma20 && last.ma20 > 0) riskFactors.add('$kPriceBelowMa20，趋势偏弱');
 
     // 量价风险
     if (last.close < last.open && last.volume > last.volMa5 * 1.5 && last.volMa5 > 0) {
@@ -143,7 +145,7 @@ class RiskAnalyzer {
   /// 趋势/量价风险 > 超买超卖/估值风险
   static double _getRiskWeight(String factor) {
     // 趋势类风险: 1.5x — 趋势破位是最致命的风险
-    if (factor.contains('下穿') || factor.contains('低于MA20') ||
+    if (factor.contains('下穿') || factor.contains(kPriceBelowMa20) ||
         factor.contains('趋势转弱') || factor.contains('空头')) return 1.5;
     // 量价类风险: 1.2x — 放量下跌等有资金确认的风险
     if (factor.contains('放量下跌') || factor.contains('OBV') ||

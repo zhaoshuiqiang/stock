@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import '../models/stock_models.dart';
 import 'indicators.dart';
 
@@ -620,12 +621,12 @@ class BacktestEngine {
     if (data.length < 60) return {};
 
     final results = <String, BacktestResult>{};
-    try { results['MACD交叉'] = backtestMACDCross(data); } catch (_) {}
-    try { results['MA金叉'] = backtestMACross(data); } catch (_) {}
-    try { results['KDJ超卖'] = backtestKDJOversoldCross(data); } catch (_) {}
-    try { results['RSI超卖'] = backtestRSIOversoldRecovery(data); } catch (_) {}
-    try { results['布林支撑'] = backtestBollSupport(data); } catch (_) {}
-    try { results['均线多头'] = backtestMAMultiHead(data); } catch (_) {}
+    try { results['MACD交叉'] = backtestMACDCross(data); } catch (e) { debugPrint('[回测] MACD交叉策略失败: $e'); }
+    try { results['MA金叉'] = backtestMACross(data); } catch (e) { debugPrint('[回测] MA金叉策略失败: $e'); }
+    try { results['KDJ超卖'] = backtestKDJOversoldCross(data); } catch (e) { debugPrint('[回测] KDJ超卖策略失败: $e'); }
+    try { results['RSI超卖'] = backtestRSIOversoldRecovery(data); } catch (e) { debugPrint('[回测] RSI超卖策略失败: $e'); }
+    try { results['布林支撑'] = backtestBollSupport(data); } catch (e) { debugPrint('[回测] 布林支撑策略失败: $e'); }
+    try { results['均线多头'] = backtestMAMultiHead(data); } catch (e) { debugPrint('[回测] 均线多头策略失败: $e'); }
 
     return results;
   }

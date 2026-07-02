@@ -843,6 +843,7 @@ class AlertsScreenState extends State<AlertsScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _apiClient.dispose();
     super.dispose();
   }
 }

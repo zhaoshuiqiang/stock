@@ -52,6 +52,7 @@ class SignalsScreenState extends State<SignalsScreen> {
         _code = codeWithPrefix;
       });
       final quote = await _apiClient.getRealtimeQuote(codeWithPrefix);
+      if (!mounted) return;
       if (quote != null) {
         setState(() {
           _name = quote.name;
@@ -59,6 +60,7 @@ class SignalsScreenState extends State<SignalsScreen> {
       }
 
       final klines = await _apiClient.getStockHistory(codeWithPrefix, days: 120);
+      if (!mounted) return;
       final calculated = calcAllIndicators(klines);
       final analysis = generateAnalysis(calculated, quote);
 
@@ -68,6 +70,7 @@ class SignalsScreenState extends State<SignalsScreen> {
     } catch (e) {
       debugPrint('Load analysis failed: $e');
     } finally {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });

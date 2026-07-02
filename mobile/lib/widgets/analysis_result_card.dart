@@ -238,15 +238,16 @@ class AnalysisResultCard extends StatelessWidget {
     );
   }
 
-  /// 获取评分颜色
+  /// 获取评分颜色（与comprehensive_scorer推荐逻辑一致）
   Color _getScoreColor(int score) {
-    if (score >= 9) return const Color(0xFF26a69a); // 强烈买入
-    if (score >= 8) return const Color(0xFF4caf50); // 买入
-    if (score >= 7) return const Color(0xFF8bc34a); // 谨慎买入
-    if (score >= 5) return const Color(0xFFffb74d); // 观望
-    if (score >= 4) return const Color(0xFFF44336); // 谨慎卖出
-    if (score >= 3) return const Color(0xFFe57373); // 卖出
-    return const Color(0xFFc62828); // 强烈卖出
+    if (score >= 8) return const Color(0xFF26a69a); // 强烈买入 (8-10)
+    if (score >= 7) return const Color(0xFF4caf50); // 买入 (7)
+    if (score >= 6) return const Color(0xFF8bc34a); // 谨慎买入 (6)
+    if (score >= 5) return const Color(0xFFffb74d); // 偏多观望 (5)
+    if (score >= 4) return const Color(0xFFff9800); // 偏空观望 (4)
+    if (score >= 3) return const Color(0xFFF44336); // 谨慎卖出 (3)
+    if (score >= 2) return const Color(0xFFe57373); // 卖出 (2)
+    return const Color(0xFFc62828); // 强烈卖出 (1)
   }
 
   /// 获取置信度颜色
@@ -258,15 +259,9 @@ class AnalysisResultCard extends StatelessWidget {
     return const Color(0xFFc62828);
   }
 
-  /// 获取推荐颜色
+  /// 获取推荐颜色（与comprehensive_scorer推荐逻辑一致）
   Color _getRecommendationColor() {
-    if (analysis.score >= 9) return const Color(0xFF26a69a);
-    if (analysis.score >= 8) return const Color(0xFF4caf50);
-    if (analysis.score >= 7) return const Color(0xFF8bc34a);
-    if (analysis.score >= 5) return const Color(0xFFffb74d);
-    if (analysis.score >= 4) return const Color(0xFFF44336);
-    if (analysis.score >= 3) return const Color(0xFFe57373);
-    return const Color(0xFFc62828);
+    return _getScoreColor(analysis.score);
   }
 
   /// 获取风险等级颜色

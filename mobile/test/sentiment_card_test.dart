@@ -5,9 +5,24 @@ import 'package:stock_analyzer/widgets/sentiment_thermometer_card.dart';
 
 void main() {
   group('SentimentThermometerCard', () {
-    testWidgets('null sentiment shows skeleton', (tester) async {
+    testWidgets('null sentiment shows hint and refresh button', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: SentimentThermometerCard(
+          sentiment: null,
+          onRefresh: () {},
+        )),
+      ));
+      // null 时显示提示文本（而非无限转圈）
+      expect(find.textContaining('暂无情绪数据'), findsOneWidget);
+      expect(find.byType(IconButton), findsOneWidget); // 刷新按钮
+    });
+
+    testWidgets('null sentiment with isLoading shows spinner', (tester) async {
       await tester.pumpWidget(const MaterialApp(
-        home: Scaffold(body: SentimentThermometerCard(sentiment: null)),
+        home: Scaffold(body: SentimentThermometerCard(
+          sentiment: null,
+          isLoading: true,
+        )),
       ));
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
     });

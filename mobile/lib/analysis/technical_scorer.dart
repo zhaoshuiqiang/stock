@@ -66,12 +66,21 @@ class TechnicalScorer {
   }
 
   /// 2. 趋势强度评分 (0-2分) - 基于均线排列 + ADX趋势强度
+  /// v2.38.0: 降低均线多头排列权重(1.8→1.4)，增加MA20偏离保护，防止追高
   static double _scoreTrend(List<HistoryKline> data) {
     final last = data[data.length - 1];
     double trendScore = 0;
     if (last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0) {
       if (last.ma5 > last.ma10 && last.ma10 > last.ma20) {
-        trendScore = 1.8;
+        trendScore = 1.4;
+        if (last.close > 0) {
+          final ma20Deviation = (last.close - last.ma20) / last.ma20 * 100;
+          if (ma20Deviation > 8) {
+            trendScore *= 0.85;
+          } else if (ma20Deviation > 5) {
+            trendScore *= 0.92;
+          }
+        }
       } else if (last.ma5 > last.ma10) {
         trendScore = 1.1;
       } else if (last.ma5 > last.ma20) {

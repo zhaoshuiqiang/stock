@@ -72,8 +72,10 @@ class QuoteData {
   double mainOutflow;
   double mainNetFlow;
   double mainNetFlowRate;
+  final double volumeRatio;
   final DateTime? updateTime;
   final String confidence;
+  final String sectorName;
 
   QuoteData({
     required this.code,
@@ -97,8 +99,10 @@ class QuoteData {
     this.mainOutflow = 0,
     this.mainNetFlow = 0,
     this.mainNetFlowRate = 0,
+    this.volumeRatio = 0,
     this.updateTime,
     this.confidence = 'high',
+    this.sectorName = '',
   });
 
   factory QuoteData.fromJson(Map<String, dynamic> json) {
@@ -126,6 +130,7 @@ class QuoteData {
       mainNetFlowRate: _parseDouble(json['main_net_flow_rate']),
       updateTime: json['update_time'] != null ? DateTime.tryParse(json['update_time']) : null,
       confidence: json['confidence'] ?? 'high',
+      sectorName: json['sector_name'] ?? '',
     );
   }
 
@@ -169,6 +174,60 @@ class QuoteData {
       'update_time': updateTime?.toIso8601String(),
       'confidence': confidence,
     };
+  }
+
+  QuoteData copyWith({
+    String? code,
+    String? name,
+    double? price,
+    double? change,
+    double? changePct,
+    double? open,
+    double? high,
+    double? low,
+    double? preClose,
+    double? volume,
+    double? amount,
+    double? amplitude,
+    double? turnover,
+    double? pe,
+    double? pb,
+    double? totalMarketCap,
+    double? circulatingMarketCap,
+    double? mainInflow,
+    double? mainOutflow,
+    double? mainNetFlow,
+    double? mainNetFlowRate,
+    double? volumeRatio,
+    DateTime? updateTime,
+    String? confidence,
+  }) {
+    return QuoteData(
+      code: code ?? this.code,
+      name: name ?? this.name,
+      price: price ?? this.price,
+      change: change ?? this.change,
+      changePct: changePct ?? this.changePct,
+      open: open ?? this.open,
+      high: high ?? this.high,
+      low: low ?? this.low,
+      preClose: preClose ?? this.preClose,
+      volume: volume ?? this.volume,
+      amount: amount ?? this.amount,
+      amplitude: amplitude ?? this.amplitude,
+      turnover: turnover ?? this.turnover,
+      pe: pe ?? this.pe,
+      pb: pb ?? this.pb,
+      totalMarketCap: totalMarketCap ?? this.totalMarketCap,
+      circulatingMarketCap: circulatingMarketCap ?? this.circulatingMarketCap,
+      mainInflow: mainInflow ?? this.mainInflow,
+      mainOutflow: mainOutflow ?? this.mainOutflow,
+      mainNetFlow: mainNetFlow ?? this.mainNetFlow,
+      mainNetFlowRate: mainNetFlowRate ?? this.mainNetFlowRate,
+      volumeRatio: volumeRatio ?? this.volumeRatio,
+      updateTime: updateTime ?? this.updateTime,
+      confidence: confidence ?? this.confidence,
+    );
   }
 }
 
@@ -383,6 +442,8 @@ class HistoryKline {
       ma10: QuoteData._parseDouble(json['ma10']),
       ma20: QuoteData._parseDouble(json['ma20']),
       ma60: QuoteData._parseDouble(json['ma60']),
+      volMa5: QuoteData._parseDouble(json['volMa5']),
+      volMa10: QuoteData._parseDouble(json['volMa10']),
       macdDif: QuoteData._parseDouble(json['macd_dif']),
       macdDea: QuoteData._parseDouble(json['macd_dea']),
       macdHist: QuoteData._parseDouble(json['macd_hist']),
@@ -1031,10 +1092,12 @@ class AlertRule {
   }
 
   Map<String, dynamic> toJson() => {
+    'id': id,
     'code': code,
     'name': name,
     'condition_type': conditionType,
     'threshold_value': thresholdValue,
+    'created_at': createdAt.millisecondsSinceEpoch,
     'enabled': enabled,
     'alert_type': alertType,
     'threshold': threshold,
@@ -1059,7 +1122,11 @@ class WatchlistItem {
     return WatchlistItem(
       code: json['code'] ?? '',
       name: json['name'] ?? '',
-      addedAt: DateTime.now(),
+      addedAt: json['added_at'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(json['added_at'] as int)
+          : (json['addedAt'] != null
+              ? DateTime.fromMillisecondsSinceEpoch(json['addedAt'] as int)
+              : DateTime.now()),
       isPinned: (json['is_pinned'] as int?) == 1,
     );
   }
@@ -1348,11 +1415,11 @@ class ExploreResult {
       'sector': sector,
       'confluence_score': confluenceScore,
       'analyzed_at': analyzedAt.millisecondsSinceEpoch,
-      'concept_summary': conceptSummary ?? '',
+      'concept_summary': conceptSummary,
       'day5_return': day5Return,
       'day10_return': day10Return,
       'day20_return': day20Return,
-      'market_structure': marketStructure ?? '',
+      'market_structure': marketStructure,
     };
   }
 
@@ -1408,4 +1475,78 @@ class SentimentResult {
     required this.signals,
     required this.timestamp,
   });
+
+  Map<String, dynamic> toMap() => {
+    'temperature': temperature,
+    'phase': phase.name,
+    'zhaban_rate': zhabanRate,
+    'continuation_rate': continuationRate,
+    'seal_success_rate': sealSuccessRate,
+    'money_making_effect': moneyMakingEffect,
+    'limit_up_count': limitUpCount,
+    'limit_down_count': limitDownCount,
+    'continuation_height': continuationHeight,
+    'signals': signals,
+    'timestamp': timestamp.millisecondsSinceEpoch,
+  };
+
+  factory SentimentResult.fromMap(Map<String, dynamic> map) => SentimentResult(
+    temperature: (map['temperature'] as num?)?.toDouble() ?? 50.0,
+    phase: EmotionPhase.values.firstWhere(
+      (e) => e.name == (map['phase'] as String?),
+      orElse: () => EmotionPhase.freezing,
+    ),
+    zhabanRate: (map['zhaban_rate'] as num?)?.toDouble() ?? 0.0,
+    continuationRate: (map['continuation_rate'] as num?)?.toDouble() ?? 0.0,
+    sealSuccessRate: (map['seal_success_rate'] as num?)?.toDouble() ?? 0.0,
+    moneyMakingEffect: (map['money_making_effect'] as num?)?.toDouble() ?? 0.0,
+    limitUpCount: (map['limit_up_count'] as int?) ?? 0,
+    limitDownCount: (map['limit_down_count'] as int?) ?? 0,
+    continuationHeight: (map['continuation_height'] as int?) ?? 0,
+    signals: (map['signals'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+    timestamp: map['timestamp'] != null
+        ? DateTime.fromMillisecondsSinceEpoch((map['timestamp'] as num).toInt())
+        : DateTime.now(),
+  );
+}
+
+/// 全球主要股指（美股/港股/亚太/欧洲）
+class GlobalIndex {
+  final String code;        // NDX / SPX / DJIA / HSI ...
+  final String name;        // 纳斯达克综合指数
+  final double price;       // 最新价
+  final double changePct;   // 涨跌幅 %
+  final double changePoint; // 涨跌点
+  final String market;      // US / HK / JP / EU / KR
+  final DateTime? tradeTime;
+
+  const GlobalIndex({
+    required this.code,
+    required this.name,
+    required this.price,
+    required this.changePct,
+    required this.changePoint,
+    required this.market,
+    this.tradeTime,
+  });
+
+  /// 计算一组指数的综合趋势：返回 (trendLabel, avgChangePct, upCount, downCount)
+  /// trendLabel: 偏多(avg>0.5) / 偏空(avg<-0.5) / 中性
+  static ({String trend, double avg, int upCount, int downCount}) calculateTrend(List<GlobalIndex> indices) {
+    if (indices.isEmpty) {
+      return (trend: '中性', avg: 0.0, upCount: 0, downCount: 0);
+    }
+    final upCount = indices.where((i) => i.changePct > 0).length;
+    final downCount = indices.where((i) => i.changePct < 0).length;
+    final avg = indices.map((i) => i.changePct).reduce((a, b) => a + b) / indices.length;
+    String trend;
+    if (avg > 0.5) {
+      trend = '偏多';
+    } else if (avg < -0.5) {
+      trend = '偏空';
+    } else {
+      trend = '中性';
+    }
+    return (trend: trend, avg: avg, upCount: upCount, downCount: downCount);
+  }
 }

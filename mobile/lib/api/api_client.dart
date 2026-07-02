@@ -16,6 +16,7 @@ class ApiClient {
   final Duration _cacheDuration = const Duration(minutes: 5);
   final Map<String, Future> _inFlightRequests = {};
   static const int _maxCacheSize = 100;
+  bool _disposed = false;
 
   /// 重建HTTP客户端（连接池失效时调用）
   void _rebuildClient() {
@@ -33,6 +34,7 @@ class ApiClient {
 
   /// 公共 HTTP GET 请求方法，统一处理超时、重试和异常捕获
   Future<http.Response?> _httpGet(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 15), int retries = 2}) async {
+    if (_disposed) return null;
     for (var attempt = 0; attempt < retries; attempt++) {
       try {
         final response = await _client.get(url, headers: headers ?? {}).timeout(timeout);
@@ -85,6 +87,24 @@ class ApiClient {
     final cached = _getCached(cacheKey);
     if (cached != null) return cached as List<StockInfo>;
 
+    // Check if request is already in flight
+    if (_inFlightRequests.containsKey(cacheKey)) {
+      return _inFlightRequests[cacheKey] as Future<List<StockInfo>>;
+    }
+
+    // Make the request
+    final future = _fetchSearchStocks(keyword, cacheKey);
+    _inFlightRequests[cacheKey] = future;
+
+    try {
+      final result = await future;
+      return result;
+    } finally {
+      _inFlightRequests.remove(cacheKey);
+    }
+  }
+
+  Future<List<StockInfo>> _fetchSearchStocks(String keyword, String cacheKey) async {
     final encoded = Uri.encodeComponent(keyword);
     final url = Uri.parse('https://suggest3.sinajs.cn/suggest/type=111&key=$encoded');
     final response = await _httpGet(url, headers: {
@@ -389,7 +409,13 @@ class ApiClient {
     });
     if (response != null) {
       final body = response.body;
-      final data = json.decode(body) as Map<String, dynamic>;
+      Map<String, dynamic> data;
+      try {
+        data = json.decode(body) as Map<String, dynamic>;
+      } catch (e) {
+        debugPrint('[API] JSON解析失败: $e');
+        return null;
+      }
       final diff = data['data']?['diff'] as List?;
       if (diff != null && diff.isNotEmpty) {
         final item = diff.first as Map<String, dynamic>;
@@ -434,7 +460,7 @@ class ApiClient {
     }
 
     final url = Uri.parse(
-      'https://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fltt=2&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f170,f171',
+      'https://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fltt=2&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f170,f171,f10',
     );
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
@@ -442,7 +468,13 @@ class ApiClient {
     });
     if (response != null) {
       final body = response.body;
-      final data = json.decode(body) as Map<String, dynamic>;
+      Map<String, dynamic> data;
+      try {
+        data = json.decode(body) as Map<String, dynamic>;
+      } catch (e) {
+        debugPrint('[API] JSON解析失败: $e');
+        return null;
+      }
       final d = data['data'] as Map<String, dynamic>?;
       if (d == null) return null;
 
@@ -459,6 +491,7 @@ class ApiClient {
       final pb = _parseDouble(d['f167']); // 市净率
       final totalMarketCap = _parseDouble(d['f116']) * 10000; // 万元→元
       final circulatingMarketCap = _parseDouble(d['f117']) * 10000; // 万元→元
+      final volumeRatio = _parseDouble(d['f10']); // 量比
       final name = d['f58']?.toString() ?? '';
 
       final amplitude = preClose > 0 ? (high - low) / preClose * 100 : 0.0;
@@ -480,6 +513,7 @@ class ApiClient {
         pb: pb,
         totalMarketCap: totalMarketCap,
         circulatingMarketCap: circulatingMarketCap,
+        volumeRatio: volumeRatio,
       );
     }
     return null;
@@ -947,7 +981,7 @@ class ApiClient {
   /// 获取涨停/跌停家数（接入东方财富涨停池/跌停池接口）
   /// 失败时返回 (0, 0)，不影响主流程
   Future<({int up, int down})> _fetchLimitPoolCount() async {
-    final now = DateTime.now();
+    final now = DateTime.now().toUtc().add(const Duration(hours: 8));
     final dateStr = '${now.year}'
         '${now.month.toString().padLeft(2, '0')}'
         '${now.day.toString().padLeft(2, '0')}';
@@ -1049,8 +1083,12 @@ class ApiClient {
 
   String addMarketPrefix(String code) {
     if (code.isEmpty) return code;
-    if (code.startsWith('sh') || code.startsWith('sz')) {
+    if (code.startsWith('sh') || code.startsWith('sz') || code.startsWith('bj')) {
       return code.toLowerCase();
+    }
+    // 北交所：830xxx/870xxx/889xxx 或 430xxx
+    if (code.startsWith('8') || code.startsWith('43')) {
+      return 'bj$code';
     }
     final firstChar = code[0];
     if (firstChar == '6') {
@@ -1153,6 +1191,46 @@ class ApiClient {
     return 0;
   }
 
+  /// 获取个股所属行业板块（东方财富）
+  Future<String> getStockSector(String code) async {
+    final cacheKey = 'sector_$code';
+    final cached = _getCached(cacheKey);
+    if (cached != null) return cached as String;
+
+    String secid;
+    if (code.startsWith('sh')) {
+      secid = '1.${code.substring(2)}';
+    } else if (code.startsWith('sz')) {
+      secid = '0.${code.substring(2)}';
+    } else {
+      secid = code;
+    }
+
+    try {
+      final url = Uri.parse(
+        'https://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fltt=2&fields=f126,f127',
+      );
+      final response = await _httpGet(url, headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://quote.eastmoney.com/',
+      });
+      if (response != null) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final d = data['data'] as Map<String, dynamic>?;
+        if (d != null) {
+          final sector = d['f126']?.toString() ?? '';
+          if (sector.isNotEmpty) {
+            _setCached(cacheKey, sector, duration: const Duration(minutes: 30));
+            return sector;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('getStockSector failed: $e');
+    }
+    return '';
+  }
+
   /// 获取热门行业板块（东方财富行业板块涨幅排名前5）
   Future<List<SectorInfo>> getHotSectors() async {
     const cacheKey = 'hot_sectors';
@@ -1207,6 +1285,90 @@ class ApiClient {
     }
 
     return sectors ?? [];
+  }
+
+  /// 获取全球主要股指（美股/港股/亚太/欧洲）
+  ///
+  /// 数据来源：东方财富全球指数接口。返回 10 个主要指数，
+  /// 按 market 字段标识所属市场（US/HK/JP/EU/KR）。
+  Future<List<GlobalIndex>> getGlobalIndices() async {
+    const cacheKey = 'global_indices';
+    final cached = _getCached(cacheKey);
+    if (cached != null) return cached as List<GlobalIndex>;
+
+    // secids: 100=美股/全球, 116=港股
+    const secids =
+        '100.NDX,100.SPX,100.DJIA,116.HSI,116.HSCEI,100.N225,100.GDAXI,100.FTSE,100.FCHI,100.KOSPI';
+    const codeToMarket = <String, String>{
+      'NDX': 'US', 'SPX': 'US', 'DJIA': 'US',
+      'HSI': 'HK', 'HSCEI': 'HK',
+      'N225': 'JP',
+      'GDAXI': 'EU', 'FTSE': 'EU', 'FCHI': 'EU',
+      'KOSPI': 'KR',
+    };
+
+    try {
+      final url = Uri.parse(
+        'https://push2.eastmoney.com/api/qt/ulist.np/get'
+        '?fields=f2,f3,f4,f12,f14,f15,f16,f17,f18'
+        '&secids=$secids',
+      );
+      final response = await _httpGet(url, headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://quote.eastmoney.com/',
+      }, retries: 3);
+      if (response == null) return [];
+
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      final diff = data['data']?['diff'] as List?;
+      if (diff == null || diff.isEmpty) return [];
+
+      final result = <GlobalIndex>[];
+      for (final item in diff) {
+        final m = item as Map<String, dynamic>;
+        final code = m['f12']?.toString() ?? '';
+        final market = codeToMarket[code] ?? 'OTHER';
+        final price = _parseDouble(m['f2']);
+        final previousClose = _parseDouble(m['f18']);
+        if (price <= 0) continue;
+        // v2.37.1: 不直接使用 f3(全球指数 f3 可能返回非日变化)，
+        // 改为用 f2(最新价) 和 f18(昨收) 自行计算日涨跌幅
+        double changePct;
+        double changePoint;
+        if (previousClose > 0) {
+          changePoint = price - previousClose;
+          changePct = changePoint / previousClose * 100;
+          // sanity check: 单日涨跌幅超过 15% 视为数据异常（昨收可能缺失或为 0）
+          if (changePct.abs() > 15) {
+            final fallbackPct = _parseDouble(m['f3']);
+            changePct = fallbackPct.abs() > 15 ? 0.0 : fallbackPct;
+            final fallbackPoint = _parseDouble(m['f4']);
+            changePoint = fallbackPct.abs() > 15 ? 0.0 : fallbackPoint;
+          }
+        } else {
+          // 无昨收时退回 f3/f4，但做同样的 sanity check
+          final fallbackPct = _parseDouble(m['f3']);
+          changePct = fallbackPct.abs() > 15 ? 0.0 : fallbackPct;
+          final fallbackPoint = _parseDouble(m['f4']);
+          changePoint = fallbackPct.abs() > 15 ? 0.0 : fallbackPoint;
+        }
+        result.add(GlobalIndex(
+          code: code,
+          name: m['f14']?.toString() ?? code,
+          price: price,
+          changePct: changePct,
+          changePoint: changePoint,
+          market: market,
+        ));
+      }
+      if (result.isNotEmpty) {
+        _setCached(cacheKey, result, duration: const Duration(minutes: 2));
+      }
+      return result;
+    } catch (e) {
+      debugPrint('getGlobalIndices failed: $e');
+      return [];
+    }
   }
 
   Future<List<SectorInfo>> _fetchHotSectorsFromSina() async {
@@ -1371,6 +1533,28 @@ class ApiClient {
   Future<List<QuoteData>> getBatchRealtimeQuotes(List<String> codes) async {
     if (codes.isEmpty) return [];
 
+    final cacheKey = 'batch_quotes_${codes.join(',')}';
+    final cached = _getCached(cacheKey);
+    if (cached != null) return cached as List<QuoteData>;
+
+    // Check if request is already in flight
+    if (_inFlightRequests.containsKey(cacheKey)) {
+      return _inFlightRequests[cacheKey] as Future<List<QuoteData>>;
+    }
+
+    // Make the request
+    final future = _fetchBatchRealtimeQuotes(codes, cacheKey);
+    _inFlightRequests[cacheKey] = future;
+
+    try {
+      final result = await future;
+      return result;
+    } finally {
+      _inFlightRequests.remove(cacheKey);
+    }
+  }
+
+  Future<List<QuoteData>> _fetchBatchRealtimeQuotes(List<String> codes, String cacheKey) async {
     // 腾讯批量接口：多个代码用逗号分隔
     final codesStr = codes.join(',');
     final url = Uri.parse('https://qt.gtimg.cn/q=$codesStr');
@@ -1413,10 +1597,12 @@ class ApiClient {
               pb: parts.length > 46 ? _parseDouble(parts[46]) : 0,
               totalMarketCap: parts.length > 44 ? _parseDouble(parts[44]) * 10000 : 0,
               circulatingMarketCap: parts.length > 43 ? _parseDouble(parts[43]) * 10000 : 0,
+              volumeRatio: parts.length > 49 ? _parseDouble(parts[49]) : 0,
             ));
           }
         }
       }
+      _setCached(cacheKey, results, duration: const Duration(seconds: 5));
       return results;
     }
     return [];
@@ -1425,7 +1611,10 @@ class ApiClient {
   /// 当日涨停板池（东方财富 push2ex.eastmoney.com/getTopicZTPool）
   /// 返回完整涨停数据：连板数/首封时间/封单/换手/炸板标记
   Future<List<LimitUpStock>> getLimitUpBoard({DateTime? date, int pageSize = 500}) async {
-    final dateStr = (date ?? DateTime.now()).toLocal().toString().substring(0, 10).replaceAll('-', '');
+    // A股交易日按上海时区(UTC+8)计算，避免海外用户日期偏移
+    final base = date ?? DateTime.now();
+    final shanghai = base.toUtc().add(const Duration(hours: 8));
+    final dateStr = shanghai.toIso8601String().substring(0, 10).replaceAll('-', '');
     final url = Uri.parse(
       'https://push2ex.eastmoney.com/getTopicZTPool'
       '?ut=7eea3edcaed734bea9cbfc24409ed989'
@@ -1459,7 +1648,9 @@ class ApiClient {
 
   /// 昨日涨停股池（用于计算赚钱效应）
   Future<List<LimitUpStock>> getYesterdayLimitUpPool() async {
-    final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    // 昨日按上海时区(UTC+8)计算，与 getLimitUpBoard 一致
+    final shanghaiNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+    final yesterday = shanghaiNow.subtract(const Duration(days: 1));
     return getLimitUpBoard(date: yesterday);
   }
 
@@ -1491,14 +1682,14 @@ class ApiClient {
       return result;
     }
 
-    print('getTimeshareData: 东方财富分时接口失败，降级使用新浪5分钟K线');
+    debugPrint('getTimeshareData: 东方财富分时接口失败，降级使用新浪5分钟K线');
     final fallback = await _getTimeshareFromSina(code);
     if (fallback != null) {
       _setCached(cacheKey, fallback, duration: const Duration(seconds: 60));
       return fallback;
     }
 
-    print('getTimeshareData: 新浪分时降级也失败，分时数据不可用');
+    debugPrint('getTimeshareData: 新浪分时降级也失败，分时数据不可用');
     return null;
   }
 
@@ -1527,30 +1718,30 @@ class ApiClient {
         'Referer': 'https://quote.eastmoney.com/',
       });
       if (response == null) {
-        print('getTimeshareData: EastMoney HTTP请求返回null (重试耗尽)');
+        debugPrint('getTimeshareData: EastMoney HTTP请求返回null (重试耗尽)');
         return null;
       }
 
       final data = json.decode(response.body) as Map<String, dynamic>;
       final rc = data['rc'];
       if (rc == null) {
-        print('getTimeshareData: EastMoney响应缺少rc字段, body=${response.body.substring(0, response.body.length.clamp(0, 200))}');
+        debugPrint('getTimeshareData: EastMoney响应缺少rc字段, body=${response.body.substring(0, response.body.length.clamp(0, 200))}');
         return null;
       }
       if (rc != 0) {
-        print('getTimeshareData: EastMoney返回错误rc=$rc');
+        debugPrint('getTimeshareData: EastMoney返回错误rc=$rc');
         return null;
       }
 
       final trendsData = data['data'] as Map<String, dynamic>?;
       if (trendsData == null) {
-        print('getTimeshareData: EastMoney响应缺少data字段');
+        debugPrint('getTimeshareData: EastMoney响应缺少data字段');
         return null;
       }
 
       final trends = trendsData['trends'] as List?;
       if (trends == null || trends.isEmpty) {
-        print('getTimeshareData: EastMoney trends为空(可能非交易日)');
+        debugPrint('getTimeshareData: EastMoney trends为空(可能非交易日)');
         return null;
       }
 
@@ -1600,10 +1791,10 @@ class ApiClient {
         'preClose': {0: preClose},
       };
     } on FormatException catch (e) {
-      print('getTimeshareData: EastMoney响应JSON解析失败 $e');
+      debugPrint('getTimeshareData: EastMoney响应JSON解析失败 $e');
       return null;
     } catch (e) {
-      print('getTimeshareData: EastMoney请求异常 $e');
+      debugPrint('getTimeshareData: EastMoney请求异常 $e');
       return null;
     }
   }
@@ -1624,29 +1815,29 @@ class ApiClient {
         'Referer': 'https://finance.sina.com.cn/',
       });
       if (response == null) {
-        print('getTimeshareData: Sina HTTP请求返回null');
+        debugPrint('getTimeshareData: Sina HTTP请求返回null');
         return null;
       }
 
       final bodyStr = response.body.trim();
       if (bodyStr.isEmpty || bodyStr == 'null') {
-        print('getTimeshareData: Sina返回空/无效响应');
+        debugPrint('getTimeshareData: Sina返回空/无效响应');
         return null;
       }
       if (!bodyStr.startsWith('[')) {
-        print('getTimeshareData: Sina返回非数组响应(前100字符): ${bodyStr.substring(0, bodyStr.length.clamp(0, 100))}');
+        debugPrint('getTimeshareData: Sina返回非数组响应(前100字符): ${bodyStr.substring(0, bodyStr.length.clamp(0, 100))}');
         return null;
       }
 
       // 新浪返回格式: [{day, open, high, low, close, volume}]
       final decoded = json.decode(bodyStr);
       if (decoded is! List<dynamic>) {
-        print('getTimeshareData: Sina响应不是数组, type=${decoded.runtimeType}');
+        debugPrint('getTimeshareData: Sina响应不是数组, type=${decoded.runtimeType}');
         return null;
       }
       final list = decoded;
       if (list.isEmpty) {
-        print('getTimeshareData: Sina返回空数据数组');
+        debugPrint('getTimeshareData: Sina返回空数据数组');
         return null;
       }
 
@@ -1709,15 +1900,16 @@ class ApiClient {
         'preClose': {0: preClose},
       };
     } on FormatException catch (e) {
-      print('getTimeshareData: Sina响应JSON解析失败 $e');
+      debugPrint('getTimeshareData: Sina响应JSON解析失败 $e');
       return null;
     } catch (e) {
-      print('getTimeshareData: Sina请求异常 $e');
+      debugPrint('getTimeshareData: Sina请求异常 $e');
       return null;
     }
   }
 
   void dispose() {
+    _disposed = true;
     _client.close();
     _fallbackClient?.close();
     _cache.clear();

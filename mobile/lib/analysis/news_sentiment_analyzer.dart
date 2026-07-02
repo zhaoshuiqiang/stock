@@ -125,7 +125,7 @@ class NewsSentimentAnalyzer {
         final contextMod = _getContextModifier(title, idx, entry.key.length);
         if (isNegated) {
           negativeScore += entry.value.toDouble();
-          if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _negativeKeywords)) {
+          if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _positiveKeywords)) {
             matchedKeyword = '未${entry.key}';
           }
         } else if (contextMod == '反转') {
@@ -153,7 +153,7 @@ class NewsSentimentAnalyzer {
         final contextMod = _getContextModifier(title, idx, entry.key.length);
         if (isNegated) {
           positiveScore += entry.value.toDouble();
-          if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _positiveKeywords)) {
+          if (matchedKeyword.isEmpty || entry.value > _currentKeywordWeight(matchedKeyword, _negativeKeywords)) {
             matchedKeyword = '未${entry.key}';
           }
         } else if (contextMod == '反转') {

@@ -75,7 +75,8 @@ class SentimentThermometer {
   ) {
     if (yesterday.isEmpty) return 0.3;
     final y1 = yesterday.where((a) => a.consecutiveDays == 1).length;
-    final t2 = today.where((a) => a.consecutiveDays >= 2).length;
+    // 晋级率 = 1板→2板，分子只计今日 2板（即昨日 1板晋级而来）
+    final t2 = today.where((a) => a.consecutiveDays == 2).length;
     if (y1 == 0) return 0.3;
     return (t2 / y1).clamp(0.0, 1.0);
   }
@@ -103,7 +104,7 @@ class SentimentThermometer {
 
   // === 维度 5: 连板高度 ===
   static int _computeContinuationHeight(List<LimitUpAnalysis> pool) {
-    return pool.fold(1, (max, a) => a.consecutiveDays > max ? a.consecutiveDays : max);
+    return pool.fold(0, (max, a) => a.consecutiveDays > max ? a.consecutiveDays : max);
   }
 
   // === 综合温度 ===

@@ -23,7 +23,7 @@ class CapitalFlowAnalyzer {
     double score = 5.0;
     double mainNetFlow5d = 0, mainNetFlow10d = 0, flowTrend = 0;
 
-    if (quote != null && quote.mainNetFlow != 0) {
+    if (quote != null && (quote.mainNetFlow != 0 || quote.mainNetFlowRate != 0)) {
       final rate = quote.mainNetFlowRate;
       if (rate > 5) { score += 2.0; signals.add('当日主力大幅净流入${rate.toStringAsFixed(1)}%'); }
       else if (rate > 2) { score += 1.2; signals.add('当日主力净流入${rate.toStringAsFixed(1)}%'); }

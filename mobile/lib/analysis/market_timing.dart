@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../api/api_client.dart';
 import '../api/market_context_provider.dart';
 import '../models/stock_models.dart';
@@ -33,7 +34,8 @@ class MarketTiming {
         marketContext: results[0] as MarketContext?,
         marketSentiment: results[1] as MarketSentiment?,
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[择时] fetchTiming 失败: $e');
       return null;
     }
   }
@@ -94,26 +96,26 @@ class MarketTiming {
       else { volumeScore = 0.3; signals.add('极度缩量'); }
     }
 
-    final totalScore = indexScore + breadthScore + sentimentComponent + premiumScore + volumeScore;
+    final totalScore = indexScore * 0.3 + breadthScore * 0.25 + sentimentComponent * 0.2 + premiumScore * 0.15 + volumeScore * 0.1;
 
     String trendDirection; double positionAdvice; String positionLabel;
-    if (totalScore >= 8.0) { trendDirection = 'bull'; positionAdvice = 0.8; positionLabel = '重仓(7-8成)'; signals.add('市场强势，可积极参与'); }
-    else if (totalScore >= 6.5) { trendDirection = 'bull'; positionAdvice = 0.6; positionLabel = '偏多仓位(5-6成)'; }
-    else if (totalScore >= 5.0) { trendDirection = 'neutral'; positionAdvice = 0.4; positionLabel = '中性仓位(3-4成)'; signals.add('市场震荡，控制仓位'); }
-    else if (totalScore >= 3.5) { trendDirection = 'bear'; positionAdvice = 0.2; positionLabel = '轻仓(1-2成)'; signals.add('市场偏弱，减仓观望'); }
+    if (totalScore >= 1.8) { trendDirection = 'bull'; positionAdvice = 0.8; positionLabel = '重仓(7-8成)'; signals.add('市场强势，可积极参与'); }
+    else if (totalScore >= 1.5) { trendDirection = 'bull'; positionAdvice = 0.6; positionLabel = '偏多仓位(5-6成)'; }
+    else if (totalScore >= 1.2) { trendDirection = 'neutral'; positionAdvice = 0.4; positionLabel = '中性仓位(3-4成)'; signals.add('市场震荡，控制仓位'); }
+    else if (totalScore >= 0.9) { trendDirection = 'bear'; positionAdvice = 0.2; positionLabel = '轻仓(1-2成)'; signals.add('市场偏弱，减仓观望'); }
     else { trendDirection = 'bear'; positionAdvice = 0.05; positionLabel = '空仓或极轻仓'; signals.add('市场弱势，建议空仓等待'); }
 
     String sentimentLabel;
-    if (totalScore >= 7.0) sentimentLabel = '乐观';
-    else if (totalScore >= 5.5) sentimentLabel = '中性偏多';
-    else if (totalScore >= 4.5) sentimentLabel = '中性';
-    else if (totalScore >= 3.0) sentimentLabel = '谨慎';
+    if (totalScore >= 1.6) sentimentLabel = '乐观';
+    else if (totalScore >= 1.3) sentimentLabel = '中性偏多';
+    else if (totalScore >= 1.0) sentimentLabel = '中性';
+    else if (totalScore >= 0.7) sentimentLabel = '谨慎';
     else sentimentLabel = '恐慌';
 
     return MarketTimingResult(
       sentimentScore: totalScore, sentimentLabel: sentimentLabel,
       trendDirection: trendDirection, positionAdvice: positionAdvice,
-      positionLabel: positionLabel, signals: signals, isTradable: totalScore >= 3.5,
+      positionLabel: positionLabel, signals: signals, isTradable: totalScore >= 0.9,
     );
   }
 

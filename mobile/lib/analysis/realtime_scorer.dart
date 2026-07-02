@@ -7,8 +7,9 @@ class RealtimeScorer {
     if (quote != null && quote.price > 0) {
       final cp = quote.changePct;
       // 倒U型评分：小涨最优，大涨抑制追高，大跌惩罚
+      // v2.38.0: 中阳线(5%~8%)奖励从+1.5降至+1.0，避免诱多（次日反转风险高）
       if (cp > 8) s += 0.8;       // 大涨：抑制追高但给一定认可
-      else if (cp > 5) s += 1.5;  // 强势上涨
+      else if (cp > 5) s += 1.0;  // 中阳线：降低奖励，避免诱多
       else if (cp > 2) s += 2.0;  // 温和上涨，最优区间
       else if (cp > 0) s += 1.2;  // 小幅上涨
       else if (cp >= -2) s += 0.5;

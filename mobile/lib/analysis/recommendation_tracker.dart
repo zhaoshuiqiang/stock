@@ -139,6 +139,66 @@ class RecommendationTracker {
     return snapshot;
   }
 
+  /// 批量记录推荐快照（用于探索引擎批量写入）
+  /// 一次性获取所有活跃推荐 code 集合，过滤已存在的，事务内批量插入
+  Future<List<RecommendationSnapshot>> trackBatch(List<AnalysisResult> analyses) async {
+    if (!_initialized) await init();
+
+    // 一次性获取所有活跃推荐 code 集合
+    final activeCodes = await _dbService.getActiveRecommendationCodes();
+
+    final newSnapshots = <RecommendationSnapshot>[];
+    for (final analysis in analyses) {
+      final quote = analysis.quote;
+      if (quote == null || analysis.score < 6) continue;
+      // 已有活跃推荐，跳过
+      if (activeCodes.contains(quote.code)) continue;
+
+      // 获取概念标签
+      String conceptTags = '';
+      try {
+        conceptTags = ConceptTagProvider.instance.getConceptSummary(quote.code);
+      } catch (e) { debugPrint('RecommendationTracker.trackBatch: $e'); }
+
+      // 获取主力策略名称
+      String strategy = '';
+      final activeStrategies = [
+        ...analysis.shortTermStrategies.where((s) => s.isActive).map((s) => s.name),
+        ...analysis.longTermStrategies.where((s) => s.isActive).map((s) => s.name),
+      ];
+      if (activeStrategies.isNotEmpty) {
+        strategy = activeStrategies.take(3).join(',');
+      }
+
+      final snapshot = RecommendationSnapshot(
+        code: quote.code,
+        name: quote.name,
+        signalPrice: quote.price,
+        signalDate: DateTime.now(),
+        marketStructure: analysis.marketStructure != null
+            ? MarketStructureAnalyzer.getLabel(analysis.marketStructure!.structure)
+            : '',
+        strategy: strategy,
+        conceptTags: conceptTags,
+      );
+      newSnapshots.add(snapshot);
+      // 标记为已存在，防止批次内重复添加
+      activeCodes.add(quote.code);
+    }
+
+    if (newSnapshots.isEmpty) return [];
+
+    // 事务内批量插入
+    final db = await _dbService.database;
+    await db.transaction((txn) async {
+      for (final snapshot in newSnapshots) {
+        await txn.insert('recommendation_tracking', snapshot.toMap());
+      }
+    });
+
+    return newSnapshots;
+  }
+
   /// 更新历史推荐的收益率
   /// 计算从信号价到当前价的N日收益
   Future<void> updateReturns(Map<String, double> pricesByCode) async {
@@ -150,31 +210,44 @@ class RecommendationTracker {
       orderBy: 'signal_date DESC',
       limit: 50);
 
-    for (final row in recent) {
-      final code = row['code'] as String;
-      final signalPrice = (row['signal_price'] as num).toDouble();
-      final signalDate = DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int);
-      final id = row['id'] as int;
-      final now = DateTime.now();
-      final daysSince = now.difference(signalDate).inDays;
+    // 整个 for 循环用事务包裹，避免每次 update 获取新连接、提升并发性能
+    await db.transaction((txn) async {
+      for (final row in recent) {
+        final code = row['code'] as String;
+        final signalPrice = (row['signal_price'] as num).toDouble();
+        final signalDate = DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int);
+        final id = row['id'] as int;
+        final now = DateTime.now();
+        final daysSince = now.difference(signalDate).inDays;
 
-      final currentPrice = pricesByCode[code];
-      if (currentPrice == null || currentPrice <= 0) continue;
+        final currentPrice = pricesByCode[code];
+        if (currentPrice == null || currentPrice <= 0) continue;
 
-      final returnPct = (currentPrice - signalPrice) / signalPrice * 100;
+        final returnPct = (currentPrice - signalPrice) / signalPrice * 100;
+        final nowMs = now.millisecondsSinceEpoch;
 
-      // 更新对应天数的收益 (独立if确保不会漏掉前序里程碑)
-      if (daysSince >= 5 && row['day5_return'] == null) {
-        await _dbService.updateRecommendationReturn(id, 5, currentPrice, returnPct);
+        // 更新对应天数的收益 (独立if确保不会漏掉前序里程碑)
+        if (daysSince >= 5 && row['day5_return'] == null) {
+          await txn.update('recommendation_tracking',
+            {'day5_price': currentPrice, 'day5_return': returnPct, 'last_checked_date': nowMs},
+            where: 'id = ?', whereArgs: [id]);
+        }
+        if (daysSince >= 10 && row['day10_return'] == null) {
+          await txn.update('recommendation_tracking',
+            {'day10_price': currentPrice, 'day10_return': returnPct, 'last_checked_date': nowMs},
+            where: 'id = ?', whereArgs: [id]);
+        }
+        if (daysSince >= 20 && row['day20_return'] == null) {
+          await txn.update('recommendation_tracking',
+            {'day20_price': currentPrice, 'day20_return': returnPct, 'last_checked_date': nowMs},
+            where: 'id = ?', whereArgs: [id]);
+          // 20日追踪完成
+          await txn.update('recommendation_tracking',
+            {'is_closed': 1},
+            where: 'id = ?', whereArgs: [id]);
+        }
       }
-      if (daysSince >= 10 && row['day10_return'] == null) {
-        await _dbService.updateRecommendationReturn(id, 10, currentPrice, returnPct);
-      }
-      if (daysSince >= 20 && row['day20_return'] == null) {
-        await _dbService.updateRecommendationReturn(id, 20, currentPrice, returnPct);
-        await _dbService.closeRecommendation(id); // 20日追踪完成
-      }
-    }
+    });
   }
 
   /// 获取某只股票的最新追踪收益

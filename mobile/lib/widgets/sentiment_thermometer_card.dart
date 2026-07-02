@@ -24,7 +24,29 @@ class SentimentThermometerCard extends StatelessWidget {
           color: const Color(0xFF161B22),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Text('🌡️ 情绪温度计',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white)),
+              const Spacer(),
+              if (isLoading)
+                const SizedBox(width: 14, height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70))
+              else if (onRefresh != null)
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 18, color: Colors.white70),
+                  onPressed: onRefresh,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                ),
+            ]),
+            const SizedBox(height: 10),
+            const Text('暂无情绪数据，点击刷新扫描打板池',
+                style: TextStyle(fontSize: 12, color: Colors.white54)),
+          ],
+        ),
       );
     }
 

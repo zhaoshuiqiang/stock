@@ -149,6 +149,7 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       ));
 
       final results = <ExploreResult>[];
+      final analysisList = <AnalysisResult>[];
       const analyzeBatchSize = 30; // 增大分析批次，只需CPU计算
 
       for (int i = 0; i < allStocks.length; i += analyzeBatchSize) {
@@ -160,10 +161,12 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
           final stock = batch[j];
           final klineData = klineCache[stock.code] ?? <HistoryKline>[];
           final quote = quoteCache[stock.code] ?? stock;
-          final result = _analyzeCached(stock, klineData, quote);
+          final result = _analyzeCached(stock, klineData, quote, analysisList);
           if (result != null) {
             results.add(result);
           }
+          // 释放内存：分析完成后立即清理K线缓存
+          klineCache.remove(stock.code);
         }
 
         emit(ExploreProgress(
@@ -181,6 +184,11 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       // 7. 持久化到数据库
       emit(ExploreProgress(status: ExploreStatus.saving));
       await _dbService.replaceExploreResults(results);
+
+      // Phase 3: 批量记录推荐快照（事务内一次性写入，避免逐只 track 的并发开销）
+      try {
+        await RecommendationTracker().trackBatch(analysisList);
+      } catch (e) { debugPrint('trackBatch失败: $e'); }
 
       // Phase 3: 更新历史推荐收益率
       try {
@@ -215,6 +223,7 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
     QuoteData stock,
     List<HistoryKline> klineData,
     QuoteData quote,
+    List<AnalysisResult> analysisList,
   ) {
     try {
       if (klineData.length < 20) return null;
@@ -237,10 +246,8 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         conceptSummary = ConceptTagProvider.instance.getConceptSummary(stock.code);
       } catch (e) { debugPrint('ExploreEngine.conceptTags: $e'); }
 
-      // Phase 3: 推荐追踪
-      try {
-        RecommendationTracker().track(analysis);
-      } catch (e) { debugPrint('ExploreEngine.trackRec: $e'); }
+      // Phase 3: 推荐追踪（收集到列表，循环结束后批量写入）
+      analysisList.add(analysis);
 
       // Phase 1: 市场结构
       final structureLabel = analysis.marketStructure != null

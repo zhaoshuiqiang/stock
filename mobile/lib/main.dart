@@ -7,6 +7,7 @@ import 'package:stock_analyzer/screens/discover_screen.dart';
 import 'package:stock_analyzer/screens/archive_screen.dart';
 import 'package:stock_analyzer/screens/alerts_screen.dart';
 import 'package:stock_analyzer/screens/update_log_screen.dart';
+import 'package:stock_analyzer/screens/scoring_explanation_screen.dart';
 import 'package:stock_analyzer/services/notification_service.dart';
 import 'package:stock_analyzer/data/concept_tag_provider.dart';
 
@@ -52,6 +53,10 @@ void main() async {
   // 如果用户已开启推送，启动轮询
   if (await notificationService.isEnabled()) {
     notificationService.startPolling();
+    // 日内高抛低吸信号轮询（独立于资讯轮询，默认开启）
+    if (await notificationService.isIntradayEnabled()) {
+      notificationService.startIntradayPolling();
+    }
   }
   runApp(const MyApp());
 }
@@ -135,6 +140,15 @@ class _MyAppState extends State<MyApp> {
           title: Text(titles[_currentIndex]),
           actions: _currentIndex == 0
             ? [
+                  IconButton(
+                    icon: const Icon(Icons.help_outline),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const ScoringExplanationScreen()),
+                      );
+                    },
+                  ),
                   IconButton(
                     icon: const Icon(Icons.info_outline),
                     onPressed: () {

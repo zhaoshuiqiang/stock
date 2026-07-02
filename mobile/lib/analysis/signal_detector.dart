@@ -428,12 +428,25 @@ class SignalDetector {
     }
 
     // 3. 趋势强度确认（ADX）— P0-1修复：需要方向确认
+    // v2.38.0: 将趋势强度强劲信号type从neutral改为buy/sell，确保信号分类准确
     if (last.adx14 > 25 && last.plusDi14 > last.minusDi14) {
       signals.add(SignalItem(
-        type: 'neutral',
+        type: 'buy',
         indicator: 'ADX',
         signal: '趋势强度强劲',
-        description: 'ADX>25，趋势明确，可顺势而为',
+        description: 'ADX>25，多头趋势明确，可顺势而为',
+        strength: 75,
+        timestamp: last.date,
+        duration: SignalDuration.longTerm,
+        confidence: 0.8,
+        signalCount: 1,
+      ));
+    } else if (last.adx14 > 25 && last.minusDi14 > last.plusDi14) {
+      signals.add(SignalItem(
+        type: 'sell',
+        indicator: 'ADX',
+        signal: '趋势强度强劲',
+        description: 'ADX>25，空头趋势明确，建议回避',
         strength: 75,
         timestamp: last.date,
         duration: SignalDuration.longTerm,

@@ -1,13 +1,17 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import '../analysis/indicators.dart';
 import '../analysis/signal_engine.dart';
 import '../storage/database_service.dart';
 import '../core/trading_session.dart';
+import '../analysis/sector_rotation.dart';
 
 
 class ArchiveScreen extends StatefulWidget {
@@ -56,7 +60,8 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   /// 判断留档推荐是否偏差（时间自适应阈值）
   /// 
   /// 基准阈值 ±2%（5天），按 sqrt(天数/5) 缩放：
-  ///   1天→0.9%, 5天→2.0%, 20天→4.0%, 60天→6.9%
+  ///   1天→2.0%, 5天→2.0%, 20天→4.0%, 60天→6.9%
+  /// v2.38.0: 1天窗口最小阈值从1.0提升至2.0，与A股日常波动匹配，避免过度判定偏差
   /// 观望推荐的基准阈值为 ±8%，同样按时间缩放
   static bool _isDeviation(ArchiveRecord record, double currentPrice) {
     if (currentPrice <= 0 || record.price <= 0) return false;
@@ -67,7 +72,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     final timeScale = max(daysSince, 1) / 5.0;
     final timeFactor = sqrt(timeScale);
     // 基准阈值 ±2%（买入/卖出）, ±8%（观望），按时间缩放并设置上下限
-    final threshold = (2.0 * timeFactor).clamp(1.0, 12.0);
+    final threshold = (2.0 * timeFactor).clamp(2.0, 12.0);
     final neutralThreshold = (8.0 * timeFactor).clamp(4.0, 24.0);
 
     final wasBuy = record.recommendation.contains('买入');
@@ -162,7 +167,19 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       }
 
       final calculated = calcAllIndicators(klines);
-      final analysis = generateAnalysis(calculated, quote);
+
+      final sectorName = await _apiClient.getStockSector(prefixedCode);
+      final hotSectors = await _apiClient.getHotSectors();
+      final sectorData = hotSectors.map((s) => SectorData(
+        name: s.name, code: s.code, changePct: s.changePct,
+        limitUpCount: s.stockCount, mainNetFlow: 0,
+      )).toList();
+      final sectorRotationResult = SectorRotation.analyze(sectorList: sectorData);
+
+      final analysis = generateAnalysis(calculated, quote,
+        sectorName: sectorName,
+        sectorAnalysis: sectorRotationResult.topSectors,
+      );
 
       if (mounted) Navigator.pop(context);
 
@@ -303,6 +320,115 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     _loadArchives();
   }
 
+  /// CSV 字段转义：包含逗号/引号/换行时用双引号包裹，内部双引号双写
+  String _csvEscape(String? value) {
+    if (value == null) return '';
+    final v = value.replaceAll('\r', ' ').replaceAll('\n', ' ');
+    if (v.contains(',') || v.contains('"')) {
+      return '"${v.replaceAll('"', '""')}"';
+    }
+    return v;
+  }
+
+  /// 导出留档数据为 CSV 文件并通过系统分享
+  Future<void> _exportToCsv() async {
+    if (_archives.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('暂无留档数据可导出')),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      // CSV 表头：留档元数据 + 推荐字段 + 实时行情 + 可靠性判定
+      final headers = [
+        '代码', '名称', '留档价格', '留档涨跌幅(%)', '评分', '推荐', '风险等级',
+        '买入信号数', '卖出信号数', '活跃战法数', '共振评分',
+        '留档时间',
+        '现价', '现涨跌幅(%)', '价格变动(%)', '是否偏差', '可靠性',
+        'topSignals',
+      ];
+
+      final now = DateTime.now();
+      final dateFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
+
+      final lines = <String>[];
+      lines.add(headers.map(_csvEscape).join(','));
+
+      for (final record in _archives) {
+        final quote = _currentQuotes[record.code];
+        final currentPrice = quote?.price ?? 0;
+        final currentChangePct = quote?.changePct ?? 0;
+        final priceChangePct = record.price > 0 && currentPrice > 0
+            ? (currentPrice - record.price) / record.price * 100
+            : 0.0;
+        final isDeviation = currentPrice > 0 ? _isDeviation(record, currentPrice) : false;
+
+        String reliability = '未知';
+        if (currentPrice > 0) {
+          reliability = isDeviation ? '偏差' : '合理';
+        }
+
+        final row = [
+          record.code,
+          record.name,
+          record.price.toStringAsFixed(4),
+          record.changePct.toStringAsFixed(2),
+          record.score.toString(),
+          record.recommendation,
+          record.riskLevel,
+          record.buySignalCount.toString(),
+          record.sellSignalCount.toString(),
+          record.activeStrategyCount.toString(),
+          record.confluenceScore.toString(),
+          dateFormat.format(record.archivedAt),
+          currentPrice > 0 ? currentPrice.toStringAsFixed(4) : '',
+          currentPrice > 0 ? currentChangePct.toStringAsFixed(2) : '',
+          currentPrice > 0 ? priceChangePct.toStringAsFixed(2) : '',
+          currentPrice > 0 ? (isDeviation ? '是' : '否') : '',
+          reliability,
+          record.topSignals,
+        ];
+        lines.add(row.map(_csvEscape).join(','));
+      }
+
+      // 添加 BOM 防止 Excel 打开 CSV 时中文乱码
+      final csvContent = '\uFEFF${lines.join('\n')}';
+
+      final dir = await getTemporaryDirectory();
+      final stamp = DateFormat('yyyyMMdd_HHmmss').format(now);
+      final file = File('${dir.path}/archive_export_$stamp.csv');
+      await file.writeAsString(csvContent);
+
+      if (!mounted) return;
+      Navigator.pop(context); // 关闭 loading
+
+      // 使用 share_plus 分享文件
+      final shareResult = await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: '留档数据导出 ($stamp)',
+      );
+
+      if (mounted && shareResult.status == ShareResultStatus.unavailable) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('分享功能不可用，请检查系统分享组件')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // 关闭 loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导出失败: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -318,7 +444,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
             const SizedBox(height: 12),
             const Text('暂无留档记录', style: TextStyle(color: Colors.white38, fontSize: 14)),
             const SizedBox(height: 4),
-            const Text('在"机会"页面中点击留档按钮保存推荐', style: TextStyle(color: Colors.white24, fontSize: 12)),
+            const Text('在"自选"页面中点击归档按钮保存推荐', style: TextStyle(color: Colors.white24, fontSize: 12)),
           ],
         ),
       );
@@ -350,7 +476,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       onRefresh: _loadArchives,
       child: CustomScrollView(
         slivers: [
-          // 顶部胜率统计卡片
+          // 顶部胜率统计卡片（两行布局：统计 + 操作按钮）
           SliverToBoxAdapter(
             child: Container(
               margin: const EdgeInsets.fromLTRB(8, 8, 8, 4),
@@ -360,70 +486,104 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: Colors.orange.withOpacity(0.3)),
               ),
-              child: Row(
+              child: Column(
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(isFiltered ? '筛选胜率' : '推荐胜率', style: TextStyle(color: isFiltered ? const Color(0xFF58A6FF) : Colors.white54, fontSize: 12)),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${winRate.toStringAsFixed(1)}%',
-                          style: const TextStyle(color: Colors.orange, fontSize: 28, fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(width: 1, height: 40, color: Colors.white12),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        Column(
+                  // 第一行：胜率 + 合理/偏差/总计
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('合理', style: TextStyle(color: Colors.orange, fontSize: 11)),
-                            const SizedBox(height: 2),
-                            Text('$reasonableCount', style: const TextStyle(color: Colors.orange, fontSize: 22, fontWeight: FontWeight.bold)),
+                            Text(isFiltered ? '筛选胜率' : '推荐胜率', style: TextStyle(color: isFiltered ? const Color(0xFF58A6FF) : Colors.white54, fontSize: 12)),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${winRate.toStringAsFixed(1)}%',
+                              style: const TextStyle(color: Colors.orange, fontSize: 28, fontWeight: FontWeight.bold),
+                            ),
                           ],
                         ),
-                        Column(
-                          children: [
-                            const Text('偏差', style: TextStyle(color: Color(0xFF26a69a), fontSize: 11)),
-                            const SizedBox(height: 2),
-                            Text('$deviationCount', style: const TextStyle(color: Color(0xFF26a69a), fontSize: 22, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                        Column(
-                          children: [
-                            const Text('总计', style: TextStyle(color: Colors.white38, fontSize: 11)),
-                            const SizedBox(height: 2),
-                            Text('$total', style: const TextStyle(color: Colors.white70, fontSize: 22, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: _deleteAll,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.red.withOpacity(0.5)),
                       ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.delete_sweep, color: Colors.red, size: 14),
-                          SizedBox(width: 4),
-                          Text('一键删除', style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.w600)),
-                        ],
+                      Container(width: 1, height: 40, color: Colors.white12),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            Column(
+                              children: [
+                                const Text('合理', style: TextStyle(color: Colors.orange, fontSize: 11)),
+                                const SizedBox(height: 2),
+                                Text('$reasonableCount', style: const TextStyle(color: Colors.orange, fontSize: 22, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                            Column(
+                              children: [
+                                const Text('偏差', style: TextStyle(color: Color(0xFF26a69a), fontSize: 11)),
+                                const SizedBox(height: 2),
+                                Text('$deviationCount', style: const TextStyle(color: Color(0xFF26a69a), fontSize: 22, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                            Column(
+                              children: [
+                                const Text('总计', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                                const SizedBox(height: 2),
+                                Text('$total', style: const TextStyle(color: Colors.white70, fontSize: 22, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  // 第二行：导出 + 删除按钮（各占一半宽度）
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: _exportToCsv,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF58A6FF).withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0xFF58A6FF).withOpacity(0.5)),
+                            ),
+                            child: const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.ios_share, color: Color(0xFF58A6FF), size: 15),
+                                SizedBox(width: 4),
+                                Text('导出CSV', style: TextStyle(color: Color(0xFF58A6FF), fontSize: 12, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: _deleteAll,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.red.withOpacity(0.5)),
+                            ),
+                            child: const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.delete_sweep, color: Colors.red, size: 15),
+                                SizedBox(width: 4),
+                                Text('一键删除', style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -742,6 +902,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _apiClient.dispose();
     super.dispose();
   }
 }

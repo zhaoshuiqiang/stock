@@ -4,7 +4,7 @@ import '../models/stock_models.dart';
 class ConfluenceResult {
   /// 共振评分 (0-10)
   /// 5.0 为中性，多头指标加权加分（上限+5），空头指标加权减分（下限-5）
-  /// 各指标权重不同：MA/MACD=1.5, VOL=1.2, BOLL=1.0, KDJ/RSI=0.8, WR/CCI=0.6, GAP=0.4, DIVER=0.5
+  /// 各指标权重不同：MA/MACD=1.5, VOL=1.2, BOLL=1.0, KDJ/RSI=0.8, WR/CCI=0.6, GAP=0.4, DIVER=1.0
   final double score;
 
   /// 多头指标数量
@@ -135,7 +135,7 @@ class ConfluenceScorer {
       case 'WR': return 0.6;     // 辅助指标，波动较大
       case 'CCI': return 0.6;    // 辅助指标，使用频率较低
       case 'GAP': return 0.4;    // 缺口罕见且统计显著性有限
-      case 'DIVER': return 0.5;  // 背离信号极罕见，权重适中
+      case 'DIVER': return 1.0;  // v2.38.0: 背离信号是强反转预警，权重提升至1.0
       default: return 0.8;
     }
   }

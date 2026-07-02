@@ -388,14 +388,15 @@ void main() {
       }
 
       // adjustedScore → totalScore → recommendation 映射验证
-      // 注: 无 quote 时权重 tech 0.45 + real 0.35 + conf 0.20 = 1.0, rawScore = s
-      expect(_scored(8.5).recommendation, equals('强烈买入'), reason: 's=8.5 → 8.5*0.95=8.075 → round=8');
-      expect(_scored(6.9).recommendation, equals('买入'), reason: 's=6.9 → 6.9*0.95=6.555 → round=7');
+      // 注: 无 quote 时权重 (v2.37 branch 1) tech 0.50 + real 0.25 + conf 0.18 + struct 0.07 = 1.0, rawScore = s
+      // v2.37: 移除 0.95 系数，totalScore = round(adjustedScore).clamp(1,10)
+      expect(_scored(8.5).recommendation, equals('强烈买入'), reason: 's=8.5 → round=9');
+      expect(_scored(6.9).recommendation, equals('买入'), reason: 's=6.9 → round=7');
 
       // Use boundary values verified in group 10
       expect(_scored(5.79).recommendation, equals('谨慎买入'));
       expect(_scored(4.74).recommendation, equals('偏多观望'));
-      expect(_scored(4.73).recommendation, equals('偏空观望'));
+      expect(_scored(4.73).recommendation, equals('偏多观望'));
       expect(_scored(3.0).recommendation, equals('谨慎卖出'));
       expect(_scored(2.0).recommendation, equals('卖出'));
       expect(_scored(1.0).recommendation, equals('强烈卖出'));
@@ -471,12 +472,12 @@ void main() {
   });
 
   // ─── 10. ComprehensiveScorer Formula Tests ───
-  // 验证 (adjustedScore * 0.95).round().clamp(1, 10) 的边界映射
-  group('ComprehensiveScorer Formula (0.95× round)', () {
+  // v2.37: 验证 (adjustedScore).round().clamp(1, 10) 的边界映射（已移除 0.95 系数）
+  group('ComprehensiveScorer Formula (round only, no 0.95×)', () {
     /// 辅助：设置 tech/realtime/confluence 等值，无 quote/news/capital
-    /// 权重: tech 0.45, realtime 0.35, confluence 0.20
+    /// v2.37 branch 1 权重: tech 0.50 + real 0.25 + conf 0.18 + struct 0.07 = 1.0
+    /// 传入与score一致的structureScore使rawScore=score
     ComprehensiveScoreResult _scoreAll(double score) {
-      // P0-5修复后7维权重，传入与score一致的structureScore使rawScore=score
       final ms = MarketStructureResult(
         structure: MarketStructure.consolidation,
         confidence: 0.5, adxValue: 0, maAlignment: '混合',
@@ -497,56 +498,58 @@ void main() {
     }
 
     test('adjustedScore=5.0 maps to totalScore=5 (偏多观望)', () {
-      final r = _scoreAll(5.0); // 5.0*0.95=4.75 → round=5
+      final r = _scoreAll(5.0); // round=5
       expect(r.totalScore, equals(5));
       expect(r.recommendation, equals('偏多观望'));
     });
 
     test('adjustedScore=4.74 maps to totalScore=5 (偏多观望)', () {
-      final r = _scoreAll(4.74); // 4.74*0.95=4.503 → round=5
+      final r = _scoreAll(4.74); // round=5
       expect(r.totalScore, equals(5));
       expect(r.recommendation, equals('偏多观望'));
     });
 
-    test('adjustedScore=4.73 maps to totalScore=4 (偏空观望)', () {
-      final r = _scoreAll(4.73); // 4.73*0.95=4.4935 → round=4
-      expect(r.totalScore, equals(4));
-      expect(r.recommendation, equals('偏空观望'));
+    test('adjustedScore=4.73 maps to totalScore=5 (偏多观望)', () {
+      // v2.37: 移除 0.95 系数后，4.73 → round=5（此前为 4.49→round=4 偏空观望）
+      final r = _scoreAll(4.73); // round=5
+      expect(r.totalScore, equals(5));
+      expect(r.recommendation, equals('偏多观望'));
     });
 
     test('adjustedScore=5.79 maps to totalScore=6 (谨慎买入)', () {
-      final r = _scoreAll(5.79); // 5.79*0.95=5.5005 → round=6
+      final r = _scoreAll(5.79); // round=6
       expect(r.totalScore, equals(6));
       expect(r.recommendation, equals('谨慎买入'));
     });
 
-    test('adjustedScore=5.78 maps to totalScore=5 (偏多观望)', () {
-      final r = _scoreAll(5.78); // 5.78*0.95=5.491 → round=5
-      expect(r.totalScore, equals(5));
-      expect(r.recommendation, equals('偏多观望'));
+    test('adjustedScore=5.78 maps to totalScore=6 (谨慎买入)', () {
+      // v2.37: 移除 0.95 系数后，5.78 → round=6（此前为 5.49→round=5 偏多观望）
+      final r = _scoreAll(5.78); // round=6
+      expect(r.totalScore, equals(6));
+      expect(r.recommendation, equals('谨慎买入'));
     });
 
     test('adjustedScore=7.89 maps to totalScore=8 (强烈买入)', () {
-      final r = _scoreAll(7.9); // 7.9*0.95=7.505 → round=8
-      // 用 7.9 避免 7.89*0.95=7.4955 的浮点歧义
+      final r = _scoreAll(7.9); // round=8
       expect(r.totalScore, equals(8));
       expect(r.recommendation, equals('强烈买入'));
     });
 
     test('adjustedScore=10.0 maps to totalScore=10 (强烈买入)', () {
-      final r = _scoreAll(10.0); // 10*0.95=9.5 → round=10
+      final r = _scoreAll(10.0); // round=10
       expect(r.totalScore, equals(10));
       expect(r.recommendation, equals('强烈买入'));
     });
 
     test('adjustedScore=0 maps to totalScore=1 (clamp下限)', () {
-      final r = _scoreAll(0.0); // 0*0.95=0 → round=0 → clamp=1
+      final r = _scoreAll(0.0); // round=0 → clamp=1
       expect(r.totalScore, equals(1));
       expect(r.recommendation, equals('强烈卖出'));
     });
 
     test('adjustedScore=2.5 maps to totalScore=2 (卖出)', () {
-      final r = _scoreAll(2.5); // 2.5*0.95=2.375 → round=2
+      // v2.38: 加回 0.97 系数后，2.5×0.97=2.425→round=2（卖出）
+      final r = _scoreAll(2.5); // round=2
       expect(r.totalScore, equals(2));
       expect(r.recommendation, equals('卖出'));
     });
@@ -569,7 +572,7 @@ void main() {
         marketStructure: ms,
       );
       expect(r.totalScore, lessThanOrEqualTo(5));
-      // ST totalScore=4.73*0.95≈4.49→round=4 → 谨慎卖出
+      // v2.37 ST totalScore=4.73→round=5 → 偏多观望（封顶5）
       expect(r.recommendation, anyOf(equals('谨慎卖出'), equals('偏多观望')));
     });
 

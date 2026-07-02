@@ -2,6 +2,8 @@ import '../models/stock_models.dart';
 import 'fundamental_analyzer.dart';
 import 'news_sentiment_analyzer.dart';
 import 'market_structure_analyzer.dart';
+import 'sector_heat_detector.dart';
+import 'sector_rotation.dart';
 
 class ComprehensiveScoreResult {
   final int totalScore;
@@ -19,8 +21,9 @@ class ComprehensiveScorer {
   /// 精确ST检测（避免EAST/WEST等误判）
   static bool isSTStock(String name) => name.startsWith('ST') || name.startsWith('*ST');
 
-  /// 7维度加权：技术22%+资金13%+实时12%+共振12%+情绪8%+基本面23%+结构10%
+  /// 7维度加权（v2.37 评审微调）：技术33%+资金18%+实时16%+共振12%+情绪10%+基本面7%+结构4%
   /// v2.30: 新增 data/industryRSScore/adxValue/isBullAlign 参数用于动量保护和行业RS
+  /// v2.38.0: 新增 sectorName/sectorAnalysis 参数用于板块情绪过热检测
   static ComprehensiveScoreResult combine({
     required double technicalScore, required double realtimeScore, required double confluenceScore,
     double? capitalFlowScore, double? marketPositionFactor,
@@ -32,6 +35,8 @@ class ComprehensiveScorer {
     double? industryRSScore,
     double? adxValue,
     bool? isBullAlign,
+    String? sectorName,
+    List<SectorAnalysis>? sectorAnalysis,
   }) {
     FundamentalScore? fundamentalScore;
     double fundamentalScoreValue = 5.0;
@@ -51,14 +56,17 @@ class ComprehensiveScorer {
     final structureScoreValue = marketStructure?.structureScore ?? 5.0;
 
     // 7维权重: Tech/Cap/Real/Conf/Sent/Fund/Struct
-    // 结构分析始终可用(基于K线)，不需要自适应回退
-    double techW=0.22, capW=0.13, realW=0.12, confW=0.12, sentW=0.08, fundW=0.23, structW=0.10;
+    // v2.35: 调整为短线导向权重 — 基本面是慢变量，对短线(1-3日)预测贡献低，
+    //        降低基本面/结构权重，提升技术/资金/实时/情绪权重，使评分与留档胜率评估周期匹配
+    // v2.37: 评分评审后微调 — 结构2%→4%(ADX/MA布局对短线择时影响显著)，
+    //        基本面5%→7%(避免极端高估低估个股被短线信号掩盖)，技术35%→33%、实时18%→16%(等比例让出)
+    double techW=0.33, capW=0.18, realW=0.16, confW=0.12, sentW=0.10, fundW=0.07, structW=0.04;
     final hasFund = fundamentalScore != null, hasSent = newsSentiment != null, hasCapital = capitalFlowScore != null;
-    if (!hasFund && !hasSent && !hasCapital) { techW=0.39; realW=0.21; confW=0.22; structW=0.18; capW=sentW=fundW=0; }
-    else if (!hasFund && !hasSent) { techW=0.32; capW=0.19; realW=0.17; confW=0.17; structW=0.15; sentW=fundW=0; }
-    else if (!hasFund) { techW=0.29; capW=0.17; realW=0.16; confW=0.15; sentW=0.10; structW=0.13; fundW=0; }
-    else if (!hasSent) { techW=0.24; capW=0.14; realW=0.13; confW=0.13; fundW=0.25; structW=0.11; sentW=0; }
-    else if (!hasCapital) { techW=0.25; realW=0.14; confW=0.14; sentW=0.09; fundW=0.27; structW=0.11; capW=0; }
+    if (!hasFund && !hasSent && !hasCapital) { techW=0.50; realW=0.25; confW=0.18; structW=0.07; capW=sentW=fundW=0; }
+    else if (!hasFund && !hasSent) { techW=0.40; capW=0.22; realW=0.19; confW=0.14; structW=0.05; sentW=fundW=0; }
+    else if (!hasFund) { techW=0.35; capW=0.20; realW=0.17; confW=0.13; sentW=0.11; structW=0.04; fundW=0; }
+    else if (!hasSent) { techW=0.37; capW=0.20; realW=0.18; confW=0.13; fundW=0.08; structW=0.04; sentW=0; }
+    else if (!hasCapital) { techW=0.40; realW=0.20; confW=0.15; sentW=0.12; fundW=0.09; structW=0.04; capW=0; }
 
     // v2.30: 熊市基本面权重提升 — 下跌市中低估值防守价值更大
     if (marketContext != null && marketContext.avgChangePct < -0.5 && fundW > 0) {
@@ -89,16 +97,19 @@ class ComprehensiveScorer {
 
     // 追高惩罚：当日涨幅越高，后续回撤风险越大
     // v2.30: 动量保护 + 连涨天数判断（突破首日减轻惩罚）
+    // v2.38.0: 涨停股(cp>9.5%)不被动量保护削弱，避免追高风险被掩盖
     double chasePenalty = 1.0;
     final cp = currentChangePct ?? quote?.changePct;
     if (cp != null && quote != null && quote.price > 0) {
       final consecutiveRise = _consecutiveRiseDays(data);
-      if (cp > 8) chasePenalty = consecutiveRise >= 3 ? 0.82 : 0.90;
+      if (cp > 9.5) chasePenalty = 0.80;
+      else if (cp > 8) chasePenalty = consecutiveRise >= 3 ? 0.82 : 0.90;
       else if (cp > 5) chasePenalty = consecutiveRise >= 3 ? 0.88 : 0.94;
       else if (cp > 3) chasePenalty = consecutiveRise >= 2 ? 0.94 : 0.97;
       else if (cp > 1.5) chasePenalty = 0.97;
-      // v2.30: 动量保护 — 强势趋势中惩罚减半
-      chasePenalty = 1.0 - (1.0 - chasePenalty) * momentumFactor;
+      if (cp <= 9.5) {
+        chasePenalty = 1.0 - (1.0 - chasePenalty) * momentumFactor;
+      }
     }
 
     // 乖离率惩罚：价格偏离均线越远，均值回归风险越大
@@ -116,13 +127,26 @@ class ComprehensiveScorer {
 
     final adjustedScore = (rawScore * combinedAdjustment * chasePenalty * biasPenalty).clamp(0.0, 10.0);
 
+    // v2.38.0: 加回温和系数0.97，减少borderline评分过度集中在6分（谨慎买入）
+    //          之前移除0.95后，5.5→6、6.5→7，导致6分股票过多（89只/204只）
+    //          使用0.97而非0.95，平衡评分分布和真实度：5.5→5.335→5，6.5→6.305→6
+    var temperedScore = adjustedScore * 0.97;
+
+    // v2.38.0: 板块情绪过热检测 — 过热板块个股评分乘以0.85折扣
+    if (sectorName != null && sectorAnalysis != null && sectorAnalysis.isNotEmpty) {
+      final heatDiscount = SectorHeatDetector.getHeatDiscount(sectorName, sectorAnalysis);
+      if (heatDiscount < 1.0) {
+        temperedScore *= heatDiscount;
+      }
+    }
+
     // ST股票封顶：最高"偏多观望"，防止推荐高风险标的
     final isST = quote != null && isSTStock(quote.name);
     final int totalScore;
     if (isST) {
-      totalScore = (adjustedScore * 0.95).round().clamp(1, 5);
+      totalScore = temperedScore.round().clamp(1, 5);
     } else {
-      totalScore = (adjustedScore * 0.95).round().clamp(1, 10);
+      totalScore = temperedScore.round().clamp(1, 10);
     }
 
     String recommendation;

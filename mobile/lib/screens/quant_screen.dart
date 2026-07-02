@@ -1465,10 +1465,14 @@ class _QuantScreenState extends State<QuantScreen> {
   // ─── 辅助方法 ──────────────────────────────────────────────────
 
   Color _getScoreColor(int score) {
-    if (score >= 8) return _kUp;
-    if (score >= 6) return _kOrange;
-    if (score >= 4) return _kTextSecondary;
-    return _kDown;
+    if (score >= 8) return const Color(0xFF26a69a);
+    if (score >= 7) return const Color(0xFF4caf50);
+    if (score >= 6) return const Color(0xFF8bc34a);
+    if (score >= 5) return const Color(0xFFffb74d);
+    if (score >= 4) return const Color(0xFFff9800);
+    if (score >= 3) return const Color(0xFFF44336);
+    if (score >= 2) return const Color(0xFFe57373);
+    return const Color(0xFFc62828);
   }
 
   Color _getRecommendationColor(String rec) {

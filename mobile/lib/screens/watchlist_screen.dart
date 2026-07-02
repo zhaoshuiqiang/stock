@@ -87,6 +87,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     _searchController.dispose();
     _oppSub?.cancel();
     _sectorSub?.cancel();
+    _apiClient.dispose();
     super.dispose();
   }
 
@@ -217,6 +218,14 @@ class WatchlistScreenState extends State<WatchlistScreen>
         return _sortAscending
             ? scoreA.compareTo(scoreB)
             : scoreB.compareTo(scoreA);
+      });
+    } else if (_sortBy == 'volume_ratio') {
+      items.sort((a, b) {
+        final vrA = (a['quote'] as QuoteData).volumeRatio;
+        final vrB = (b['quote'] as QuoteData).volumeRatio;
+        return _sortAscending
+            ? vrA.compareTo(vrB)
+            : vrB.compareTo(vrA);
       });
     }
 
@@ -535,6 +544,60 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 },
               ),
             ),
+            // 底部一键加自选
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 42,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('一键加自选', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _accentColor,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: () async {
+                      final items = picks.map((p) => Map<String, dynamic>.from(p)).toList();
+                      final existing = await _dbService.getWatchlist();
+                      final existingCodes = existing.map((e) => e.code).toSet();
+                      final newItems = items
+                          .where((p) => !existingCodes.contains(p['code']))
+                          .map((p) => Map<String, dynamic>.from(p))
+                          .toList();
+                      if (newItems.isEmpty) {
+                        if (ctx.mounted) {
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('所有精选标的已在自选中'), duration: Duration(seconds: 1)),
+                          );
+                        }
+                        return;
+                      }
+                      final watchlistItems = newItems.map((p) => WatchlistItem(
+                        code: p['code'] as String,
+                        name: p['name'] as String,
+                      )).toList();
+                      await _dbService.batchAddToWatchlist(watchlistItems);
+                      await _loadWatchlist();
+                      if (ctx.mounted) {
+                        Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('已添加${newItems.length}只到自选'
+                                '${items.length - newItems.length > 0 ? "，${items.length - newItems.length}只已在自选中" : ""}'),
+                            backgroundColor: _accentColor,
+                            duration: const Duration(seconds: 1),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -569,7 +632,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('1-10分 6维加权 大盘择时调整',
+            Text('1-10分 7维加权 大盘择时调整',
                 style: TextStyle(color: _textSecondary, fontSize: 12)),
             SizedBox(height: 10),
             _ScoringRow(label: '8-10', desc: '强烈买入，多指标共振+资金流入'),
@@ -588,7 +651,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
             SizedBox(height: 6),
             _ScoringRow(label: '1', desc: '强烈卖出，多指标共振偏空'),
             SizedBox(height: 12),
-            Text('技术28% 资金17% 实时22% 共振15% 情绪10% 基本面8%',
+            Text('技术22% 资金13% 实时12% 共振12% 情绪8% 基本面23% 结构10%',
                 style: TextStyle(color: _textSecondary, fontSize: 11)),
             Text('ST股票评分封顶5分，仅显示偏多观望',
                 style: TextStyle(color: _textSecondary, fontSize: 11)),
@@ -741,7 +804,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: _sortBy == 'change_pct' ? (_sortAscending ? '涨幅↑' : '涨幅↓')
-              : _sortBy == 'score' ? (_sortAscending ? '评分↑' : '评分↓') : '默认',
+              : _sortBy == 'score' ? (_sortAscending ? '评分↑' : '评分↓')
+              : _sortBy == 'volume_ratio' ? (_sortAscending ? '量比↑' : '量比↓') : '默认',
           isDense: true,
           dropdownColor: _darkSurface,
           style: TextStyle(color: _sortBy != 'default' ? _accentColor : _textPrimary, fontSize: 13),
@@ -751,6 +815,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
             DropdownMenuItem(value: '涨幅↑', child: Text('涨幅升序')),
             DropdownMenuItem(value: '评分↓', child: Text('评分降序')),
             DropdownMenuItem(value: '评分↑', child: Text('评分升序')),
+            DropdownMenuItem(value: '量比↓', child: Text('量比降序')),
+            DropdownMenuItem(value: '量比↑', child: Text('量比升序')),
           ],
           onChanged: (v) {
             if (v == null) return;
@@ -759,7 +825,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
               else if (v == '涨幅↓') { _sortBy = 'change_pct'; _sortAscending = false; }
               else if (v == '涨幅↑') { _sortBy = 'change_pct'; _sortAscending = true; }
               else if (v == '评分↓') { _sortBy = 'score'; _sortAscending = false; }
-              else { _sortBy = 'score'; _sortAscending = true; }
+              else if (v == '评分↑') { _sortBy = 'score'; _sortAscending = true; }
+              else if (v == '量比↓') { _sortBy = 'volume_ratio'; _sortAscending = false; }
+              else { _sortBy = 'volume_ratio'; _sortAscending = true; }
             });
           },
         ),
@@ -1002,6 +1070,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
           changePct: quote.changePct,
           pe: quote.pe > 0 ? quote.pe : null,
           pb: quote.pb > 0 ? quote.pb : null,
+          volumeRatio: quote.volumeRatio > 0 ? quote.volumeRatio : null,
           score: opp?.score,
           recommendation: opp?.recommendation,
           riskLevel: opp?.riskLevel,
@@ -1139,7 +1208,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
   void _showPositionDialog(WatchlistItem item) {
     final existing = _positionMap[item.code];
     final qtyCtrl = TextEditingController(text: existing?.quantity.toString() ?? '');
-    final priceCtrl = TextEditingController(text: existing?.avgPrice.toStringAsFixed(2) ?? '');
+    final priceCtrl = TextEditingController(text: existing?.avgPrice.toStringAsFixed(3) ?? '');
     final notesCtrl = TextEditingController(text: existing?.notes ?? '');
 
     showDialog(

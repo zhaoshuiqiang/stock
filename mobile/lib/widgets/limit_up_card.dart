@@ -39,7 +39,7 @@ class LimitUpCard extends StatelessWidget {
                   const SizedBox(width: 4),
                   _buildTypeBadge(a.boardType, _boardTypeColor(a.boardType)),
                 ],
-                if (a.timeGrade.isNotEmpty) ...[
+                if (a.timeGrade.isNotEmpty && a.timeGrade != '未知') ...[
                   const SizedBox(width: 4),
                   _buildTypeBadge(a.timeGrade, _timeGradeColor(a.timeGrade)),
                 ],

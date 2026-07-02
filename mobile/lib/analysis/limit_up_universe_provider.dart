@@ -32,7 +32,7 @@ class LimitUpUniverseProvider {
     final quoteMap = <String, QuoteData>{};
     for (final q in quotes) {
       // 剥离 sh./sz./bj. 前缀（带点）或 sh/sz/bj 前缀（无点）
-      final bareCode = q.code.replaceAll(RegExp(r'^(sh|sz|bj)\.?'), '');
+      final bareCode = q.code.replaceAll(RegExp(r'^(sh|sz|bj)\.?', caseSensitive: false), '');
       quoteMap[bareCode] = q;
     }
     return stocks.map((s) {

@@ -20,6 +20,7 @@ import 'market_structure_analyzer.dart';
 import 'percentile_analyzer.dart';
 import 'recommendation_tracker.dart';
 import 'pattern_recognizer.dart';
+import 'sector_rotation.dart';
 
 /// 向后兼容：检测特有信号（量价背离、布林收口）
 List<SignalItem> detectSignals(List<HistoryKline> data) {
@@ -235,6 +236,8 @@ AnalysisResult generateAnalysis(
   QuoteData? quote, {
   MarketContext? marketContext,
   List<dynamic>? newsList,
+  String? sectorName,
+  List<SectorAnalysis>? sectorAnalysis,
 }) {
   if (data.isEmpty) {
     return AnalysisResult(
@@ -272,7 +275,7 @@ AnalysisResult generateAnalysis(
           confidence: p.confidence,
         ));
       }
-    } catch (_) {}
+    } catch (e) { debugPrint('[信号引擎] PatternRecognizer 失败: $e'); }
   }
 
   // 1a. 市场结构分析 (Phase 1)
@@ -309,9 +312,9 @@ AnalysisResult generateAnalysis(
   try {
     final flowResult = CapitalFlowAnalyzer.analyze(klineData: data, quote: quote);
     capitalFlowScore = flowResult.score;
-  } catch (_) {}
+  } catch (e) { debugPrint('[信号引擎] CapitalFlowAnalyzer 失败: $e'); }
 
-  // 5. 综合评分 (v2.30: 传递 data/adx/isBullAlign 用于动量保护和行业RS)
+  // 5. 综合评分 (v2.38: 传递 sectorName/sectorAnalysis 用于板块情绪过热检测)
   final compResult = ComprehensiveScorer.combine(
     technicalScore: techResult.totalScore,
     realtimeScore: realtimeScore,
@@ -327,6 +330,8 @@ AnalysisResult generateAnalysis(
     adxValue: marketStructure.adxValue,
     isBullAlign: marketStructure.maAlignment == '多头',
     industryRSScore: percentile.industryRSScore,
+    sectorName: sectorName ?? quote?.sectorName,
+    sectorAnalysis: sectorAnalysis,
   );
 
   final totalScore = compResult.totalScore;
@@ -349,7 +354,7 @@ AnalysisResult generateAnalysis(
     try {
       backtestResults = BacktestEngine.megaBacktest(data);
       backtestSummary = BacktestEngine.getBacktestSummary(backtestResults);
-    } catch (_) {}
+    } catch (e) { debugPrint('[信号引擎] BacktestEngine 失败: $e'); }
   }
 
   // 11. 分层策略
@@ -500,7 +505,7 @@ AnalysisResult generateAnalysis(
       marketStructure: marketStructure,
     );
     // 异步fire-and-forget，不阻塞主分析流程
-    RecommendationTracker().track(trackResult).catchError((_) => null);
+    RecommendationTracker().track(trackResult).catchError((e) { debugPrint('[信号引擎] 推荐跟踪失败: $e'); return null; });
   }
 
   return AnalysisResult(

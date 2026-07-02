@@ -32,6 +32,15 @@ class SRQualityEvaluator {
     double level, {
     double tolerance = 0.01,
   }) {
+    if (level == 0) return SRQualityResult(
+      level: level,
+      type: 'support',
+      quality: '未验证',
+      testCount: 0,
+      avgVolumeAtLevel: 0,
+      daysSinceLastTest: 60,
+      reliability: 0.0,
+    );
     int testCount = 0;
     double totalVolume = 0;
     int lastTestIdx = -1;
@@ -106,6 +115,15 @@ class SRQualityEvaluator {
     double level, {
     double tolerance = 0.01,
   }) {
+    if (level == 0) return SRQualityResult(
+      level: level,
+      type: 'resistance',
+      quality: '未验证',
+      testCount: 0,
+      avgVolumeAtLevel: 0,
+      daysSinceLastTest: 60,
+      reliability: 0.0,
+    );
     int testCount = 0;
     double totalVolume = 0;
     int lastTestIdx = -1;

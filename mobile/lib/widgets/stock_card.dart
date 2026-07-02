@@ -8,6 +8,7 @@ class StockCard extends StatelessWidget {
   final double changePct;
   final double? pe;
   final double? pb;
+  final double? volumeRatio;
   final int? score;
   final String? recommendation;
   final String? riskLevel;
@@ -28,6 +29,7 @@ class StockCard extends StatelessWidget {
     required this.changePct,
     this.pe,
     this.pb,
+    this.volumeRatio,
     this.score,
     this.recommendation,
     this.riskLevel,
@@ -180,6 +182,20 @@ class StockCard extends StatelessWidget {
                     'PB:${pb!.toStringAsFixed(1)}',
                     style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
                   ),
+                if (volumeRatio != null && volumeRatio! > 0) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '量比:${volumeRatio!.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      color: volumeRatio! >= 2
+                          ? const Color(0xFFE74C3C)
+                          : volumeRatio! >= 1
+                              ? const Color(0xFFFFB000)
+                              : const Color(0xFF8B949E),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
                 if (score != null) ...[
                   const SizedBox(width: 10),
                   Container(
@@ -288,7 +304,7 @@ class _PositionRow extends StatelessWidget {
           Text('持仓 ${info.quantity}股',
               style: const TextStyle(color: Color(0xFFF0F6FC), fontSize: 12, fontWeight: FontWeight.w600)),
           const SizedBox(width: 10),
-          Text('成本¥${info.avgPrice.toStringAsFixed(2)}',
+          Text('成本¥${info.avgPrice.toStringAsFixed(3)}',
               style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11)),
           const Spacer(),
           Text('$pnlSign${info.pnl.toStringAsFixed(0)}',

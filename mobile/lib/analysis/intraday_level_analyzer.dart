@@ -99,6 +99,27 @@ class IntradayLevelAnalyzer {
   /// 开盘区间计算分钟数
   static const int _openingRangeMinutes = 30;
 
+  /// 将 [time] 映射到交易时段分钟偏移量（0~239）
+  ///
+  /// 上午盘 9:30~11:30 → 0~120，午休 → 120，下午盘 13:00~15:00 → 120~240。
+  /// 非交易时间返回 null。
+  static int? timeToMinuteOffset(DateTime time) {
+    final totalMinutes = time.hour * 60 + time.minute;
+    const morningStart = 9 * 60 + 30; // 570
+    const morningEnd = 11 * 60 + 30; // 690
+    const afternoonStart = 13 * 60; // 780
+    const afternoonEnd = 15 * 60; // 900
+
+    if (totalMinutes >= morningStart && totalMinutes <= morningEnd) {
+      return totalMinutes - morningStart;
+    } else if (totalMinutes > morningEnd && totalMinutes < afternoonStart) {
+      return 120;
+    } else if (totalMinutes >= afternoonStart && totalMinutes <= afternoonEnd) {
+      return 120 + (totalMinutes - afternoonStart);
+    }
+    return null;
+  }
+
   /// 分析分时图，返回所有信号
   ///
   /// [prices]: 分钟偏移量 → 价格
@@ -1000,10 +1021,14 @@ class IntradayLevelAnalyzer {
     final sorted = [...signals]..sort((a, b) => a.minuteOffset.compareTo(b.minuteOffset));
 
     // 同类型信号10分钟窗口去重（保留置信度最高的）
+    // 时间驱动回溯：从末尾向前扫描直到时间差 >= 10 分钟，
+    // 避免不同类型信号交替时同类型信号被挤出固定窗口导致漏报
     final deduplicated = <IntradayLevelPoint>[];
     for (int i = 0; i < sorted.length; i++) {
       bool isDuplicate = false;
-      for (int j = max(0, deduplicated.length - 5); j < deduplicated.length; j++) {
+      for (int j = deduplicated.length - 1;
+          j >= 0 && sorted[i].minuteOffset - deduplicated[j].minuteOffset < 10;
+          j--) {
         if (sorted[i].signalType == deduplicated[j].signalType &&
             (sorted[i].minuteOffset - deduplicated[j].minuteOffset).abs() < 10) {
           // 保留置信度更高的

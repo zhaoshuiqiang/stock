@@ -16,6 +16,12 @@ class MarketContextProvider {
     return _httpClient!;
   }
 
+  /// 关闭并释放 HTTP 客户端
+  static void dispose() {
+    _httpClient?.close();
+    _httpClient = null;
+  }
+
   /// 获取市场环境（优先使用新浪，备用东方财富）
   static Future<MarketContext> getMarketContext() async {
     // 先尝试新浪完整行情API
@@ -156,8 +162,8 @@ class MarketContextProvider {
           for (final item in diff) {
             final m = item as Map<String, dynamic>;
             final changePct = QuoteData.parseDouble(m['f3']);
-            final riseCount = m['f104'] as int? ?? 0;
-            final fallCount = m['f105'] as int? ?? 0;
+            final riseCount = (m['f104'] as num?)?.toInt() ?? 0;
+            final fallCount = (m['f105'] as num?)?.toInt() ?? 0;
 
             final code = m['f12']?.toString() ?? '';
             if (code.startsWith('1.')) {

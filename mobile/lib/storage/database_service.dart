@@ -11,24 +11,24 @@ class DatabaseService {
   factory DatabaseService() => _instance;
   DatabaseService._internal();
 
-  Database? _database;
+  Future<Database>? _dbFuture;
 
   Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDatabase();
-    return _database!;
+    if (_dbFuture != null) return _dbFuture!;
+    _dbFuture = _initDatabase();
+    return _dbFuture!;
   }
 
   /// 用于测试：注入 in-memory DB，绕过 path_provider
   @visibleForTesting
   Future<void> setDatabaseForTesting(Database db) async {
-    _database = db;
+    _dbFuture = Future.value(db);
   }
 
   /// 用于测试：重置 singleton 状态
   @visibleForTesting
   void resetForTesting() {
-    _database = null;
+    _dbFuture = null;
   }
 
   Future<Database> _initDatabase() async {
@@ -37,202 +37,245 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 11,
+      version: 13,
       onCreate: (db, version) async {
         await _createTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 2) {
-          await db.execute('''
-            ALTER TABLE alerts ADD COLUMN alert_type TEXT DEFAULT '';
-          ''');
-          await db.execute('''
-            ALTER TABLE alerts ADD COLUMN indicator_type TEXT DEFAULT '';
-          ''');
-        }
-        if (oldVersion < 3) {
-          await db.execute('''
-            CREATE TABLE archive_records (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              code TEXT NOT NULL,
-              name TEXT NOT NULL,
-              price REAL NOT NULL,
-              change_pct REAL NOT NULL,
-              score INTEGER NOT NULL,
-              recommendation TEXT NOT NULL,
-              risk_level TEXT NOT NULL,
-              buy_signal_count INTEGER NOT NULL DEFAULT 0,
-              sell_signal_count INTEGER NOT NULL DEFAULT 0,
-              active_strategy_count INTEGER NOT NULL DEFAULT 0,
-              confluence_score INTEGER NOT NULL DEFAULT 0,
-              trade_levels_json TEXT,
-              top_signals TEXT DEFAULT '',
-              archived_at INTEGER NOT NULL
-            )
-          ''');
-        }
-        if (oldVersion < 4) {
-          await db.execute('''
-            CREATE TABLE explore_results (
-              code TEXT PRIMARY KEY,
-              name TEXT NOT NULL,
-              price REAL NOT NULL,
-              change_pct REAL NOT NULL,
-              pe REAL DEFAULT 0,
-              pb REAL DEFAULT 0,
-              score INTEGER NOT NULL,
-              recommendation TEXT NOT NULL,
-              sector TEXT DEFAULT '',
-              confluence_score INTEGER DEFAULT 0,
-              analyzed_at INTEGER NOT NULL
-            )
-          ''');
-        }
-        if (oldVersion < 5) {
-          await db.execute('''
-            CREATE TABLE opportunity_results (
-              code TEXT PRIMARY KEY,
-              name TEXT NOT NULL,
-              price REAL NOT NULL,
-              change_pct REAL NOT NULL,
-              score INTEGER NOT NULL,
-              recommendation TEXT NOT NULL,
-              risk_level TEXT NOT NULL,
-              buy_signal_count INTEGER NOT NULL DEFAULT 0,
-              sell_signal_count INTEGER NOT NULL DEFAULT 0,
-              active_strategy_count INTEGER NOT NULL DEFAULT 0,
-              confluence_score INTEGER NOT NULL DEFAULT 0,
-              trade_levels_json TEXT,
-              top_signals TEXT DEFAULT '',
-              analyzed_at INTEGER NOT NULL
-            )
-          ''');
-          await db.execute('''
-            CREATE TABLE sector_pick_results (
-              code TEXT PRIMARY KEY,
-              name TEXT NOT NULL,
-              recommendation TEXT NOT NULL,
-              score INTEGER NOT NULL,
-              sector TEXT NOT NULL,
-              analyzed_at INTEGER NOT NULL
-            )
-          ''');
-        }
-        if (oldVersion < 6) {
-          await db.execute('''
-            CREATE TABLE home_cache (
-              key TEXT PRIMARY KEY,
-              value TEXT NOT NULL,
-              updated_at INTEGER NOT NULL
-            )
-          ''');
-        }
-        if (oldVersion < 7) {
-          await db.execute('''
-            ALTER TABLE watchlist ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0
-          ''');
-        }
-        if (oldVersion < 8) {
-          // Phase 2: 概念标签
-          await db.execute('''
-            ALTER TABLE explore_results ADD COLUMN concept_summary TEXT DEFAULT ''
-          ''');
-          await db.execute('''
-            ALTER TABLE explore_results ADD COLUMN day5_return REAL
-          ''');
-          await db.execute('''
-            ALTER TABLE explore_results ADD COLUMN day10_return REAL
-          ''');
-          await db.execute('''
-            ALTER TABLE explore_results ADD COLUMN day20_return REAL
-          ''');
-          await db.execute('''
-            ALTER TABLE explore_results ADD COLUMN market_structure TEXT DEFAULT ''
-          ''');
-          // Phase 3: 推荐收益追踪
-          await db.execute('''
-            CREATE TABLE recommendation_tracking (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              code TEXT NOT NULL,
-              name TEXT NOT NULL,
-              signal_price REAL NOT NULL,
-              signal_date INTEGER NOT NULL,
-              market_structure TEXT DEFAULT '',
-              strategy TEXT DEFAULT '',
-              concept_tags TEXT DEFAULT '',
-              day5_price REAL,
-              day5_return REAL,
-              day10_price REAL,
-              day10_return REAL,
-              day20_price REAL,
-              day20_return REAL,
-              last_checked_date INTEGER,
-              is_closed INTEGER DEFAULT 0
-            )
-          ''');
-        }
-        if (oldVersion < 9) {
-          // v2.33: 持仓管理
-          await db.execute('''
-            CREATE TABLE positions (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              code TEXT NOT NULL,
-              name TEXT NOT NULL,
-              quantity INTEGER NOT NULL DEFAULT 0,
-              avg_price REAL NOT NULL DEFAULT 0,
-              buy_date INTEGER,
-              notes TEXT DEFAULT '',
-              created_at INTEGER NOT NULL
-            )
-          ''');
-          await db.execute('CREATE INDEX idx_positions_code ON positions(code)');
-        }
-        if (oldVersion < 10) {
-          // v2.33: sector_pick_results 增加主线轮动字段
-          await db.execute(
-            'ALTER TABLE sector_pick_results ADD COLUMN mainLine INTEGER NOT NULL DEFAULT 0',
-          );
-          await db.execute(
-            'ALTER TABLE sector_pick_results ADD COLUMN bonus REAL NOT NULL DEFAULT 1.0',
-          );
-          await db.execute(
-            'ALTER TABLE sector_pick_results ADD COLUMN originalScore INTEGER',
-          );
-          await db.execute(
-            'ALTER TABLE sector_pick_results ADD COLUMN sectorCode TEXT NOT NULL DEFAULT \'\'',
-          );
-        }
-        if (oldVersion < 11) {
-          // v2.34: 打板梯队池（情绪温度计 + 连板分组）
-          await db.execute('''
-            CREATE TABLE limit_up_pool (
-              code              TEXT    NOT NULL,
-              name              TEXT    NOT NULL,
-              trade_date        TEXT    NOT NULL,
-              limit_up_price    REAL    NOT NULL DEFAULT 0,
-              first_limit_time  INTEGER,
-              last_limit_time   INTEGER,
-              consecutive_days  INTEGER NOT NULL DEFAULT 1,
-              board_type        TEXT    NOT NULL DEFAULT '',
-              seal_amount       REAL    NOT NULL DEFAULT 0,
-              seal_rate         REAL    NOT NULL DEFAULT 0,
-              volume_ratio      REAL    NOT NULL DEFAULT 0,
-              turnover_rate     REAL    NOT NULL DEFAULT 0,
-              is_zhaban         INTEGER NOT NULL DEFAULT 0,
-              zhaban_count      INTEGER NOT NULL DEFAULT 0,
-              sector            TEXT,
-              quality_score     REAL    NOT NULL DEFAULT 0,
-              premium_prob      REAL    NOT NULL DEFAULT 0,
-              price             REAL    NOT NULL DEFAULT 0,
-              change_pct        REAL    NOT NULL DEFAULT 0,
-              updated_at        INTEGER NOT NULL,
-              PRIMARY KEY (code, trade_date)
-            )
-          ''');
-          await db.execute('CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
-          await db.execute('CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
-          debugPrint('[DB] v10→v11: created limit_up_pool table');
-        }
+        await db.transaction((txn) async {
+          if (oldVersion < 2) {
+            await txn.execute('''
+              ALTER TABLE alerts ADD COLUMN alert_type TEXT DEFAULT '';
+            ''');
+            await txn.execute('''
+              ALTER TABLE alerts ADD COLUMN indicator_type TEXT DEFAULT '';
+            ''');
+          }
+          if (oldVersion < 3) {
+            await txn.execute('''
+              CREATE TABLE archive_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                price REAL NOT NULL,
+                change_pct REAL NOT NULL,
+                score INTEGER NOT NULL,
+                recommendation TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                buy_signal_count INTEGER NOT NULL DEFAULT 0,
+                sell_signal_count INTEGER NOT NULL DEFAULT 0,
+                active_strategy_count INTEGER NOT NULL DEFAULT 0,
+                confluence_score INTEGER NOT NULL DEFAULT 0,
+                trade_levels_json TEXT,
+                top_signals TEXT DEFAULT '',
+                archived_at INTEGER NOT NULL
+              )
+            ''');
+          }
+          if (oldVersion < 4) {
+            await txn.execute('''
+              CREATE TABLE explore_results (
+                code TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                price REAL NOT NULL,
+                change_pct REAL NOT NULL,
+                pe REAL DEFAULT 0,
+                pb REAL DEFAULT 0,
+                score INTEGER NOT NULL,
+                recommendation TEXT NOT NULL,
+                sector TEXT DEFAULT '',
+                confluence_score INTEGER DEFAULT 0,
+                analyzed_at INTEGER NOT NULL
+              )
+            ''');
+          }
+          if (oldVersion < 5) {
+            await txn.execute('''
+              CREATE TABLE opportunity_results (
+                code TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                price REAL NOT NULL,
+                change_pct REAL NOT NULL,
+                score INTEGER NOT NULL,
+                recommendation TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                buy_signal_count INTEGER NOT NULL DEFAULT 0,
+                sell_signal_count INTEGER NOT NULL DEFAULT 0,
+                active_strategy_count INTEGER NOT NULL DEFAULT 0,
+                confluence_score INTEGER NOT NULL DEFAULT 0,
+                trade_levels_json TEXT,
+                top_signals TEXT DEFAULT '',
+                analyzed_at INTEGER NOT NULL
+              )
+            ''');
+            await txn.execute('''
+              CREATE TABLE sector_pick_results (
+                code TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                recommendation TEXT NOT NULL,
+                score INTEGER NOT NULL,
+                sector TEXT NOT NULL,
+                analyzed_at INTEGER NOT NULL
+              )
+            ''');
+          }
+          if (oldVersion < 6) {
+            await txn.execute('''
+              CREATE TABLE home_cache (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+              )
+            ''');
+          }
+          if (oldVersion < 7) {
+            await txn.execute('''
+              ALTER TABLE watchlist ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0
+            ''');
+          }
+          if (oldVersion < 8) {
+            // Phase 2: 概念标签
+            await txn.execute('''
+              ALTER TABLE explore_results ADD COLUMN concept_summary TEXT DEFAULT ''
+            ''');
+            await txn.execute('''
+              ALTER TABLE explore_results ADD COLUMN day5_return REAL
+            ''');
+            await txn.execute('''
+              ALTER TABLE explore_results ADD COLUMN day10_return REAL
+            ''');
+            await txn.execute('''
+              ALTER TABLE explore_results ADD COLUMN day20_return REAL
+            ''');
+            await txn.execute('''
+              ALTER TABLE explore_results ADD COLUMN market_structure TEXT DEFAULT ''
+            ''');
+            // Phase 3: 推荐收益追踪
+            await txn.execute('''
+              CREATE TABLE recommendation_tracking (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                signal_price REAL NOT NULL,
+                signal_date INTEGER NOT NULL,
+                market_structure TEXT DEFAULT '',
+                strategy TEXT DEFAULT '',
+                concept_tags TEXT DEFAULT '',
+                day5_price REAL,
+                day5_return REAL,
+                day10_price REAL,
+                day10_return REAL,
+                day20_price REAL,
+                day20_return REAL,
+                last_checked_date INTEGER,
+                is_closed INTEGER DEFAULT 0
+              )
+            ''');
+          }
+          if (oldVersion < 9) {
+            // v2.33: 持仓管理
+            await txn.execute('''
+              CREATE TABLE positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                quantity INTEGER NOT NULL DEFAULT 0,
+                avg_price REAL NOT NULL DEFAULT 0,
+                buy_date INTEGER,
+                notes TEXT DEFAULT '',
+                created_at INTEGER NOT NULL
+              )
+            ''');
+            await txn.execute('CREATE INDEX idx_positions_code ON positions(code)');
+          }
+          if (oldVersion < 10) {
+            // v2.33: sector_pick_results 增加主线轮动字段
+            await txn.execute(
+              'ALTER TABLE sector_pick_results ADD COLUMN mainLine INTEGER NOT NULL DEFAULT 0',
+            );
+            await txn.execute(
+              'ALTER TABLE sector_pick_results ADD COLUMN bonus REAL NOT NULL DEFAULT 1.0',
+            );
+            await txn.execute(
+              'ALTER TABLE sector_pick_results ADD COLUMN originalScore INTEGER',
+            );
+            await txn.execute(
+              'ALTER TABLE sector_pick_results ADD COLUMN sectorCode TEXT NOT NULL DEFAULT \'\'',
+            );
+          }
+          if (oldVersion < 11) {
+            // v2.34: 打板梯队池（情绪温度计 + 连板分组）
+            // 注：此处建表不含 time_grade/quality/position，由 v13 干净重建统一补齐
+            await txn.execute('''
+              CREATE TABLE limit_up_pool (
+                code              TEXT    NOT NULL,
+                name              TEXT    NOT NULL,
+                trade_date        TEXT    NOT NULL,
+                limit_up_price    REAL    NOT NULL DEFAULT 0,
+                first_limit_time  INTEGER,
+                last_limit_time   INTEGER,
+                consecutive_days  INTEGER NOT NULL DEFAULT 1,
+                board_type        TEXT    NOT NULL DEFAULT '',
+                seal_amount       REAL    NOT NULL DEFAULT 0,
+                seal_rate         REAL    NOT NULL DEFAULT 0,
+                volume_ratio      REAL    NOT NULL DEFAULT 0,
+                turnover_rate     REAL    NOT NULL DEFAULT 0,
+                is_zhaban         INTEGER NOT NULL DEFAULT 0,
+                zhaban_count      INTEGER NOT NULL DEFAULT 0,
+                sector            TEXT,
+                quality_score     REAL    NOT NULL DEFAULT 0,
+                premium_prob      REAL    NOT NULL DEFAULT 0,
+                price             REAL    NOT NULL DEFAULT 0,
+                change_pct        REAL    NOT NULL DEFAULT 0,
+                updated_at        INTEGER NOT NULL,
+                PRIMARY KEY (code, trade_date)
+              )
+            ''');
+            await txn.execute('CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
+            await txn.execute('CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
+            debugPrint('[DB] v10→v11: created limit_up_pool table');
+          }
+          if (oldVersion < 13) {
+            // v2.35: 干净重建 limit_up_pool 表，修复 v12 migration 重复列问题
+            await txn.execute('DROP TABLE IF EXISTS limit_up_pool');
+            await txn.execute('''
+              CREATE TABLE limit_up_pool (
+                code              TEXT    NOT NULL,
+                name              TEXT    NOT NULL,
+                trade_date        TEXT    NOT NULL,
+                limit_up_price    REAL    NOT NULL DEFAULT 0,
+                first_limit_time  INTEGER,
+                last_limit_time   INTEGER,
+                consecutive_days  INTEGER NOT NULL DEFAULT 1,
+                board_type        TEXT    NOT NULL DEFAULT '',
+                seal_amount       REAL    NOT NULL DEFAULT 0,
+                seal_rate         REAL    NOT NULL DEFAULT 0,
+                volume_ratio      REAL    NOT NULL DEFAULT 0,
+                turnover_rate     REAL    NOT NULL DEFAULT 0,
+                is_zhaban         INTEGER NOT NULL DEFAULT 0,
+                zhaban_count      INTEGER NOT NULL DEFAULT 0,
+                sector            TEXT,
+                quality_score     REAL    NOT NULL DEFAULT 0,
+                premium_prob      REAL    NOT NULL DEFAULT 0,
+                price             REAL    NOT NULL DEFAULT 0,
+                change_pct        REAL    NOT NULL DEFAULT 0,
+                time_grade        TEXT    NOT NULL DEFAULT '未知',
+                quality           TEXT    NOT NULL DEFAULT '一般',
+                position          TEXT    NOT NULL DEFAULT '',
+                updated_at        INTEGER NOT NULL,
+                PRIMARY KEY (code, trade_date)
+              )
+            ''');
+            await txn.execute('CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
+            await txn.execute('CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
+            await txn.execute('CREATE INDEX idx_limit_up_pool_code ON limit_up_pool(code)');
+            debugPrint('[DB] v12→v13: rebuilt limit_up_pool table with all columns');
+          }
+          // 索引补建（幂等，保证升级路径和新装路径都有）
+          await txn.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
+          await txn.execute('CREATE INDEX IF NOT EXISTS idx_alerts_code ON alerts(code)');
+          await txn.execute('CREATE INDEX IF NOT EXISTS idx_limit_up_pool_code ON limit_up_pool(code)');
+        });
       },
     );
   }
@@ -400,12 +443,18 @@ class DatabaseService {
         premium_prob      REAL    NOT NULL DEFAULT 0,
         price             REAL    NOT NULL DEFAULT 0,
         change_pct        REAL    NOT NULL DEFAULT 0,
+        time_grade        TEXT    NOT NULL DEFAULT '未知',
+        quality           TEXT    NOT NULL DEFAULT '一般',
+        position          TEXT    NOT NULL DEFAULT '',
         updated_at        INTEGER NOT NULL,
         PRIMARY KEY (code, trade_date)
       )
     ''');
     await db.execute('CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
     await db.execute('CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_limit_up_pool_code ON limit_up_pool(code)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_alerts_code ON alerts(code)');
   }
 
   Future<void> addToWatchlist(String code, String name) async {
@@ -417,7 +466,7 @@ class DatabaseService {
         'name': name,
         'added_at': DateTime.now().millisecondsSinceEpoch,
       },
-      conflictAlgorithm: ConflictAlgorithm.replace,
+      conflictAlgorithm: ConflictAlgorithm.ignore,
     );
   }
 
@@ -622,10 +671,10 @@ class DatabaseService {
   }
 
   Future<void> closeDb() async {
-    final db = _database;
-    if (db != null) {
+    if (_dbFuture != null) {
+      final db = await _dbFuture!;
       await db.close();
-      _database = null;
+      _dbFuture = null;
     }
   }
 
@@ -725,10 +774,7 @@ class DatabaseService {
       final now = DateTime.now().millisecondsSinceEpoch;
       for (final a in analyses) {
         final m = a.toMap();
-        // 移除 limit_up_pool 表中不存在的字段
-        m.remove('quality');
-        m.remove('time_grade');
-        m.remove('position');
+        // signals 是 List 类型，SQLite 无法直接存储
         m.remove('signals');
         // 补充 schema 必填字段
         m['trade_date'] = tradeDate;
@@ -741,7 +787,9 @@ class DatabaseService {
   /// 获取打板池数据（默认今日，可指定日期）
   Future<List<LimitUpAnalysis>> getLimitUpPool({String? tradeDate}) async {
     final db = await database;
-    final date = tradeDate ?? DateTime.now().toIso8601String().substring(0, 10);
+    // 使用上海时区(UTC+8)计算默认交易日，与 replaceLimitUpPool 写入时区一致
+    final date = tradeDate ??
+        DateTime.now().toUtc().add(const Duration(hours: 8)).toIso8601String().substring(0, 10);
     final result = await db.query(
       'limit_up_pool',
       where: 'trade_date = ?',
@@ -754,6 +802,15 @@ class DatabaseService {
   /// 获取指定交易日的打板池（历史回看用）
   Future<List<LimitUpAnalysis>> getLimitUpPoolByDate(String tradeDate) async {
     return getLimitUpPool(tradeDate: tradeDate);
+  }
+
+  /// 按股票代码查当日打板池记录（裸6位代码），无则返回 null
+  Future<LimitUpAnalysis?> getLimitUpAnalysisByCode(String bareCode) async {
+    final pool = await getLimitUpPool();
+    for (final a in pool) {
+      if (a.code == bareCode) return a;
+    }
+    return null;
   }
 
   /// 获取最近的打板池交易日列表（情绪周期曲线用）
@@ -822,6 +879,27 @@ class DatabaseService {
   Future<void> insertRecommendationSnapshot(Map<String, dynamic> snapshot) async {
     final db = await database;
     await db.insert('recommendation_tracking', snapshot);
+  }
+
+  /// 获取所有活跃推荐（is_closed = 0）的 code 集合，用于批量去重
+  Future<Set<String>> getActiveRecommendationCodes() async {
+    final db = await database;
+    final rows = await db.query('recommendation_tracking',
+      columns: ['code'],
+      where: 'is_closed = 0',
+    );
+    return rows.map((r) => r['code'] as String).toSet();
+  }
+
+  /// 批量插入推荐快照（事务包裹，提升并发性能）
+  Future<void> batchInsertRecommendationSnapshots(List<Map<String, dynamic>> snapshots) async {
+    if (snapshots.isEmpty) return;
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final snapshot in snapshots) {
+        await txn.insert('recommendation_tracking', snapshot);
+      }
+    });
   }
 
   Future<void> updateRecommendationReturn(int id, int days, double price, double returnPct) async {
