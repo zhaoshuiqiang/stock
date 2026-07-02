@@ -10,6 +10,18 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.42.0',
+        'date': '2026-07-02',
+        'changes': [
+          '修复主力资金数据为0：实时轮询改用getRealtimeQuoteWithValidation()，包含主力资金字段',
+          '优化个股详情加载速度：_loadData()中5个串行API请求改为Future.wait并行化，大幅减少加载时间',
+          '修复战法为空：确认_klines正确传递给StrategyPanel组件',
+          '修复打板器/低吸扫描无反应：检查BaseAnalysisEngine状态管理，确保markFinished()正确调用',
+          '修复分时页面布局：确保分时图下方的成交量柱和主力资金栏正常显示',
+          '环球市场数据修复：_loadData()始终调用getGlobalIndices()获取数据',
+        ],
+      },
+      {
         'version': 'v2.41.0',
         'date': '2026-07-02',
         'changes': [

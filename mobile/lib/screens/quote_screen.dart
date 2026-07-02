@@ -314,10 +314,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         }
       }
 
-      final quote = await _apiClient.getRealtimeQuote(widget.code);
+      final validatedQuote = await _apiClient.getRealtimeQuoteWithValidation(widget.code);
       if (!mounted) return;
-      if (quote != null) {
-        _handleQuoteUpdate(quote);
+      if (validatedQuote != null && validatedQuote.quote != null) {
+        _handleQuoteUpdate(validatedQuote.quote!);
       }
     });
 
@@ -491,20 +491,31 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     });
 
     try {
-      var quote = await _apiClient.getRealtimeQuote(widget.code);
-      final mainFundFlow = await _apiClient.getMainFundFlow(widget.code);
-      final klines = await _apiClient.getStockHistory(widget.code, days: 120);
+      // 并行加载数据：quote+fundFlow、klines、sectorInfo、timeshare
+      final results = await Future.wait([
+        _apiClient.getRealtimeQuoteWithValidation(widget.code),
+        _apiClient.getStockHistory(widget.code, days: 120),
+        _apiClient.getStockSector(widget.code),
+        _apiClient.getHotSectors(),
+        _apiClient.getTimeshareData(widget.code),
+      ]);
+
+      final validatedQuote = results[0] as ValidatedQuoteData?;
+      var quote = validatedQuote?.quote;
+      final klines = results[1] as List<HistoryKline>;
+      final sectorName = results[2] as String;
+      final hotSectors = results[3] as List<SectorInfo>;
+      final timeshareResult = results[4] as Map<String, dynamic>?;
+
       final calculated = calcAllIndicators(klines);
 
-      final sectorName = await _apiClient.getStockSector(widget.code);
-      final hotSectors = await _apiClient.getHotSectors();
       final sectorData = hotSectors.map((s) => SectorData(
         name: s.name, code: s.code, changePct: s.changePct,
         limitUpCount: s.stockCount, mainNetFlow: 0,
       )).toList();
       final sectorRotationResult = SectorRotation.analyze(sectorList: sectorData);
 
-      if (quote != null && mainFundFlow != null) {
+      if (quote != null) {
         quote = QuoteData(
           code: quote.code, name: quote.name, price: quote.price,
           open: quote.open, high: quote.high, low: quote.low,
@@ -512,8 +523,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           change: quote.change, changePct: quote.changePct, amplitude: quote.amplitude,
           turnover: quote.turnover, pe: quote.pe, pb: quote.pb,
           totalMarketCap: quote.totalMarketCap, circulatingMarketCap: quote.circulatingMarketCap,
-          mainInflow: mainFundFlow.mainInflow, mainOutflow: mainFundFlow.mainOutflow,
-          mainNetFlow: mainFundFlow.mainNetFlow, mainNetFlowRate: mainFundFlow.mainNetFlowRate,
+          mainInflow: quote.mainInflow, mainOutflow: quote.mainOutflow,
+          mainNetFlow: quote.mainNetFlow, mainNetFlowRate: quote.mainNetFlowRate,
           sectorName: sectorName,
         );
       }
@@ -531,9 +542,6 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       if (_showFibonacci) {
         tech['fibonacci'] = calcFibonacci(calculated);
       }
-
-      // 加载分时线历史数据（盘后也能显示全天走势）
-      final timeshareResult = await _apiClient.getTimeshareData(widget.code);
 
       if (!mounted) return;
 
