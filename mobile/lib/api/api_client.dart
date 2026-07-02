@@ -1349,9 +1349,9 @@ class ApiClient {
         final market = codeToMarket[code] ?? 'OTHER';
         final price = _parseDouble(m['f2']);
         final previousClose = _parseDouble(m['f18']);
-        if (price <= 0) continue;
-        // v2.37.1: 不直接使用 f3(全球指数 f3 可能返回非日变化)，
-        // 改为用 f2(最新价) 和 f18(昨收) 自行计算日涨跌幅
+        if (price <= 0 && previousClose <= 0) continue;
+        // 非交易时段price可能为0，使用昨收价显示
+        final displayPrice = price > 0 ? price : previousClose;
         double changePct;
         double changePoint;
         if (previousClose > 0) {
@@ -1374,7 +1374,7 @@ class ApiClient {
         result.add(GlobalIndex(
           code: code,
           name: m['f14']?.toString() ?? code,
-          price: price,
+          price: displayPrice,
           changePct: changePct,
           changePoint: changePoint,
           market: market,
@@ -1382,6 +1382,8 @@ class ApiClient {
       }
       if (result.isNotEmpty) {
         _setCached(cacheKey, result, duration: const Duration(minutes: 2));
+      } else {
+        _setCached(cacheKey, result, duration: const Duration(minutes: 1));
       }
       return result;
     } catch (e) {
@@ -1667,9 +1669,12 @@ class ApiClient {
 
   /// 昨日涨停股池（用于计算赚钱效应）
   Future<List<LimitUpStock>> getYesterdayLimitUpPool() async {
-    // 昨日按上海时区(UTC+8)计算，与 getLimitUpBoard 一致
     final shanghaiNow = DateTime.now().toUtc().add(const Duration(hours: 8));
-    final yesterday = shanghaiNow.subtract(const Duration(days: 1));
+    var yesterday = shanghaiNow.subtract(const Duration(days: 1));
+    // 跳过周末：周六回退到周五，周日回退到周五
+    while (yesterday.weekday == DateTime.saturday || yesterday.weekday == DateTime.sunday) {
+      yesterday = yesterday.subtract(const Duration(days: 1));
+    }
     return getLimitUpBoard(date: yesterday);
   }
 

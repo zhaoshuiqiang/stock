@@ -411,10 +411,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
         pb: prev.pb,
         totalMarketCap: prev.totalMarketCap,
         circulatingMarketCap: prev.circulatingMarketCap,
-        mainInflow: quote.mainInflow,
-        mainOutflow: quote.mainOutflow,
-        mainNetFlow: quote.mainNetFlow,
-        mainNetFlowRate: quote.mainNetFlowRate,
+        mainInflow: quote.mainInflow != 0 ? quote.mainInflow : prev.mainInflow,
+        mainOutflow: quote.mainOutflow != 0 ? quote.mainOutflow : prev.mainOutflow,
+        mainNetFlow: quote.mainNetFlow != 0 ? quote.mainNetFlow : prev.mainNetFlow,
+        mainNetFlowRate: quote.mainNetFlowRate != 0 ? quote.mainNetFlowRate : prev.mainNetFlowRate,
         volumeRatio: quote.volumeRatio > 0 ? quote.volumeRatio : prev.volumeRatio,
       );
     } else {
@@ -490,21 +490,29 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     });
 
     try {
-      // 并行加载数据：quote+fundFlow、klines、sectorInfo、timeshare
+      // 渐进式加载：先获取核心数据（行情+主力资金），快速显示页面
+      final validatedQuote = await _apiClient.getRealtimeQuoteWithValidation(widget.code);
+      var quote = validatedQuote?.quote;
+
+      if (quote != null && mounted) {
+        setState(() {
+          _quote = quote;
+          _isLoading = false; // 先显示行情数据
+        });
+      }
+
+      // 然后并行加载其余数据
       final results = await Future.wait([
-        _apiClient.getRealtimeQuoteWithValidation(widget.code),
         _apiClient.getStockHistory(widget.code, days: 120),
         _apiClient.getStockSector(widget.code),
         _apiClient.getHotSectors(),
         _apiClient.getTimeshareData(widget.code),
       ]);
 
-      final validatedQuote = results[0] as ValidatedQuoteData?;
-      var quote = validatedQuote?.quote;
-      final klines = results[1] as List<HistoryKline>;
-      final sectorName = results[2] as String;
-      final hotSectors = results[3] as List<SectorInfo>;
-      final timeshareResult = results[4] as Map<String, dynamic>?;
+      final klines = results[0] as List<HistoryKline>;
+      final sectorName = results[1] as String;
+      final hotSectors = results[2] as List<SectorInfo>;
+      final timeshareResult = results[3] as Map<String, dynamic>?;
 
       final calculated = calcAllIndicators(klines);
 
@@ -1411,7 +1419,19 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     final inflow = quote.mainInflow.abs();
     final outflow = quote.mainOutflow.abs();
     final total = inflow + outflow;
-    if (total == 0) return const SizedBox.shrink();
+    if (total == 0) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _kCardColor,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Center(
+          child: Text('主力资金数据加载中...', style: TextStyle(color: Colors.white38, fontSize: 12)),
+        ),
+      );
+    }
 
     final inflowRatio = inflow / total;
     final outflowRatio = outflow / total;

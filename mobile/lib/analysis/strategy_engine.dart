@@ -103,7 +103,7 @@ class TradingStrategy {
 }
 
 List<TradingStrategy> evaluateStrategies(List<HistoryKline> data, List<SignalItem> signals, {MarketStructureResult? marketStructure}) {
-  if (data.length < 30) return [];
+  if (data.length < 10) return [];
 
   // 委托 StrategyBuilder 构建完整策略库
   final strategies = StrategyBuilder.buildLayeredStrategies(data, signals, null);

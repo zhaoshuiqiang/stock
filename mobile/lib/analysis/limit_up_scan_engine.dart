@@ -47,9 +47,42 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
       // Step 1: 拉取今日 + 昨日涨停池
       emit(const LimitUpScanProgress(stage: 'fetching', message: '拉取涨停板数据...'));
       final todayStocks = await LimitUpUniverseProvider.fetchLatest(apiClient: _apiClient);
+
       if (todayStocks.isEmpty) {
-        emit(const LimitUpScanProgress(stage: 'done', message: '今日暂无涨停标的'));
-        return null;
+        // 今日无涨停标的（非交易日/API故障），从DB读取最近交易日数据
+        final dbPool = await _dbService.getLimitUpPool();
+        if (dbPool.isEmpty) {
+          // DB也无数据，尝试从最近交易日读取
+          final dates = await _dbService.getLimitUpDates();
+          if (dates.isNotEmpty) {
+            final latestDate = dates.first;
+            final latestPool = await _dbService.getLimitUpPool(tradeDate: latestDate);
+            if (latestPool.isNotEmpty) {
+              final todayAnalyses = latestPool;
+              final sentiment = SentimentThermometer.compute(
+                todayPool: todayAnalyses,
+                yesterdayPool: [],
+                todayQuotePct: {},
+                yesterdayPhase: _lastSentiment?.phase,
+              );
+              _lastSentiment = sentiment;
+              emit(const LimitUpScanProgress(stage: 'done', message: '使用缓存数据计算情绪'));
+              return sentiment;
+            }
+          }
+          emit(const LimitUpScanProgress(stage: 'done', message: '暂无涨停数据'));
+          return null;
+        }
+        // 用DB缓存数据计算基础情绪
+        final sentiment = SentimentThermometer.compute(
+          todayPool: dbPool,
+          yesterdayPool: [],
+          todayQuotePct: {},
+          yesterdayPhase: _lastSentiment?.phase,
+        );
+        _lastSentiment = sentiment;
+        emit(const LimitUpScanProgress(stage: 'done', message: '使用缓存数据计算情绪'));
+        return sentiment;
       }
 
       final yesterdayStocks = await _apiClient.getYesterdayLimitUpPool();

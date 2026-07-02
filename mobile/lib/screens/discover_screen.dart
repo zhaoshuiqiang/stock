@@ -167,7 +167,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
           setState(() => _limitUpScanLoading = false);
           break;
         case 'already_running':
-          setState(() => _limitUpScanLoading = true);
+          // 不重复设置_loading，_refreshLimitUpPool已自行管理状态
           break;
       }
     });
@@ -219,6 +219,17 @@ class DiscoverScreenState extends State<DiscoverScreen>
     if (!mounted) return;
     setState(() => _isScanningIntraday = true);
     try {
+      // 先确保explore_results有数据
+      var exploreResults = await _dbService.getExploreResults();
+      if (exploreResults.isEmpty) {
+        // 无探索数据，先触发一次全市场扫描
+        try {
+          await ExploreEngine.instance.explore();
+          exploreResults = await _dbService.getExploreResults();
+        } catch (e) {
+          debugPrint('_loadIntradayScanResults: explore scan failed: $e');
+        }
+      }
       final results = await IntradayScanEngine.scan();
       if (mounted) {
         setState(() {
@@ -323,6 +334,11 @@ class DiscoverScreenState extends State<DiscoverScreen>
     setState(() => _limitUpScanLoading = true);
     try {
       final sentiment = await LimitUpScanEngine.instance.scan();
+      // scan()返回null可能是already_running，检查引擎是否仍在运行
+      if (sentiment == null && LimitUpScanEngine.instance.isRunning) {
+        // 引擎正在运行，进度流会处理状态更新，不做任何事
+        return;
+      }
       final pool = await _dbService.getLimitUpPool();
       if (mounted) {
         setState(() {

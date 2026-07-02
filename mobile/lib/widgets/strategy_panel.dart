@@ -19,7 +19,19 @@ class StrategyPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (klines.isEmpty) {
-      return const Center(child: Text('暂无分析数据', style: TextStyle(color: Colors.white54)));
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white38)),
+              SizedBox(height: 12),
+              Text('战法数据加载中...', style: TextStyle(color: Colors.white54, fontSize: 13)),
+            ],
+          ),
+        ),
+      );
     }
 
     final strategies = evaluateStrategies(klines, signals, marketStructure: marketStructure);
