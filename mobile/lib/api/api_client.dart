@@ -403,7 +403,14 @@ class ApiClient {
       secid = code;
     }
 
-    final url = Uri.parse('https://push2.eastmoney.com/api/qt/ulist.np/get?fields=f62,f184,f66,f69,f72,f75,f78,f81,f84,f87&secids=$secid');
+    // 使用 push2his 资金流接口（日K线，取最新一天）
+    // fields2: f52=主力净流入额(元), f55=大单净流入, f56=超大单净流入, f57=主力净流入占比(%)
+    final url = Uri.parse(
+      'https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get'
+      '?secid=$secid&lmt=1&klt=1'
+      '&fields1=f1,f2,f3,f7'
+      '&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61',
+    );
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
       'Referer': 'https://quote.eastmoney.com/',
@@ -412,49 +419,47 @@ class ApiClient {
       debugPrint('[API] getMainFundFlow($code) HTTP failed');
       return null;
     }
-    if (response != null) {
-      final body = response.body;
-      Map<String, dynamic> data;
-      try {
-        data = json.decode(body) as Map<String, dynamic>;
-      } catch (e) {
-        debugPrint('[API] JSON解析失败: $e');
-        return null;
-      }
-      final diff = data['data']?['diff'] as List?;
-      if (diff != null && diff.isNotEmpty) {
-        final item = diff.first as Map<String, dynamic>;
-        final mainNetFlow = _parseDouble(item['f62']);
-        final mainNetFlowRateBps = _parseDouble(item['f184']);
-        final mainNetFlowRate = mainNetFlowRateBps / 100;
-        debugPrint('[API] getMainFundFlow($code) raw: f62=${item['f62']}, f184=${item['f184']} → netFlow=$mainNetFlow, rate=$mainNetFlowRate%');
+    try {
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      final klines = data['data']?['klines'] as List?;
+      if (klines == null || klines.isEmpty) return null;
 
-        // 从净流入和净流入率计算主力总成交额，再推算流入流出
-        // 净流入率 = 净流入 / 主力总成交额 * 100
-        double mainInflow = 0;
-        double mainOutflow = 0;
-        if (mainNetFlowRateBps.abs() > 0.01) {
-          final mainTotalAmount = (mainNetFlow.abs() / mainNetFlowRateBps.abs()) * 10000;
-          mainInflow = (mainTotalAmount + mainNetFlow) / 2;
-          mainOutflow = (mainTotalAmount - mainNetFlow) / 2;
-        } else {
-          mainInflow = mainNetFlow > 0 ? mainNetFlow : 0;
-          mainOutflow = mainNetFlow < 0 ? mainNetFlow.abs() : 0;
-        }
+      // kline 格式: "日期,主力净流入,小单净流入,中单净流入,大单净流入,超大单净流入,主力占比%,..."
+      final parts = (klines.last as String).split(',');
+      if (parts.length < 7) return null;
 
-        return QuoteData(
-          code: code,
-          mainInflow: mainInflow,
-          mainOutflow: mainOutflow,
-          mainNetFlow: mainNetFlow,
-          mainNetFlowRate: mainNetFlowRate,
-        );
+      final mainNetFlow = _parseDouble(parts[1]);     // f52 主力净流入额(元)
+      final mainNetFlowRate = _parseDouble(parts[6]); // f57 主力净流入占比(%)
+
+      // 从净流入和净流入率推算主力总成交额，再算流入流出
+      // 净流入率(%) = 净流入 / 主力总成交额 * 100
+      double mainInflow = 0;
+      double mainOutflow = 0;
+      if (mainNetFlowRate.abs() > 0.01) {
+        final mainTotalAmount = (mainNetFlow.abs() / mainNetFlowRate.abs()) * 100;
+        mainInflow = (mainTotalAmount + mainNetFlow) / 2;
+        mainOutflow = (mainTotalAmount - mainNetFlow) / 2;
+      } else if (mainNetFlow.abs() > 0) {
+        mainInflow = mainNetFlow > 0 ? mainNetFlow : 0;
+        mainOutflow = mainNetFlow < 0 ? mainNetFlow.abs() : 0;
       }
+
+      debugPrint('[API] getMainFundFlow($code) netFlow=$mainNetFlow, rate=$mainNetFlowRate%, inflow=$mainInflow, outflow=$mainOutflow');
+
+      return QuoteData(
+        code: code,
+        mainInflow: mainInflow,
+        mainOutflow: mainOutflow,
+        mainNetFlow: mainNetFlow,
+        mainNetFlowRate: mainNetFlowRate,
+      );
+    } catch (e) {
+      debugPrint('[API] getMainFundFlow($code) 解析失败: $e');
+      return null;
     }
-    return null;
   }
 
-  /// 从东方财富获取实时行情（含主力资金字段，作为 getMainFundFlow 的备用数据源）
+  /// 从东方财富获取实时行情
   Future<QuoteData?> _fetchQuoteFromEastMoney(String code) async {
     String secid;
     if (code.startsWith('sh')) {
@@ -465,9 +470,8 @@ class ApiClient {
       secid = code;
     }
 
-    // fields 含行情+主力资金：f62=主力净流入额(元)，f184=主力净流入占比(百分比，fltt=2)
     final url = Uri.parse(
-      'https://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fltt=2&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f170,f171,f10,f62,f184',
+      'https://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fltt=2&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f170,f171,f10',
     );
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
@@ -501,21 +505,6 @@ class ApiClient {
       final volumeRatio = _parseDouble(d['f10']); // 量比
       final name = d['f58']?.toString() ?? '';
 
-      // 主力资金字段（stock/get 接口 fltt=2 时 f184 为百分比，如 -15.04 表示 -15.04%）
-      final mainNetFlow = _parseDouble(d['f62']);
-      final mainNetFlowRate = _parseDouble(d['f184']);
-      double mainInflow = 0;
-      double mainOutflow = 0;
-      if (mainNetFlowRate.abs() > 0.001) {
-        // 净流入率(%) = 净流入 / 主力总成交额 * 100 → 主力总成交额 = 净流入 / 净流入率 * 100
-        final mainTotalAmount = (mainNetFlow.abs() / mainNetFlowRate.abs()) * 100;
-        mainInflow = (mainTotalAmount + mainNetFlow) / 2;
-        mainOutflow = (mainTotalAmount - mainNetFlow) / 2;
-      } else if (mainNetFlow.abs() > 0) {
-        mainInflow = mainNetFlow > 0 ? mainNetFlow : 0;
-        mainOutflow = mainNetFlow < 0 ? mainNetFlow.abs() : 0;
-      }
-
       final amplitude = preClose > 0 ? (high - low) / preClose * 100 : 0.0;
 
       return QuoteData(
@@ -536,10 +525,6 @@ class ApiClient {
         totalMarketCap: totalMarketCap,
         circulatingMarketCap: circulatingMarketCap,
         volumeRatio: volumeRatio,
-        mainNetFlow: mainNetFlow,
-        mainNetFlowRate: mainNetFlowRate,
-        mainInflow: mainInflow,
-        mainOutflow: mainOutflow,
       );
     }
     return null;
@@ -567,21 +552,13 @@ class ApiClient {
       mergedQuote = eastMoneyQuote!;
     }
 
-    // 合并主力资金数据：优先使用 getMainFundFlow（ulist.np接口）
-    // 若失败或净流入为0，回退到 _fetchQuoteFromEastMoney 的资金流字段（stock/get接口）
-    if (fundFlowQuote != null && fundFlowQuote.mainNetFlow != 0) {
+    // 合并主力资金数据
+    if (fundFlowQuote != null) {
       mergedQuote = mergedQuote.copyWith(
         mainNetFlow: fundFlowQuote.mainNetFlow,
         mainNetFlowRate: fundFlowQuote.mainNetFlowRate,
         mainInflow: fundFlowQuote.mainInflow,
         mainOutflow: fundFlowQuote.mainOutflow,
-      );
-    } else if (eastMoneyQuote != null && eastMoneyQuote.mainNetFlow != 0) {
-      mergedQuote = mergedQuote.copyWith(
-        mainNetFlow: eastMoneyQuote.mainNetFlow,
-        mainNetFlowRate: eastMoneyQuote.mainNetFlowRate,
-        mainInflow: eastMoneyQuote.mainInflow,
-        mainOutflow: eastMoneyQuote.mainOutflow,
       );
     }
 
@@ -1342,90 +1319,94 @@ class ApiClient {
 
   /// 获取全球主要股指（美股/港股/亚太/欧洲）
   ///
-  /// 数据来源：东方财富全球指数接口。返回 10 个主要指数，
-  /// 按 market 字段标识所属市场（US/HK/JP/EU/KR）。
+  /// 数据来源：东方财富 push2his K线接口（并行请求各指数最近2条日K线）。
+  /// 返回 10 个主要指数，按 market 字段标识所属市场（US/HK/JP/EU/KR）。
   Future<List<GlobalIndex>> getGlobalIndices() async {
     const cacheKey = 'global_indices';
     final cached = _getCached(cacheKey);
     if (cached != null) return cached as List<GlobalIndex>;
 
-    // secids: 100=美股/全球, 116=港股
-    const secids =
-        '100.NDX,100.SPX,100.DJIA,116.HSI,116.HSCEI,100.N225,100.GDAXI,100.FTSE,100.FCHI,100.KOSPI';
-    const codeToMarket = <String, String>{
-      'NDX': 'US', 'SPX': 'US', 'DJIA': 'US',
-      'HSI': 'HK', 'HSCEI': 'HK',
-      'N225': 'JP',
-      'GDAXI': 'EU', 'FTSE': 'EU', 'FCHI': 'EU',
-      'KOSPI': 'KR',
+    // secid → [显示名, 市场区域]
+    const indexSpec = <String, List<String>>{
+      '100.NDX': ['纳斯达克100', 'US'],
+      '100.SPX': ['标普500', 'US'],
+      '100.DJIA': ['道琼斯', 'US'],
+      '116.HSI': ['恒生指数', 'HK'],
+      '116.HSCEI': ['恒生中国企业', 'HK'],
+      '100.N225': ['日经225', 'JP'],
+      '100.GDAXI': ['德国DAX', 'EU'],
+      '100.FTSE': ['英国富时100', 'EU'],
+      '100.FCHI': ['法国CAC40', 'EU'],
+      '100.KOSPI': ['韩国KOSPI', 'KR'],
     };
 
     try {
-      final url = Uri.parse(
-        'https://push2.eastmoney.com/api/qt/ulist.np/get'
-        '?fields=f2,f3,f4,f12,f14,f15,f16,f17,f18'
-        '&secids=$secids',
-      );
-      final response = await _httpGet(url, headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Referer': 'https://quote.eastmoney.com/',
-      }, retries: 3);
-      if (response == null) {
-        debugPrint('[API] getGlobalIndices HTTP failed (response null)');
-        return [];
-      }
+      // 并行请求所有指数的K线数据
+      final futures = indexSpec.entries.map((e) => _fetchGlobalIndexKline(e.key, e.value[0], e.value[1]));
+      final results = await Future.wait(futures);
+      final result = results.whereType<GlobalIndex>().toList();
 
-      final data = json.decode(response.body) as Map<String, dynamic>;
-      final diff = data['data']?['diff'] as List?;
-      debugPrint('[API] getGlobalIndices diff count: ${diff?.length ?? 0}');
-      if (diff == null || diff.isEmpty) return [];
-
-      final result = <GlobalIndex>[];
-      for (final item in diff) {
-        final m = item as Map<String, dynamic>;
-        final code = m['f12']?.toString() ?? '';
-        final market = codeToMarket[code] ?? 'OTHER';
-        final price = _parseDouble(m['f2']);
-        final previousClose = _parseDouble(m['f18']);
-        if (price <= 0 && previousClose <= 0) continue;
-        // 非交易时段price可能为0，使用昨收价显示
-        final displayPrice = price > 0 ? price : previousClose;
-        double changePct;
-        double changePoint;
-        if (previousClose > 0) {
-          changePoint = price - previousClose;
-          changePct = changePoint / previousClose * 100;
-          // sanity check: 单日涨跌幅超过 15% 视为数据异常（昨收可能缺失或为 0）
-          if (changePct.abs() > 15) {
-            final fallbackPct = _parseDouble(m['f3']);
-            changePct = fallbackPct.abs() > 15 ? 0.0 : fallbackPct;
-            final fallbackPoint = _parseDouble(m['f4']);
-            changePoint = fallbackPct.abs() > 15 ? 0.0 : fallbackPoint;
-          }
-        } else {
-          // 无昨收时退回 f3/f4，但做同样的 sanity check
-          final fallbackPct = _parseDouble(m['f3']);
-          changePct = fallbackPct.abs() > 15 ? 0.0 : fallbackPct;
-          final fallbackPoint = _parseDouble(m['f4']);
-          changePoint = fallbackPct.abs() > 15 ? 0.0 : fallbackPoint;
-        }
-        result.add(GlobalIndex(
-          code: code,
-          name: m['f14']?.toString() ?? code,
-          price: displayPrice,
-          changePct: changePct,
-          changePoint: changePoint,
-          market: market,
-        ));
-      }
+      debugPrint('[API] getGlobalIndices fetched ${result.length}/${indexSpec.length} indices');
       if (result.isNotEmpty) {
         _setCached(cacheKey, result, duration: const Duration(minutes: 2));
       }
-      // 空结果不缓存，避免持续无数据
       return result;
     } catch (e) {
       debugPrint('getGlobalIndices failed: $e');
       return [];
+    }
+  }
+
+  /// 获取单个全球指数的最近2条日K线，计算当前价格和涨跌幅
+  Future<GlobalIndex?> _fetchGlobalIndexKline(String secid, String displayName, String market) async {
+    try {
+      final url = Uri.parse(
+        'https://push2his.eastmoney.com/api/qt/stock/kline/get'
+        '?secid=$secid&klt=101&fqt=0&lmt=2&end=20500101'
+        '&fields1=f1,f2,f3,f4,f5,f6'
+        '&fields2=f51,f52,f53,f54,f55,f56,f57',
+      );
+      final response = await _httpGet(url, headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://quote.eastmoney.com/',
+      }, retries: 2);
+      if (response == null) return null;
+
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      final klines = data['data']?['klines'] as List?;
+      if (klines == null || klines.isEmpty) return null;
+
+      // K线格式: "日期,开盘,收盘,最高,最低,成交量,振幅"
+      final latestParts = (klines.last as String).split(',');
+      if (latestParts.length < 5) return null;
+      final latestClose = _parseDouble(latestParts[2]);
+
+      double changePct = 0;
+      double changePoint = 0;
+      if (klines.length >= 2) {
+        final prevParts = (klines[klines.length - 2] as String).split(',');
+        if (prevParts.length >= 5) {
+          final prevClose = _parseDouble(prevParts[2]);
+          if (prevClose > 0) {
+            changePoint = latestClose - prevClose;
+            changePct = changePoint / prevClose * 100;
+          }
+        }
+      }
+
+      // code 从 secid 提取（如 100.NDX → NDX）
+      final code = secid.split('.').last;
+      return GlobalIndex(
+        code: code,
+        name: displayName,
+        price: latestClose,
+        changePct: changePct,
+        changePoint: changePoint,
+        market: market,
+      );
+    } catch (e) {
+      debugPrint('[API] _fetchGlobalIndexKline($secid) failed: $e');
+      return null;
     }
   }
 

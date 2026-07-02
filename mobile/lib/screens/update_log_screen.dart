@@ -10,6 +10,16 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.46.0',
+        'date': '2026-07-03',
+        'changes': [
+          '修复主力资金单位错误：getMainFundFlow改用push2his资金流接口，返回正确的净流入额(元)和净流入率(%)，推算的主力流入/流出单位正确',
+          '修复环球市场数据不显示：getGlobalIndices改用push2his K线接口并行请求，从最近2条日K线计算价格和涨跌幅',
+          '回退_fetchQuoteFromEastMoney的错误修改，恢复成交量/成交额/市净率等字段正常显示',
+          'API数据验证：通过Python脚本验证九州药业资金流数据（净流入-1.22亿，净流入率-5.38%，主力流入10.72亿，流出11.94亿）',
+        ],
+      },
+      {
         'version': 'v2.45.0',
         'date': '2026-07-02',
         'changes': [
