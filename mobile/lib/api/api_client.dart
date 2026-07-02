@@ -427,6 +427,7 @@ class ApiClient {
         final mainNetFlow = _parseDouble(item['f62']);
         final mainNetFlowRateBps = _parseDouble(item['f184']);
         final mainNetFlowRate = mainNetFlowRateBps / 100;
+        debugPrint('[API] getMainFundFlow($code) raw: f62=${item['f62']}, f184=${item['f184']} → netFlow=$mainNetFlow, rate=$mainNetFlowRate%');
 
         // 从净流入和净流入率计算主力总成交额，再推算流入流出
         // 净流入率 = 净流入 / 主力总成交额 * 100
@@ -453,7 +454,7 @@ class ApiClient {
     return null;
   }
 
-  /// 从东方财富获取实时行情
+  /// 从东方财富获取实时行情（含主力资金字段，作为 getMainFundFlow 的备用数据源）
   Future<QuoteData?> _fetchQuoteFromEastMoney(String code) async {
     String secid;
     if (code.startsWith('sh')) {
@@ -464,8 +465,9 @@ class ApiClient {
       secid = code;
     }
 
+    // fields 含行情+主力资金：f62=主力净流入额(元)，f184=主力净流入占比(百分比，fltt=2)
     final url = Uri.parse(
-      'https://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fltt=2&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f170,f171,f10',
+      'https://push2.eastmoney.com/api/qt/stock/get?secid=$secid&fltt=2&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f170,f171,f10,f62,f184',
     );
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
@@ -499,6 +501,21 @@ class ApiClient {
       final volumeRatio = _parseDouble(d['f10']); // 量比
       final name = d['f58']?.toString() ?? '';
 
+      // 主力资金字段（stock/get 接口 fltt=2 时 f184 为百分比，如 -15.04 表示 -15.04%）
+      final mainNetFlow = _parseDouble(d['f62']);
+      final mainNetFlowRate = _parseDouble(d['f184']);
+      double mainInflow = 0;
+      double mainOutflow = 0;
+      if (mainNetFlowRate.abs() > 0.001) {
+        // 净流入率(%) = 净流入 / 主力总成交额 * 100 → 主力总成交额 = 净流入 / 净流入率 * 100
+        final mainTotalAmount = (mainNetFlow.abs() / mainNetFlowRate.abs()) * 100;
+        mainInflow = (mainTotalAmount + mainNetFlow) / 2;
+        mainOutflow = (mainTotalAmount - mainNetFlow) / 2;
+      } else if (mainNetFlow.abs() > 0) {
+        mainInflow = mainNetFlow > 0 ? mainNetFlow : 0;
+        mainOutflow = mainNetFlow < 0 ? mainNetFlow.abs() : 0;
+      }
+
       final amplitude = preClose > 0 ? (high - low) / preClose * 100 : 0.0;
 
       return QuoteData(
@@ -519,6 +536,10 @@ class ApiClient {
         totalMarketCap: totalMarketCap,
         circulatingMarketCap: circulatingMarketCap,
         volumeRatio: volumeRatio,
+        mainNetFlow: mainNetFlow,
+        mainNetFlowRate: mainNetFlowRate,
+        mainInflow: mainInflow,
+        mainOutflow: mainOutflow,
       );
     }
     return null;
@@ -546,13 +567,21 @@ class ApiClient {
       mergedQuote = eastMoneyQuote!;
     }
 
-    // 合并主力资金数据
-    if (fundFlowQuote != null) {
+    // 合并主力资金数据：优先使用 getMainFundFlow（ulist.np接口）
+    // 若失败或净流入为0，回退到 _fetchQuoteFromEastMoney 的资金流字段（stock/get接口）
+    if (fundFlowQuote != null && fundFlowQuote.mainNetFlow != 0) {
       mergedQuote = mergedQuote.copyWith(
         mainNetFlow: fundFlowQuote.mainNetFlow,
         mainNetFlowRate: fundFlowQuote.mainNetFlowRate,
         mainInflow: fundFlowQuote.mainInflow,
         mainOutflow: fundFlowQuote.mainOutflow,
+      );
+    } else if (eastMoneyQuote != null && eastMoneyQuote.mainNetFlow != 0) {
+      mergedQuote = mergedQuote.copyWith(
+        mainNetFlow: eastMoneyQuote.mainNetFlow,
+        mainNetFlowRate: eastMoneyQuote.mainNetFlowRate,
+        mainInflow: eastMoneyQuote.mainInflow,
+        mainOutflow: eastMoneyQuote.mainOutflow,
       );
     }
 
@@ -1341,10 +1370,14 @@ class ApiClient {
         'User-Agent': 'Mozilla/5.0',
         'Referer': 'https://quote.eastmoney.com/',
       }, retries: 3);
-      if (response == null) return [];
+      if (response == null) {
+        debugPrint('[API] getGlobalIndices HTTP failed (response null)');
+        return [];
+      }
 
       final data = json.decode(response.body) as Map<String, dynamic>;
       final diff = data['data']?['diff'] as List?;
+      debugPrint('[API] getGlobalIndices diff count: ${diff?.length ?? 0}');
       if (diff == null || diff.isEmpty) return [];
 
       final result = <GlobalIndex>[];
