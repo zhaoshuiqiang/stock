@@ -2,6 +2,7 @@ import '../models/stock_models.dart';
 
 class RealtimeScorer {
   /// 倒U型评分：温和上涨最优，抑制追高
+  /// v2.48.0: 增加跳空低开检测，识别恐慌抛压信号
   static double score(QuoteData? quote) {
     double s = 5.0;
     if (quote != null && quote.price > 0) {
@@ -16,6 +17,18 @@ class RealtimeScorer {
       else if (cp >= -5) s -= 0.5;
       else if (cp >= -8) s -= 1.5;
       else s -= 2.5;
+
+      // v2.48.0: 跳空低开检测 — 开盘价低于昨收3%以上表明恐慌抛压
+      if (quote.preClose > 0 && quote.open > 0) {
+        final gapDownPct = (quote.open - quote.preClose) / quote.preClose * 100;
+        if (gapDownPct < -5) {
+          s -= 1.8;
+        } else if (gapDownPct < -3) {
+          s -= 1.0;
+        } else if (gapDownPct < -1) {
+          s -= 0.5;
+        }
+      }
 
       if (quote.mainNetFlow != 0) {
         final r = quote.mainNetFlowRate;

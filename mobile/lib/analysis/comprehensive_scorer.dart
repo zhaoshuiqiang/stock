@@ -127,10 +127,22 @@ class ComprehensiveScorer {
 
     final adjustedScore = (rawScore * combinedAdjustment * chasePenalty * biasPenalty).clamp(0.0, 10.0);
 
+    // v2.48.0: 近期价格趋势一致性校验 — 技术面看多但近期价格下跌时降低评分
+    // 防止均线多头但近期持续下跌的股票获得虚高评分
+    double trendConsistencyFactor = 1.0;
+    if (data != null && data.length >= 3 && adjustedScore >= 5.5) {
+      final recentChange = (data.last.close - data[data.length - 3].close) / data[data.length - 3].close * 100;
+      if (recentChange < -5) {
+        trendConsistencyFactor = 0.85;
+      } else if (recentChange < -3) {
+        trendConsistencyFactor = 0.92;
+      }
+    }
+
     // v2.38.0: 加回温和系数0.97，减少borderline评分过度集中在6分（谨慎买入）
     //          之前移除0.95后，5.5→6、6.5→7，导致6分股票过多（89只/204只）
     //          使用0.97而非0.95，平衡评分分布和真实度：5.5→5.335→5，6.5→6.305→6
-    var temperedScore = adjustedScore * 0.97;
+    var temperedScore = adjustedScore * trendConsistencyFactor * 0.97;
 
     // v2.38.0: 板块情绪过热检测 — 过热板块个股评分乘以0.85折扣
     if (sectorName != null && sectorAnalysis != null && sectorAnalysis.isNotEmpty) {

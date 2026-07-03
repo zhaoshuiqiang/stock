@@ -73,6 +73,7 @@ class TechnicalScorer {
 
   /// 2. 趋势强度评分 (0-2分) - 基于均线排列 + ADX趋势强度
   /// v2.38.0: 降低均线多头排列权重(1.8→1.4)，增加MA20偏离保护，防止追高
+  /// v2.48.0: 增加日内暴跌惩罚 + 趋势强度加分需确认价格在MA上方
   static double _scoreTrend(List<HistoryKline> data) {
     final last = data[data.length - 1];
     double trendScore = 0;
@@ -85,6 +86,16 @@ class TechnicalScorer {
             trendScore *= 0.85;
           } else if (ma20Deviation > 5) {
             trendScore *= 0.92;
+          }
+        }
+        // v2.48.0: 日内暴跌惩罚 — 收盘价较开盘价下跌>5%时大幅降低趋势分
+        // 防止均线多头但当日暴跌的股票获得虚高评分
+        if (last.open > 0) {
+          final intradayChange = (last.close - last.open) / last.open * 100;
+          if (intradayChange < -5) {
+            trendScore *= 0.6;
+          } else if (intradayChange < -3) {
+            trendScore *= 0.8;
           }
         }
       } else if (last.ma5 > last.ma10) {
@@ -100,8 +111,10 @@ class TechnicalScorer {
     if (isBearishAlignment) {
       trendScore = 0;
     }
-    // ADX 趋势强度加成：仅在非空头排列时给予奖励，避免强化下跌趋势
-    if (!isBearishAlignment && last.adx14 > 25) {
+    // ADX 趋势强度加成：仅在非空头排列且价格在MA5上方时给予奖励
+    // v2.48.0: 增加价格位置确认，避免强趋势下跌(ADX>25+价格在MA下方)获得趋势加分
+    final priceAboveMa5 = last.close > 0 && last.ma5 > 0 && last.close > last.ma5;
+    if (!isBearishAlignment && last.adx14 > 25 && priceAboveMa5) {
       trendScore += 0.5;
     } else if (last.adx14 > 0 && last.adx14 < 20) {
       trendScore -= 0.3;

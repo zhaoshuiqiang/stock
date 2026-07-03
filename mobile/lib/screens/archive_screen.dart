@@ -13,6 +13,18 @@ import '../storage/database_service.dart';
 import '../core/trading_session.dart';
 import '../analysis/sector_rotation.dart';
 
+enum ReliabilityLevel {
+  veryReasonable,
+  reasonable,
+  deviation,
+  veryDeviation,
+}
+
+const _kVeryReasonableColor = Color(0xFF4CAF50);
+const _kReasonableColor = Colors.orange;
+const _kDeviationColor = Color(0xFF26a69a);
+const _kVeryDeviationColor = Color(0xFFef5350);
+
 
 class ArchiveScreen extends StatefulWidget {
   const ArchiveScreen({super.key});
@@ -31,7 +43,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   String _sortBy = 'time'; // 'time', 'score', 'change'
   bool _sortAscending = false;
   String _filterType = '全部'; // '全部', '买入', '卖出', '观望'
-  String _filterReliability = '全部'; // '全部', '合理', '偏差'
+  String _filterReliability = '全部'; // '全部', '非常合理', '合理', '偏差', '非常偏差'
 
   @override
   void initState() {
@@ -57,32 +69,84 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     _refreshCurrentPrices();
   }
 
-  /// 判断留档推荐是否偏差（时间自适应阈值）
+  /// 计算时间自适应阈值
   /// 
   /// 基准阈值 ±2%（5天），按 sqrt(天数/5) 缩放：
   ///   1天→2.0%, 5天→2.0%, 20天→4.0%, 60天→6.9%
-  /// v2.38.0: 1天窗口最小阈值从1.0提升至2.0，与A股日常波动匹配，避免过度判定偏差
+  /// v2.38.0: 1天窗口最小阈值从1.0提升至2.0，与A股日常波动匹配
   /// 观望推荐的基准阈值为 ±8%，同样按时间缩放
-  static bool _isDeviation(ArchiveRecord record, double currentPrice) {
-    if (currentPrice <= 0 || record.price <= 0) return false;
-
-    final priceChangePct = (currentPrice - record.price) / record.price * 100;
+  static (double threshold, double neutralThreshold) _calculateThresholds(ArchiveRecord record) {
     final daysSince = DateTime.now().difference(record.archivedAt).inDays.clamp(0, 365);
-    // 时间缩放：以5天为基准，波动率符合随机游走 √(N/5)
     final timeScale = max(daysSince, 1) / 5.0;
     final timeFactor = sqrt(timeScale);
-    // 基准阈值 ±2%（买入/卖出）, ±8%（观望），按时间缩放并设置上下限
-    final threshold = (2.0 * timeFactor).clamp(2.0, 12.0);
-    final neutralThreshold = (8.0 * timeFactor).clamp(4.0, 24.0);
+    return ((2.0 * timeFactor).clamp(2.0, 12.0), (8.0 * timeFactor).clamp(4.0, 24.0));
+  }
+
+  /// 判断留档推荐的可靠性等级（4级）
+  /// 
+  /// 基于 priceChangePct 与阈值的比值判定：
+  /// - veryReasonable（非常合理）：方向对且幅度超过2倍阈值
+  /// - reasonable（合理）：方向对但幅度不够2倍阈值
+  /// - deviation（偏差）：方向反但幅度小于2倍阈值
+  /// - veryDeviation（非常偏差）：方向反且幅度超过2倍阈值
+  /// 
+  /// 观望类特殊处理：价格变动极小(绝对值<0.5×阈值)才算非常合理
+  static ReliabilityLevel _getReliabilityLevel(ArchiveRecord record, double currentPrice) {
+    if (currentPrice <= 0 || record.price <= 0) return ReliabilityLevel.reasonable;
+
+    final priceChangePct = (currentPrice - record.price) / record.price * 100;
+    final (threshold, neutralThreshold) = _calculateThresholds(record);
 
     final wasBuy = record.recommendation.contains('买入');
     final wasSell = record.recommendation.contains('卖出');
     final wasNeutral = record.recommendation.contains('观望');
 
-    if (wasBuy && priceChangePct < -threshold) return true;
-    if (wasSell && priceChangePct > threshold) return true;
-    if (wasNeutral && priceChangePct.abs() > neutralThreshold) return true;
-    return false;
+    if (wasBuy) {
+      if (priceChangePct >= 2 * threshold) {
+        return ReliabilityLevel.veryReasonable;
+      } else if (priceChangePct >= -threshold) {
+        return ReliabilityLevel.reasonable;
+      } else if (priceChangePct >= -2 * threshold) {
+        return ReliabilityLevel.deviation;
+      } else {
+        return ReliabilityLevel.veryDeviation;
+      }
+    } else if (wasSell) {
+      if (priceChangePct <= -2 * threshold) {
+        return ReliabilityLevel.veryReasonable;
+      } else if (priceChangePct <= threshold) {
+        return ReliabilityLevel.reasonable;
+      } else if (priceChangePct <= 2 * threshold) {
+        return ReliabilityLevel.deviation;
+      } else {
+        return ReliabilityLevel.veryDeviation;
+      }
+    } else if (wasNeutral) {
+      if (priceChangePct.abs() < 0.5 * neutralThreshold) {
+        return ReliabilityLevel.veryReasonable;
+      } else if (priceChangePct.abs() <= neutralThreshold) {
+        return ReliabilityLevel.reasonable;
+      } else if (priceChangePct.abs() <= 2 * neutralThreshold) {
+        return ReliabilityLevel.deviation;
+      } else {
+        return ReliabilityLevel.veryDeviation;
+      }
+    }
+    return ReliabilityLevel.reasonable;
+  }
+
+  /// 获取可靠性等级对应的标签和颜色
+  static (String label, Color color) _getReliabilityInfo(ReliabilityLevel level) {
+    switch (level) {
+      case ReliabilityLevel.veryReasonable:
+        return ('非常合理', _kVeryReasonableColor);
+      case ReliabilityLevel.reasonable:
+        return ('合理', _kReasonableColor);
+      case ReliabilityLevel.deviation:
+        return ('偏差', _kDeviationColor);
+      case ReliabilityLevel.veryDeviation:
+        return ('非常偏差', _kVeryDeviationColor);
+    }
   }
 
   List<ArchiveRecord> _getFilteredAndSortedArchives() {
@@ -97,13 +161,24 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       items = items.where((r) => r.recommendation.contains('观望')).toList();
     }
 
-    // 可靠性筛选
-    if (_filterReliability == '合理' || _filterReliability == '偏差') {
+    // 可靠性筛选（4级）
+    if (_filterReliability != '全部') {
       items = items.where((r) {
         final currentQuote = _currentQuotes[r.code];
         final currentPrice = currentQuote?.price ?? 0;
-        final isDeviation = _isDeviation(r, currentPrice);
-        return _filterReliability == '偏差' ? isDeviation : !isDeviation;
+        final level = _getReliabilityLevel(r, currentPrice);
+        switch (_filterReliability) {
+          case '非常合理':
+            return level == ReliabilityLevel.veryReasonable;
+          case '合理':
+            return level == ReliabilityLevel.reasonable;
+          case '偏差':
+            return level == ReliabilityLevel.deviation;
+          case '非常偏差':
+            return level == ReliabilityLevel.veryDeviation;
+          default:
+            return true;
+        }
       }).toList();
     }
 
@@ -198,19 +273,13 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
 
     String reliability;
     Color reliabilityColor;
-    final isDev = _isDeviation(record, currentPrice);
-
-    if (isDev) {
-      final wasBuy = record.recommendation.contains('买入');
-      final wasSell = record.recommendation.contains('卖出');
-      reliability = '推荐偏差';
-      if (wasSell) {
-        reliabilityColor = const Color(0xFFef5350);
-      } else if (wasBuy) {
-        reliabilityColor = const Color(0xFF26a69a);
-      } else {
-        reliabilityColor = priceChange > 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a);
-      }
+    if (currentPrice > 0 && (record.recommendation.contains('买入') ||
+        record.recommendation.contains('卖出') ||
+        record.recommendation.contains('观望'))) {
+      final level = _getReliabilityLevel(record, currentPrice);
+      final info = _getReliabilityInfo(level);
+      reliability = info.$1;
+      reliabilityColor = info.$2;
     } else {
       reliability = '推荐合理';
       reliabilityColor = Colors.orange;
@@ -368,11 +437,14 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         final priceChangePct = record.price > 0 && currentPrice > 0
             ? (currentPrice - record.price) / record.price * 100
             : 0.0;
-        final isDeviation = currentPrice > 0 ? _isDeviation(record, currentPrice) : false;
-
         String reliability = '未知';
-        if (currentPrice > 0) {
-          reliability = isDeviation ? '偏差' : '合理';
+        bool isDeviation = false;
+        if (currentPrice > 0 && (record.recommendation.contains('买入') ||
+            record.recommendation.contains('卖出') ||
+            record.recommendation.contains('观望'))) {
+          final level = _getReliabilityLevel(record, currentPrice);
+          reliability = _getReliabilityInfo(level).$1;
+          isDeviation = level == ReliabilityLevel.deviation || level == ReliabilityLevel.veryDeviation;
         }
 
         final row = [
@@ -452,31 +524,48 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
 
     final filteredArchives = _getFilteredAndSortedArchives();
 
-    // 统计合理/偏差条数（基于筛选后的结果）
+    // 统计4级可靠性条数（基于筛选后的结果）
+    int veryReasonableCount = 0;
     int reasonableCount = 0;
     int deviationCount = 0;
+    int veryDeviationCount = 0;
     for (final record in filteredArchives) {
       final currentQuote = _currentQuotes[record.code];
       final currentPrice = currentQuote?.price ?? 0;
-      if (currentPrice > 0) {
-        if (_isDeviation(record, currentPrice)) {
-          deviationCount++;
-        } else if (record.recommendation.contains('买入') ||
-                   record.recommendation.contains('卖出') ||
-                   record.recommendation.contains('观望')) {
-          reasonableCount++;
+      if (currentPrice > 0 && (record.recommendation.contains('买入') ||
+          record.recommendation.contains('卖出') ||
+          record.recommendation.contains('观望'))) {
+        final level = _getReliabilityLevel(record, currentPrice);
+        switch (level) {
+          case ReliabilityLevel.veryReasonable:
+            veryReasonableCount++;
+            break;
+          case ReliabilityLevel.reasonable:
+            reasonableCount++;
+            break;
+          case ReliabilityLevel.deviation:
+            deviationCount++;
+            break;
+          case ReliabilityLevel.veryDeviation:
+            veryDeviationCount++;
+            break;
         }
       }
     }
-    final total = reasonableCount + deviationCount;
-    final winRate = total > 0 ? (reasonableCount / total * 100) : 0.0;
+    final total = veryReasonableCount + reasonableCount + deviationCount + veryDeviationCount;
+    final winRate = total > 0 ? ((veryReasonableCount + reasonableCount) / total * 100) : 0.0;
     final isFiltered = _filterReliability != '全部' || _filterType != '全部';
+
+    final veryReasonablePct = total > 0 ? (veryReasonableCount / total * 100) : 0.0;
+    final reasonablePct = total > 0 ? (reasonableCount / total * 100) : 0.0;
+    final deviationPct = total > 0 ? (deviationCount / total * 100) : 0.0;
+    final veryDeviationPct = total > 0 ? (veryDeviationCount / total * 100) : 0.0;
 
     return RefreshIndicator(
       onRefresh: _loadArchives,
       child: CustomScrollView(
         slivers: [
-          // 顶部胜率统计卡片（两行布局：统计 + 操作按钮）
+          // 顶部胜率统计卡片（三行布局：胜率 + 分段比例条 + 操作按钮）
           SliverToBoxAdapter(
             child: Container(
               margin: const EdgeInsets.fromLTRB(8, 8, 8, 4),
@@ -488,7 +577,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
               ),
               child: Column(
                 children: [
-                  // 第一行：胜率 + 合理/偏差/总计
+                  // 第一行：胜率 + 总计
                   Row(
                     children: [
                       Expanded(
@@ -506,38 +595,72 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                       ),
                       Container(width: 1, height: 40, color: Colors.white12),
                       const SizedBox(width: 16),
-                      Expanded(
+                      Column(
+                        children: [
+                          const Text('总计', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                          const SizedBox(height: 2),
+                          Text('$total', style: const TextStyle(color: Colors.white70, fontSize: 22, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // 第二行：分段比例条 + 标签
+                  Column(
+                    children: [
+                      // 分段比例条
+                      Container(
+                        height: 12,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(6),
+                          color: Colors.white10,
+                        ),
                         child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: [
-                            Column(
-                              children: [
-                                const Text('合理', style: TextStyle(color: Colors.orange, fontSize: 11)),
-                                const SizedBox(height: 2),
-                                Text('$reasonableCount', style: const TextStyle(color: Colors.orange, fontSize: 22, fontWeight: FontWeight.bold)),
-                              ],
+                            // 非常合理（绿）
+                            Container(
+                              width: veryReasonablePct * 0.01 * double.infinity,
+                              decoration: BoxDecoration(
+                                borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
+                                color: _kVeryReasonableColor,
+                              ),
                             ),
-                            Column(
-                              children: [
-                                const Text('偏差', style: TextStyle(color: Color(0xFF26a69a), fontSize: 11)),
-                                const SizedBox(height: 2),
-                                Text('$deviationCount', style: const TextStyle(color: Color(0xFF26a69a), fontSize: 22, fontWeight: FontWeight.bold)),
-                              ],
+                            // 合理（橙）
+                            Container(
+                              width: reasonablePct * 0.01 * double.infinity,
+                              color: _kReasonableColor,
                             ),
-                            Column(
-                              children: [
-                                const Text('总计', style: TextStyle(color: Colors.white38, fontSize: 11)),
-                                const SizedBox(height: 2),
-                                Text('$total', style: const TextStyle(color: Colors.white70, fontSize: 22, fontWeight: FontWeight.bold)),
-                              ],
+                            // 偏差（青）
+                            Container(
+                              width: deviationPct * 0.01 * double.infinity,
+                              color: _kDeviationColor,
+                            ),
+                            // 非常偏差（红）
+                            Container(
+                              width: veryDeviationPct * 0.01 * double.infinity,
+                              decoration: BoxDecoration(
+                                borderRadius: const BorderRadius.horizontal(right: Radius.circular(6)),
+                                color: _kVeryDeviationColor,
+                              ),
                             ),
                           ],
                         ),
                       ),
+                      const SizedBox(height: 6),
+                      // 标签行：非常合理/合理/偏差/非常偏差
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _buildStatLabel('非常合理', veryReasonableCount, veryReasonablePct, _kVeryReasonableColor),
+                          _buildStatLabel('合理', reasonableCount, reasonablePct, _kReasonableColor),
+                          _buildStatLabel('偏差', deviationCount, deviationPct, _kDeviationColor),
+                          _buildStatLabel('非常偏差', veryDeviationCount, veryDeviationPct, _kVeryDeviationColor),
+                        ],
+                      ),
                     ],
                   ),
                   const SizedBox(height: 10),
-                  // 第二行：导出 + 删除按钮（各占一半宽度）
+                  // 第三行：导出 + 删除按钮（各占一半宽度）
                   Row(
                     children: [
                       Expanded(
@@ -647,23 +770,13 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
 
           String reliabilityLabel = '';
           Color reliabilityColor = Colors.transparent;
-          if (currentPrice > 0) {
-            final isDev = _isDeviation(record, currentPrice);
-            if (isDev) {
-              reliabilityLabel = '偏差';
-              if (record.recommendation.contains('卖出')) {
-                reliabilityColor = const Color(0xFFef5350);
-              } else if (record.recommendation.contains('买入')) {
-                reliabilityColor = const Color(0xFF26a69a);
-              } else {
-                reliabilityColor = priceChange > 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a);
-              }
-            } else if (record.recommendation.contains('买入') ||
-                       record.recommendation.contains('卖出') ||
-                       record.recommendation.contains('观望')) {
-              reliabilityLabel = '合理';
-              reliabilityColor = Colors.orange;
-            }
+          if (currentPrice > 0 && (record.recommendation.contains('买入') ||
+              record.recommendation.contains('卖出') ||
+              record.recommendation.contains('观望'))) {
+            final level = _getReliabilityLevel(record, currentPrice);
+            final info = _getReliabilityInfo(level);
+            reliabilityLabel = info.$1;
+            reliabilityColor = info.$2;
           }
 
           final recColor = record.recommendation.contains('买入')
@@ -827,10 +940,8 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   }
 
   Widget _buildReliabilityDropdown() {
-    final options = ['全部', '合理', '偏差'];
-    final chipColor = _filterReliability == '合理' ? Colors.orange
-        : _filterReliability == '偏差' ? const Color(0xFF26a69a)
-        : const Color(0xFF8B949E);
+    final options = ['全部', '非常合理', '合理', '偏差', '非常偏差'];
+    final chipColor = _getReliabilityColor(_filterReliability);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
@@ -855,7 +966,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                   width: 6, height: 6,
                   margin: const EdgeInsets.only(right: 4),
                   decoration: BoxDecoration(
-                    color: f == '合理' ? Colors.orange : const Color(0xFF26a69a),
+                    color: _getReliabilityColor(f),
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -864,7 +975,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
             ],
           )).toList(),
           items: options.map((f) {
-            final color = f == '合理' ? Colors.orange : f == '偏差' ? const Color(0xFF26a69a) : Colors.white70;
+            final color = _getReliabilityColor(f);
             return DropdownMenuItem(
               value: f,
               child: Row(
@@ -888,6 +999,22 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     );
   }
 
+  /// 获取可靠性标签对应的颜色
+  static Color _getReliabilityColor(String label) {
+    switch (label) {
+      case '非常合理':
+        return _kVeryReasonableColor;
+      case '合理':
+        return _kReasonableColor;
+      case '偏差':
+        return _kDeviationColor;
+      case '非常偏差':
+        return _kVeryDeviationColor;
+      default:
+        return const Color(0xFF8B949E);
+    }
+  }
+
   Widget _buildTag(String text, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
@@ -896,6 +1023,27 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         borderRadius: BorderRadius.circular(3),
       ),
       child: Text(text, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+    );
+  }
+
+  /// 统计标签组件：显示"标签 N(X%)"格式
+  Widget _buildStatLabel(String label, int count, double pct, Color color) {
+    return Container(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            margin: const EdgeInsets.only(right: 3),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          Text(
+            '$label $count(${pct.toStringAsFixed(0)}%)',
+            style: TextStyle(color: color, fontSize: 10),
+          ),
+        ],
+      ),
     );
   }
 
