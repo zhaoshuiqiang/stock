@@ -84,6 +84,8 @@ class DiscoverScreenState extends State<DiscoverScreen>
   SentimentResult? _sentiment;
   bool _limitUpScanLoading = false;
   StreamSubscription<LimitUpScanProgress>? _limitUpScanSub;
+  String? _limitUpTradeDate;      // 当前打板数据所属交易日
+  bool _isLimitUpDataHistorical = false; // 是否为历史数据
 
   // ─── 缓存的列表数据（避免 build 中重复计算） ──────────────────
   List<_LimitUpGroup> _cachedLimitUpGroups = [];
@@ -335,9 +337,13 @@ class DiscoverScreenState extends State<DiscoverScreen>
   Future<void> _loadLimitUpPoolFromDb() async {
     try {
       final pool = await _dbService.getLimitUpPool();
+      final shanghaiNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+      final todayDate = shanghaiNow.toIso8601String().substring(0, 10);
       if (mounted) {
         setState(() {
           _limitUpPool = pool;
+          _limitUpTradeDate = LimitUpScanEngine.instance.currentTradeDate ?? todayDate;
+          _isLimitUpDataHistorical = LimitUpScanEngine.instance.isCurrentDataHistorical;
           _updateCachedLists();
         });
       }
@@ -351,10 +357,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
     setState(() => _limitUpScanLoading = true);
     try {
       final sentiment = await LimitUpScanEngine.instance.scan();
-      // scan()返回null可能是already_running，等待进度流完成
       if (sentiment == null && LimitUpScanEngine.instance.isRunning) {
-        // 引擎正在运行，进度流会处理状态更新
-        // 不再早退，等待进度流完成时重置状态
         return;
       }
       final pool = await _dbService.getLimitUpPool();
@@ -362,6 +365,8 @@ class DiscoverScreenState extends State<DiscoverScreen>
         setState(() {
           _sentiment = sentiment;
           _limitUpPool = pool;
+          _limitUpTradeDate = LimitUpScanEngine.instance.currentTradeDate;
+          _isLimitUpDataHistorical = LimitUpScanEngine.instance.isCurrentDataHistorical;
           _limitUpScanLoading = false;
           _updateCachedLists();
         });
@@ -760,6 +765,10 @@ class DiscoverScreenState extends State<DiscoverScreen>
       );
     }
     final sealedCount = pool.where((a) => !a.isZhaBan).length;
+    final dateLabel = _limitUpTradeDate != null
+        ? _formatDateLabel(_limitUpTradeDate!)
+        : '';
+    final isHistorical = widget.limitUpPoolOverride == null && _isLimitUpDataHistorical;
     return Column(
       children: [
         _buildTabHeader(
@@ -770,6 +779,8 @@ class DiscoverScreenState extends State<DiscoverScreen>
           accentColor: _kLimitUpColor,
           actionText: _limitUpScanLoading ? '扫描中...' : '刷新打板池',
           onAction: _limitUpScanLoading ? null : _refreshLimitUpPool,
+          dateLabel: dateLabel,
+          isHistorical: isHistorical,
         ),
         _buildBatchAddBar(
           pool.map((a) => WatchlistItem(code: a.code, name: a.name)).toList(),
@@ -796,6 +807,29 @@ class DiscoverScreenState extends State<DiscoverScreen>
         ),
       ],
     );
+  }
+
+  /// 格式化日期标签（如 "7/3 周四"）
+  String _formatDateLabel(String dateStr) {
+    try {
+      final date = DateTime.parse(dateStr);
+      final now = DateTime.now().toUtc().add(const Duration(hours: 8));
+      final today = DateTime(now.year, now.month, now.day);
+      final yesterday = today.subtract(const Duration(days: 1));
+      final targetDate = DateTime(date.year, date.month, date.day);
+
+      final weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+      if (targetDate == today) {
+        return '今日 ${weekDays[date.weekday % 7]}';
+      } else if (targetDate == yesterday) {
+        return '昨日 ${weekDays[date.weekday % 7]}';
+      } else {
+        return '${date.month}/${date.day} ${weekDays[date.weekday % 7]}';
+      }
+    } catch (_) {
+      return dateStr;
+    }
   }
 
   /// 打板扫描加载指示器
@@ -1239,39 +1273,60 @@ class DiscoverScreenState extends State<DiscoverScreen>
     required Color accentColor,
     String? actionText,
     VoidCallback? onAction,
+    String? dateLabel,
+    bool isHistorical = false,
   }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 6,
-            height: 14,
-            decoration: BoxDecoration(
-              color: accentColor,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text('$count只', style: TextStyle(
-            color: accentColor, fontSize: 13, fontWeight: FontWeight.bold)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(hint, style: const TextStyle(
-                color: _kTextSecondary, fontSize: 11),
-              overflow: TextOverflow.ellipsis),
-          ),
-          if (actionText != null && onAction != null)
-            TextButton(
-              onPressed: onAction,
-              style: TextButton.styleFrom(
-                foregroundColor: accentColor,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          Row(
+            children: [
+              Container(
+                width: 6,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: accentColor,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-              child: Text(actionText, style: const TextStyle(fontSize: 12)),
-            ),
+              const SizedBox(width: 8),
+              Text('$count只', style: TextStyle(
+                color: accentColor, fontSize: 13, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 8),
+              if (dateLabel?.isNotEmpty ?? false)
+                Text(dateLabel!, style: const TextStyle(
+                  color: _kTextSecondary, fontSize: 11)),
+              if (isHistorical)
+                Container(
+                  margin: const EdgeInsets.only(left: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF26A69A).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text('历史数据', style: TextStyle(
+                    color: Color(0xFF26A69A), fontSize: 10)),
+                ),
+              const Spacer(),
+              if (actionText != null && onAction != null)
+                TextButton(
+                  onPressed: onAction,
+                  style: TextButton.styleFrom(
+                    foregroundColor: accentColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(actionText, style: const TextStyle(fontSize: 12)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(hint, style: const TextStyle(
+            color: _kTextSecondary, fontSize: 11),
+            overflow: TextOverflow.ellipsis),
         ],
       ),
     );

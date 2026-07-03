@@ -7,27 +7,224 @@ This file provides guidance to CodeBuddy Code when working with code in this rep
 Flutter (Dart) A-share stock analysis Android app. Pure client-side rule engine — no backend server, no LLM/API calls. All technical analysis computed locally from K-line data fetched via public stock APIs (EastMoney/Tencent/Sina).
 
 - **Entry point**: `mobile/lib/main.dart`
-- **Version**: `mobile/pubspec.yaml` + `mobile/lib/core/app_version.dart` (currently v2.27.0)
+- **Version**: `mobile/pubspec.yaml` + `mobile/lib/core/app_version.dart` (currently v2.50.0)
 - **Python env**: `venv/` (akshare for concept data generation)
 
-## Commands
+## Development Workflow
+
+### 1. Development Environment
+
+| Component | Path |
+|-----------|------|
+| Flutter SDK | `D:\flutter` |
+| Android SDK | `D:\MyProjects\stock\android-sdk` |
+| Emulator (AVD) | `D:\MyProjects\stock\android-emulator` (non-C drive) |
+
+#### Environment Variables
+
+```powershell
+ANDROID_HOME=D:\MyProjects\stock\android-sdk
+ANDROID_SDK_ROOT=D:\Users\zsq53\Desktop\stock\android-sdk
+ANDROID_AVD_HOME=D:\MyProjects\stock\android-emulator
+```
+
+### 2. 完整工作流（开发 → 编译 → 测试 → 提交）
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 1: 开发环境准备                                           │
+├─────────────────────────────────────────────────────────────────┤
+│  git clone https://github.com/zhaoshuiqiang/stock.git           │
+│  cd stock                                                       │
+│  cd mobile && flutter pub get                                   │
+│  flutter emulators --launch StockEmulator                       │
+│  flutter run -d emulator-5554                                   │
+├─────────────────────────────────────────────────────────────────┤
+│  Step 2: 代码开发                                               │
+├─────────────────────────────────────────────────────────────────┤
+│  编辑 mobile/lib/ 下的文件                                      │
+│  Hot reload: 保存文件或按 R 键                                   │
+├─────────────────────────────────────────────────────────────────┤
+│  Step 3: 运行测试                                               │
+├─────────────────────────────────────────────────────────────────┤
+│  cd mobile && flutter test                                      │
+│  ✅ 全部通过后继续下一步                                         │
+├─────────────────────────────────────────────────────────────────┤
+│  Step 4: 编译 APK（使用 PowerShell 脚本）                        │
+├─────────────────────────────────────────────────────────────────┤
+│  powershell -File mobile/build_release.ps1                      │
+│  输出: d:\MyProjects\stock\stock-vX.Y.Z.apk                     │
+├─────────────────────────────────────────────────────────────────┤
+│  Step 5: Git 提交                                               │
+├─────────────────────────────────────────────────────────────────┤
+│  git status                                                     │
+│  git add mobile/lib/screens/xxx.dart mobile/pubspec.yaml ...    │
+│  git commit -m "vX.Y.Z: Description"                            │
+│  git push origin main                                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 3. 详细步骤说明
+
+#### 3.1 开发环境准备
 
 ```bash
+# 克隆仓库
+git clone https://github.com/zhaoshuiqiang/stock.git
+cd stock
+
+# 安装依赖
+cd mobile && flutter pub get
+
+# 启动模拟器并运行应用
+flutter emulators --launch StockEmulator
+flutter run -d emulator-5554
+```
+
+#### 3.2 代码开发
+
+- 编辑 `mobile/lib/` 目录下的文件
+- Hot reload: 保存文件或在终端按 R 键
+- 推荐使用 VS Code 配合 Flutter 插件开发
+
+#### 3.3 运行测试
+
+```bash
+# 运行全部测试（674+ tests）
+cd mobile && flutter test
+
+# 运行单个测试文件
+cd mobile && flutter test test/signal_engine_test.dart
+
+# 运行测试并生成覆盖率报告
+cd mobile && flutter test --coverage
+genhtml coverage/lcov.info -o coverage/html
+```
+
+**测试策略**
+
+| Test Type | Coverage | Purpose |
+|-----------|----------|---------|
+| Unit Tests | 39 files, 674+ tests | Core algorithm logic |
+| Integration Tests | TBD | UI flow validation |
+| Emulator Testing | Manual | Visual verification |
+
+#### 3.4 编译 APK（执行脚本）
+
+**方法一：使用 PowerShell 脚本（推荐）**
+
+```bash
+powershell -File mobile/build_release.ps1
+```
+
+脚本功能：
+1. 自动读取 `pubspec.yaml` 中的版本号
+2. 执行 `flutter build apk --release`
+3. 将生成的 APK 复制到项目根目录，命名为 `stock-vX.Y.Z.apk`
+4. 显示 APK 文件大小
+
+**方法二：手动编译**
+
+```bash
+# Build debug APK
+cd mobile && flutter build apk
+
 # Build release APK
 cd mobile && flutter build apk --release
-# Or use the PowerShell script (auto-names with version):
-powershell -File mobile/build_release.ps1
 
+# Build app bundle for Google Play
+cd mobile && flutter build appbundle
+```
+
+#### 3.5 Git 提交与推送
+
+```bash
+# 1. 查看状态，确认修改的文件
+git status
+
+# 2. 暂存文件（明确指定，避免 git add .）
+git add mobile/lib/screens/discover_screen.dart mobile/pubspec.yaml ...
+
+# 3. 提交（遵循版本号格式）
+git commit -m "vX.Y.Z: Brief description of changes
+
+- Detailed change 1
+- Detailed change 2
+- Detailed change 3"
+
+# 4. 推送到远程
+git push origin main
+```
+
+#### 3.6 代码审查
+
+```bash
+# 查看变更
+git diff
+
+# 使用 TRAE-code-review skill 进行结构化审查
+# 重点关注：错误处理、空安全、性能、代码风格
+```
+
+**审查清单**
+
+- [ ] 无死代码（未使用的变量/方法）
+- [ ] 正确的错误处理（try/catch）
+- [ ] 空安全合规
+- [ ] 一致的命名规范
+- [ ] 性能：无不必要的计算
+- [ ] UI：一致的颜色和间距
+- [ ] 版本号更新：pubspec.yaml + app_version.dart + update_log_screen.dart
+
+### 4. 版本发布流程
+
+**Step 1: 更新版本号（3个文件）**
+
+```bash
+# mobile/pubspec.yaml
+version: X.Y.Z
+
+# mobile/lib/core/app_version.dart
+static const String version = 'X.Y.Z';
+
+# mobile/lib/screens/update_log_screen.dart
+Add new version entry to updates list
+```
+
+**Step 2: 测试并编译**
+
+```bash
+cd mobile && flutter test
+powershell -File mobile/build_release.ps1
+```
+
+**Step 3: 提交并推送**
+
+```bash
+git add mobile/pubspec.yaml mobile/lib/core/app_version.dart mobile/lib/screens/update_log_screen.dart
+git commit -m "vX.Y.Z: Version bump"
+git push origin main
+```
+
+## Quick Reference Commands
+
+```bash
 # Install dependencies
 cd mobile && flutter pub get
 
 # Run tests
 cd mobile && flutter test
 
-# Run a single test file
-cd mobile && flutter test test/signal_engine_test.dart
+# Build release APK
+powershell -File mobile/build_release.ps1
 
-# Python: generate concept tags data
+# Start emulator
+flutter emulators --launch StockEmulator
+
+# Run app on emulator
+cd mobile && flutter run -d emulator-5554
+
+# Generate concept tags (Python)
 python scripts/build_concept_tags.py
 # Output: mobile/assets/concept_tags.json
 ```
@@ -90,7 +287,7 @@ Migrations follow `if (oldVersion < N)` pattern in `database_service.dart`.
 
 ### Testing
 
-131+ tests across 14 test files in `mobile/test/`. Tests import from `mobile/lib/` directly — no special test setup needed.
+674+ tests across 39 test files in `mobile/test/`. Tests import from `mobile/lib/` directly — no special test setup needed.
 
 ### Key Conventions
 

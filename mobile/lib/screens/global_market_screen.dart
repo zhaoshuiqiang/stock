@@ -16,7 +16,8 @@ class _GlobalMarketScreenState extends State<GlobalMarketScreen>
   final ApiClient _apiClient = ApiClient();
   List<GlobalIndex> _indices = [];
   List<SectorInfo> _sectors = [];
-  bool _isLoading = false;
+  bool _isIndicesLoading = false;
+  bool _isSectorsLoading = false;
   String _indicesError = '';
   String _sectorsError = '';
   late TabController _tabController;
@@ -36,31 +37,52 @@ class _GlobalMarketScreenState extends State<GlobalMarketScreen>
 
   Future<void> _loadData() async {
     setState(() {
-      _isLoading = true;
+      _isIndicesLoading = true;
+      _isSectorsLoading = true;
       _indicesError = '';
       _sectorsError = '';
     });
 
-    try {
-      final results = await Future.wait([
-        _apiClient.getGlobalIndices(),
-        _apiClient.getHotSectors(),
-      ]);
+    Future.wait([
+      _loadGlobalIndices(),
+      _loadHotSectors(),
+    ]);
+  }
 
+  Future<void> _loadGlobalIndices() async {
+    try {
+      final result = await _apiClient.getGlobalIndices();
       if (mounted) {
         setState(() {
-          _indices = results[0] as List<GlobalIndex>;
-          _sectors = results[1] as List<SectorInfo>;
-          _isLoading = false;
+          _indices = result;
+          _isIndicesLoading = false;
           if (_indices.isEmpty) _indicesError = '暂无数据，下拉刷新重试';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isIndicesLoading = false;
+          _indicesError = '加载失败：$e';
+        });
+      }
+    }
+  }
+
+  Future<void> _loadHotSectors() async {
+    try {
+      final result = await _apiClient.getHotSectors();
+      if (mounted) {
+        setState(() {
+          _sectors = result;
+          _isSectorsLoading = false;
           if (_sectors.isEmpty) _sectorsError = '暂无板块数据';
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _isLoading = false;
-          _indicesError = '加载失败：$e';
+          _isSectorsLoading = false;
           _sectorsError = '加载失败：$e';
         });
       }
@@ -189,7 +211,7 @@ class _GlobalMarketScreenState extends State<GlobalMarketScreen>
 
     return RefreshIndicator(
       onRefresh: _loadData,
-      child: _isLoading && _indices.isEmpty
+      child: _isIndicesLoading && _indices.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(8),
@@ -235,7 +257,7 @@ class _GlobalMarketScreenState extends State<GlobalMarketScreen>
 
     return RefreshIndicator(
       onRefresh: _loadData,
-      child: _isLoading && _sectors.isEmpty
+      child: _isSectorsLoading && _sectors.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(8),

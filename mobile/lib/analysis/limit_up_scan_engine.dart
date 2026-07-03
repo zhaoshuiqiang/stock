@@ -14,11 +14,15 @@ class LimitUpScanProgress {
   final int current;
   final int total;
   final String? message;
+  final String? tradeDate;   // 数据所属交易日
+  final bool isHistorical;   // 是否为历史数据（非今日数据）
   const LimitUpScanProgress({
     required this.stage,
     this.current = 0,
     this.total = 0,
     this.message,
+    this.tradeDate,
+    this.isHistorical = false,
   });
 }
 
@@ -31,9 +35,15 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
   final ApiClient _apiClient;
   final DatabaseService _dbService;
 
+  String? _currentTradeDate;
+  bool _isCurrentDataHistorical = false;
+
   LimitUpScanEngine._()
       : _apiClient = ApiClient(),
         _dbService = DatabaseService();
+
+  String? get currentTradeDate => _currentTradeDate;
+  bool get isCurrentDataHistorical => _isCurrentDataHistorical;
 
   /// 执行完整扫描流程
   /// 返回 SentimentResult（也通过 progressStream 广播进度）
@@ -49,15 +59,18 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
       final todayStocks = await LimitUpUniverseProvider.fetchLatest(apiClient: _apiClient);
 
       if (todayStocks.isEmpty) {
-        // 今日无涨停标的（非交易日/API故障），从DB读取最近交易日数据
+        final shanghaiNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+        final todayDate = shanghaiNow.toIso8601String().substring(0, 10);
+
         final dbPool = await _dbService.getLimitUpPool();
         if (dbPool.isEmpty) {
-          // DB也无数据，尝试从最近交易日读取
           final dates = await _dbService.getLimitUpDates();
           if (dates.isNotEmpty) {
             final latestDate = dates.first;
             final latestPool = await _dbService.getLimitUpPool(tradeDate: latestDate);
             if (latestPool.isNotEmpty) {
+              _currentTradeDate = latestDate;
+              _isCurrentDataHistorical = latestDate != todayDate;
               final todayAnalyses = latestPool;
               final sentiment = SentimentThermometer.compute(
                 todayPool: todayAnalyses,
@@ -66,14 +79,23 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
                 yesterdayPhase: _lastSentiment?.phase,
               );
               _lastSentiment = sentiment;
-              emit(const LimitUpScanProgress(stage: 'done', message: '使用缓存数据计算情绪'));
+              emit(LimitUpScanProgress(
+                stage: 'done',
+                message: '使用缓存数据计算情绪',
+                tradeDate: latestDate,
+                isHistorical: true,
+              ));
               return sentiment;
             }
           }
+          _currentTradeDate = null;
+          _isCurrentDataHistorical = false;
           emit(const LimitUpScanProgress(stage: 'done', message: '暂无涨停数据'));
           return null;
         }
-        // 用DB缓存数据计算基础情绪
+
+        _currentTradeDate = todayDate;
+        _isCurrentDataHistorical = true;
         final sentiment = SentimentThermometer.compute(
           todayPool: dbPool,
           yesterdayPool: [],
@@ -81,7 +103,12 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
           yesterdayPhase: _lastSentiment?.phase,
         );
         _lastSentiment = sentiment;
-        emit(const LimitUpScanProgress(stage: 'done', message: '使用缓存数据计算情绪'));
+        emit(LimitUpScanProgress(
+          stage: 'done',
+          message: '使用缓存数据计算情绪',
+          tradeDate: todayDate,
+          isHistorical: true,
+        ));
         return sentiment;
       }
 
@@ -126,9 +153,16 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
       // A股交易日按上海时区计算，避免海外/出差用户日期偏移
       final shanghaiNow = DateTime.now().toUtc().add(const Duration(hours: 8));
       final tradeDate = shanghaiNow.toIso8601String().substring(0, 10);
+      _currentTradeDate = tradeDate;
+      _isCurrentDataHistorical = false;
       await _dbService.replaceLimitUpPool(todayAnalyses, tradeDate);
 
-      emit(const LimitUpScanProgress(stage: 'done', message: '扫描完成'));
+      emit(LimitUpScanProgress(
+        stage: 'done',
+        message: '扫描完成',
+        tradeDate: tradeDate,
+        isHistorical: false,
+      ));
       return sentiment;
     } catch (e) {
       debugPrint('LimitUpScanEngine.scan failed: $e');

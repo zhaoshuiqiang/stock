@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.51.0',
+        'date': '2026-07-03',
+        'changes': [
+          '打板梯队页面修复：添加数据日期显示和历史数据标识，解决"没有涨停却显示连板"的困惑',
+          'LimitUpScanEngine新增数据日期追踪：记录数据所属交易日，区分今日数据与历史数据',
+          '打板梯队头部新增日期标签和历史数据徽章，用户可清晰区分数据时效性',
+        ],
+      },
+      {
         'version': 'v2.50.0',
         'date': '2026-07-03',
         'changes': [
