@@ -163,7 +163,7 @@ class ComprehensiveScorer {
       else recommendation = '强烈卖出';
     }
 
-    final double effectiveScore = isST ? totalScore.toDouble() : adjustedScore;
+    final double effectiveScore = isST ? totalScore.toDouble() : temperedScore;
     double positionAdvice = effectiveScore / 10.0;
     String positionLabel;
     if (effectiveScore >= 8) positionLabel = '可积极建仓';

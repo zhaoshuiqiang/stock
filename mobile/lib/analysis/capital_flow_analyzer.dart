@@ -50,21 +50,21 @@ class CapitalFlowAnalyzer {
       if (priceChange5d > 5 && avgVol5 < avgVol10 * 0.8 && priceChange10d > 8) { score += 0.8; signals.add('趋势上涨中缩量，主力锁仓'); }
       if (priceChange10d > 5 && priceChange5d < 2 && avgVol5 < avgVol10 * 0.7) { score -= 0.5; signals.add('量价背离：上涨趋势量能衰减'); }
 
-      if (klineData.length >= 5) {
-        final obv5ago = klineData[klineData.length - 5].obv;
-        if (obv5ago != 0) {
-          final obvChange = (last.obv - obv5ago) / obv5ago.abs() * 100;
-          if (obvChange > 10) { score += 0.8; signals.add('OBV近5日显著上升'); }
-          else if (obvChange > 5) { score += 0.4; }
-          else if (obvChange < -10) { score -= 0.8; signals.add('OBV近5日显著下降'); }
-          else if (obvChange < -5) { score -= 0.4; }
-        }
+      final obv5ago = klineData[klineData.length - 5].obv;
+      if (obv5ago != 0) {
+        final obvChange = (last.obv - obv5ago) / obv5ago.abs() * 100;
+        if (obvChange > 10) { score += 0.8; signals.add('OBV近5日显著上升'); }
+        else if (obvChange > 5) { score += 0.4; }
+        else if (obvChange < -10) { score -= 0.8; signals.add('OBV近5日显著下降'); }
+        else if (obvChange < -5) { score -= 0.4; }
       }
 
+      // 量能放大因子：avgVol5/avgVol10 > 1 表示放量，应放大资金流向信号
       final priceFactor5d = priceChange5d / 100.0;
-      final volFactor = avgVol5 > 0 ? avgVol10 / avgVol5 : 1.0;
-      mainNetFlow5d = priceFactor5d * volFactor * 10;
-      mainNetFlow10d = (priceChange10d / 100.0) * (avgVol10 > 0 ? avgVol5 / avgVol10 : 1.0) * 10;
+      final volFactor5d = avgVol10 > 0 ? avgVol5 / avgVol10 : 1.0;
+      final volFactor10d = avgVol10 > 0 ? avgVol5 / avgVol10 : 1.0;
+      mainNetFlow5d = priceFactor5d * volFactor5d * 10;
+      mainNetFlow10d = (priceChange10d / 100.0) * volFactor10d * 10;
       flowTrend = mainNetFlow5d > 0.1 ? 0.7 : mainNetFlow5d > 0.03 ? 0.3 : mainNetFlow5d > -0.03 ? 0 : mainNetFlow5d > -0.1 ? -0.3 : -0.7;
     }
 
@@ -86,7 +86,9 @@ class CapitalFlowAnalyzer {
         final recent3to6 = klineData.sublist(klineData.length - 6, klineData.length - 3);
         final avgVol3 = recent3.map((d) => d.volume).reduce((a, b) => a + b) / 3;
         final avgVol3to6 = recent3to6.map((d) => d.volume).reduce((a, b) => a + b) / 3;
-        final priceStable = (recent3.last.close / recent3.first.close - 1).abs() < 1.5;
+        final priceStable = recent3.first.close > 0
+            ? (recent3.last.close / recent3.first.close - 1).abs() < 1.5
+            : false;
         if (avgVol3 > avgVol3to6 * 1.2 && priceStable) { score += 1.2; signals.add('跌幅后缩量企稳放量，吸筹迹象'); }
       }
       if (priceChange15d > 15) {

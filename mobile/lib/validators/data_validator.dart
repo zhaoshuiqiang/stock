@@ -46,7 +46,7 @@ class DataValidator {
     final isST = quote.name.contains('ST');
     final codeNum = quote.code.replaceAll(RegExp(r'^[a-zA-Z]+'), '');
     final isMainBoard = codeNum.startsWith('60') || codeNum.startsWith('00');
-    final changeLimit = isST ? 5.0 : (isMainBoard ? 11.0 : 21.0); // 留1%容差
+    final changeLimit = isST ? 6.0 : (isMainBoard ? 11.0 : 21.0); // 留1%容差
     if (quote.changePct.abs() > changeLimit) {
       anomalies.add(DataAnomaly(
         type: DataAnomalyType.extremeChange,

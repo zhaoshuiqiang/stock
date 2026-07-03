@@ -201,6 +201,7 @@ class QuoteData {
     double? volumeRatio,
     DateTime? updateTime,
     String? confidence,
+    String? sectorName,
   }) {
     return QuoteData(
       code: code ?? this.code,
@@ -227,6 +228,7 @@ class QuoteData {
       volumeRatio: volumeRatio ?? this.volumeRatio,
       updateTime: updateTime ?? this.updateTime,
       confidence: confidence ?? this.confidence,
+      sectorName: sectorName ?? this.sectorName,
     );
   }
 }

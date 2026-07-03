@@ -24,6 +24,12 @@ class TechnicalScorer {
     List<SignalItem> buySignals,
     List<SignalItem> sellSignals,
   ) {
+    if (data.isEmpty) {
+      return TechnicalScoreResult(
+        signalScore: 1.5, trendScore: 1.0, momentumScore: 1.0,
+        volumeScore: 0.75, volatilityScore: 1.0, totalScore: 5.0,
+      );
+    }
     final signalScore = _scoreSignal(data, buySignals, sellSignals);
     final trendScore = _scoreTrend(data);
     final momentumScore = _scoreMomentum(data);
@@ -89,12 +95,13 @@ class TechnicalScorer {
         trendScore = 0.3;
       }
     }
-    if (last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0) {
-      if (last.ma5 < last.ma10 && last.ma10 < last.ma20) {
-        trendScore = 0;
-      }
+    final isBearishAlignment = last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0
+        && last.ma5 < last.ma10 && last.ma10 < last.ma20;
+    if (isBearishAlignment) {
+      trendScore = 0;
     }
-    if (last.adx14 > 25) {
+    // ADX 趋势强度加成：仅在非空头排列时给予奖励，避免强化下跌趋势
+    if (!isBearishAlignment && last.adx14 > 25) {
       trendScore += 0.5;
     } else if (last.adx14 > 0 && last.adx14 < 20) {
       trendScore -= 0.3;

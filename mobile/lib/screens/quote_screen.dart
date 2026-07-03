@@ -113,11 +113,13 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
 
     if (_isFavorite) {
       await _dbService.addToWatchlist(widget.code, widget.name);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('已添加到自选股')),
       );
     } else {
       await _dbService.removeFromWatchlist(widget.code);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('已从自选股移除')),
       );
@@ -335,7 +337,10 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     try {
       // Fetch fresh klines bypassing cache
       final klines = await _apiClient.getStockHistory(widget.code, days: 120);
-      if (klines.isEmpty) return;
+      if (klines.isEmpty) {
+        if (mounted) setState(() { _isAnalysisRefreshing = false; });
+        return;
+      }
       if (!mounted) return;
 
       final calculated = calcAllIndicators(klines);
@@ -1031,14 +1036,22 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     final signalResult = _intradayLevelResult;
     final buySpots = <FlSpot>[];
     final sellSpots = <FlSpot>[];
+    final buySpotSignals = <IntradayLevelPoint>[];
+    final sellSpotSignals = <IntradayLevelPoint>[];
     if (signalResult != null) {
       for (final s in signalResult.buySignals) {
         final price = _timeshareData[s.minuteOffset];
-        if (price != null) buySpots.add(FlSpot(s.minuteOffset.toDouble(), price));
+        if (price != null) {
+          buySpots.add(FlSpot(s.minuteOffset.toDouble(), price));
+          buySpotSignals.add(s);
+        }
       }
       for (final s in signalResult.sellSignals) {
         final price = _timeshareData[s.minuteOffset];
-        if (price != null) sellSpots.add(FlSpot(s.minuteOffset.toDouble(), price));
+        if (price != null) {
+          sellSpots.add(FlSpot(s.minuteOffset.toDouble(), price));
+          sellSpotSignals.add(s);
+        }
       }
     }
 
@@ -1228,8 +1241,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       dotData: FlDotData(
                         show: true,
                         getDotPainter: (spot, x, barData, spotIndex) {
-                          final signals = signalResult?.buySignals;
-                          final isHigh = signals != null && spotIndex < signals.length ? signals[spotIndex].isHighConfidence : false;
+                          final isHigh = spotIndex < buySpotSignals.length ? buySpotSignals[spotIndex].isHighConfidence : false;
                           return FlDotCirclePainter(
                             radius: isHigh ? 5.5 : 4.5,
                             color: Colors.greenAccent,
@@ -1250,8 +1262,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       dotData: FlDotData(
                         show: true,
                         getDotPainter: (spot, x, barData, spotIndex) {
-                          final signals = signalResult?.sellSignals;
-                          final isHigh = signals != null && spotIndex < signals.length ? signals[spotIndex].isHighConfidence : false;
+                          final isHigh = spotIndex < sellSpotSignals.length ? sellSpotSignals[spotIndex].isHighConfidence : false;
                           return FlDotCirclePainter(
                             radius: isHigh ? 5.5 : 4.5,
                             color: Colors.redAccent,

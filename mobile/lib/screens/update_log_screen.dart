@@ -10,6 +10,26 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.48.0',
+        'date': '2026-07-03',
+        'changes': [
+          '修复资金流向评分：5日资金流向量能因子方向反了（avgVol10/avgVol5应为avgVol5/avgVol10），放量上涨的资金流向信号被错误缩小，现已与10日因子方向一致',
+          '修复仓位建议与推荐评级矛盾：positionAdvice使用adjustedScore（未折价）而totalScore使用temperedScore（含0.97温和系数和板块热度折扣），导致"偏多观望"却"可适度参与"，现统一使用temperedScore',
+          '修复技术评分空头排列+强ADX得分异常：ADX趋势强度加成无条件叠加，空头排列(本应为0分)反而获得0.5分高于盘整0.3分，现仅在非空头排列时给予ADX加成',
+          '修复ST股票涨跌容差：ST容差设为5.0%导致5.0%-5.05%正常涨停被误报为异常，调整为6.0%（5%+1%容差）与主板/创业板一致',
+          '修复QuoteData.copyWith丢失sectorName：copyWith未包含sectorName字段，合并主力资金数据等场景下行业板块信息被清空',
+          '修复个股详情页分析刷新卡死：K线为空时提前返回未重置_isAnalysisRefreshing，加载指示器永久显示，30秒定时器重复进入卡死状态',
+          '修复个股详情页自选操作崩溃：await后未检查mounted，widget在异步期间被销毁时调用ScaffoldMessenger抛异常',
+          '修复分时信号点置信度错位：buySpots经过分时数据过滤后索引与原始buySignals不对齐，读取错误的isHighConfidence导致圆点大小/描边错误',
+          '修复分时低吸扫描时区：DateTime.now()使用本地时区，海外用户在A股交易时段获取null导致扫描为空，改为UTC+8上海时区',
+          '修复首页数据加载竞态：_loadData无重入保护，initState与下拉刷新并发时旧响应覆盖新数据，添加_isLoading防重入',
+          '修复CapitalFlowAnalyzer除零风险：recent3.first.close为0时产生Infinity/NaN，添加>0保护',
+          '修复SignalEngine ATR止损除零：last.close为0时除零产生Infinity，添加>0保护',
+          'TechnicalScorer添加空数据保护：data为空时访问last元素抛RangeError，现返回中性评分5.0',
+          '清理_fetchQuoteFromEastMoney中的空异常检测死代码（PB/PE校验块为空注释）',
+        ],
+      },
+      {
         'version': 'v2.47.0',
         'date': '2026-07-03',
         'changes': [

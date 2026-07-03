@@ -126,6 +126,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// 从API加载数据并保存到缓存
   Future<void> _loadData() async {
+    if (_isLoading) return; // 防止重入：initState与下拉刷新可能并发触发
     setState(() {
       _isLoading = true;
       _loadError = '';

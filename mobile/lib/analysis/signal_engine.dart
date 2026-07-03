@@ -166,7 +166,10 @@ String _getStopLossType(List<HistoryKline> data, HistoryKline last, double stopP
       return '20日低点止损';
     }
   }
-  return 'ATR动态止损(${(last.atr14 / last.close * 100).toStringAsFixed(1)}%)';
+  if (last.close > 0 && last.atr14 > 0) {
+    return 'ATR动态止损(${(last.atr14 / last.close * 100).toStringAsFixed(1)}%)';
+  }
+  return 'ATR动态止损';
 }
 
 /// 信号名 → 回测策略名映射（匹配 backtest_engine 的 key）

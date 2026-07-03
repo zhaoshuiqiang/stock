@@ -51,7 +51,8 @@ class IntradayScanEngine {
       final exploreResults = await db.getExploreResults();
       if (exploreResults.isEmpty) return [];
 
-      final now = DateTime.now();
+      // A股按上海时区(UTC+8)判断交易时段，避免海外用户时区偏移导致扫描为空
+      final now = DateTime.now().toUtc().add(const Duration(hours: 8));
       final currentOffset = IntradayLevelAnalyzer.timeToMinuteOffset(now);
       if (currentOffset == null) return [];
 

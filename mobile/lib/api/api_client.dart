@@ -249,14 +249,6 @@ class ApiClient {
             totalMarketCap = _parseDouble(parts[44]) * 10000; // 万元→元
           }
 
-          // PB/PE 合理性校验
-          if (pb > 0 && (pb > 100 || pb < 0.01)) {
-            // anomaly detected
-          }
-          if (pe > 0 && (pe > 10000 || pe < 0.01)) {
-            // anomaly detected
-          }
-
           final high = _parseDouble(parts[33]);
           final low = _parseDouble(parts[34]);
           final preClose = _parseDouble(parts[4]);
