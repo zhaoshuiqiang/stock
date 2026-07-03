@@ -10,6 +10,16 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.52.0',
+        'date': '2026-07-03',
+        'changes': [
+          '性能优化：降低QuoteScreen分析刷新频率从30秒到60秒，减少API请求和计算开销',
+          '性能优化：降低WatchlistScreen行情刷新频率从30秒到60秒',
+          '性能优化：QuoteScreen/ArchiveScreen/AlertsScreen添加应用生命周期管理，退后台时停止轮询',
+          '修复ArchiveScreen状态类名称不匹配导致编译失败',
+        ],
+      },
+      {
         'version': 'v2.51.0',
         'date': '2026-07-03',
         'changes': [

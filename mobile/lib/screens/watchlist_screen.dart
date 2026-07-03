@@ -106,7 +106,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
   void _startRefreshTimer() {
     _refreshTimer?.cancel();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       _refreshQuotes();
     });
   }

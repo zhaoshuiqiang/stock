@@ -46,7 +46,7 @@ class QuoteScreen extends StatefulWidget {
   State<QuoteScreen> createState() => QuoteScreenState();
 }
 
-class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderStateMixin {
+class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final ApiClient _apiClient = ApiClient();
   final DatabaseService _dbService = DatabaseService();
   Timer? _pollingTimer;
@@ -94,6 +94,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _tabController = TabController(length: 6, vsync: this);
     _loadData();
     _checkFavorite();
@@ -323,8 +324,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       }
     });
 
-    // 分析模块独立刷新定时器：30秒周期
-    _analysisRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    // 分析模块独立刷新定时器：60秒周期（降低频率减少卡顿）
+    _analysisRefreshTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       _refreshAnalysis();
     });
   }
@@ -2238,7 +2239,18 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _pollingTimer?.cancel();
+      _analysisRefreshTimer?.cancel();
+    } else if (state == AppLifecycleState.resumed) {
+      _startRealtime();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _apiClient.dispose();
     _tabController?.dispose();
     _pollingTimer?.cancel();

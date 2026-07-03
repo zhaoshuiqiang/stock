@@ -24,7 +24,7 @@ class AlertsScreen extends StatefulWidget {
   State<AlertsScreen> createState() => AlertsScreenState();
 }
 
-class AlertsScreenState extends State<AlertsScreen> {
+class AlertsScreenState extends State<AlertsScreen> with WidgetsBindingObserver {
   final DatabaseService _dbService = DatabaseService();
   final ApiClient _apiClient = ApiClient();
   List<AlertRule> _alerts = [];
@@ -42,6 +42,7 @@ class AlertsScreenState extends State<AlertsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadAlerts();
     _startAutoRefresh();
   }
@@ -841,7 +842,17 @@ class AlertsScreenState extends State<AlertsScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _refreshTimer?.cancel();
+    } else if (state == AppLifecycleState.resumed) {
+      _startAutoRefresh();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     _apiClient.dispose();
     super.dispose();

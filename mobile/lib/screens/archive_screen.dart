@@ -33,7 +33,7 @@ class ArchiveScreen extends StatefulWidget {
   State<ArchiveScreen> createState() => _ArchiveScreenState();
 }
 
-class _ArchiveScreenState extends State<ArchiveScreen> {
+class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserver {
   final ApiClient _apiClient = ApiClient();
   final DatabaseService _dbService = DatabaseService();
   List<ArchiveRecord> _archives = [];
@@ -48,6 +48,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadArchives();
     _startAutoRefresh();
   }
@@ -1048,7 +1049,17 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _refreshTimer?.cancel();
+    } else if (state == AppLifecycleState.resumed) {
+      _startAutoRefresh();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     _apiClient.dispose();
     super.dispose();
