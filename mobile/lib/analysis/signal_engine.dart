@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../models/stock_models.dart';
+import '../core/ai_config.dart';
 import 'indicators.dart';
 import 'signal_layer.dart';
 import 'technical_scorer.dart';
@@ -18,6 +19,8 @@ import 'sr_quality.dart';
 import 'capital_flow_analyzer.dart';
 import 'market_structure_analyzer.dart';
 import 'percentile_analyzer.dart';
+import 'ai_layer.dart';
+import 'debate_engine.dart';
 import 'recommendation_tracker.dart';
 import 'pattern_recognizer.dart';
 import 'sector_rotation.dart';
@@ -453,6 +456,40 @@ AnalysisResult generateAnalysis(
     confidenceScore: confidenceScore,
   );
 
+  // 13a. 历史决策反思注入（v2.53: 决策反馈闭环）
+  // 异步获取历史反思，不阻塞主分析流程
+  List<Map<String, dynamic>> historicalReflections = [];
+  if (quote != null) {
+    RecommendationTracker().getHistoricalReflections(quote.code).then((reflections) {
+      historicalReflections = reflections;
+      if (reflections.isNotEmpty) {
+        final summary = _generateReflectionSummary(reflections);
+        if (summary.isNotEmpty) {
+          reasons.add(summary);
+        }
+      }
+    }).catchError((e) { debugPrint('[信号引擎] 获取历史反思失败: $e'); });
+  }
+
+  // 13b. AI多智能体辩论（v2.54: 参考 TradingAgents 辩论机制）
+  // 异步执行，不阻塞主分析流程
+  if (quote != null && AIConfig.enableAIEnhancement && AILayerProvider.instance.isAvailable) {
+    _runAIDebate(
+      quote: quote,
+      totalScore: totalScore.toDouble(),
+      dimensionScores: {
+        '技术面': techResult.totalScore.toDouble(),
+        '实时行情': realtimeScore.toDouble(),
+        '共振': confluenceResult.score.toDouble(),
+        '资金流向': capitalFlowScore ?? 5.0,
+        '市场结构': marketStructure.structureScore.toDouble(),
+      },
+      reasons: reasons,
+      newsList: newsList,
+      historicalReflections: historicalReflections,
+    ).catchError((e) { debugPrint('[信号引擎] AI辩论失败: $e'); });
+  }
+
   // 追加打板理由（若当日涨停）
   if (limitUpAnalysis != null) {
     reasons.add('打板分析：${limitUpAnalysis.consecutiveDays}连板${limitUpAnalysis.boardType}，'
@@ -552,6 +589,7 @@ List<String> _generateReasons(
   Map<String, BacktestResult>? backtestResults,
   List<TradingStrategy>? activeStrategies,
   double confidenceScore = 0.5,
+  List<Map<String, dynamic>> historicalReflections = const [],
 }) {
   final reasons = <String>[];
   final buyCount = buySignals.length;
@@ -636,4 +674,82 @@ double _diluteKdjAdjustment(String signalName, double kValue, double rawAdj) {
     return 1.0 + (rawAdj - 1.0) * 0.5;
   }
   return rawAdj;
+}
+
+/// v2.53: 生成历史决策反思总结
+/// 根据已关闭推荐记录的实际收益生成反思摘要，用于增强当前分析的置信度判断
+String _generateReflectionSummary(List<Map<String, dynamic>> reflections) {
+  if (reflections.isEmpty) return '';
+
+  final totalReturn = reflections.fold<double>(0, (sum, r) => sum + (r['day20_return'] as double));
+  final avgReturn = totalReturn / reflections.length;
+  final positiveCount = reflections.where((r) => (r['day20_return'] as double) > 0).length;
+  final avgAlpha = reflections.fold<double>(0, (sum, r) => sum + (r['alpha_vs_market'] as double)) / reflections.length;
+
+  final buf = StringBuffer();
+  buf.write('历史表现: 近${reflections.length}次推荐');
+
+  if (avgReturn > 3) {
+    buf.write('平均盈利${avgReturn.toStringAsFixed(1)}%');
+    if (avgAlpha > 1) buf.write('(跑赢大盘${avgAlpha.toStringAsFixed(1)}%)');
+    buf.write('，胜率${((positiveCount / reflections.length) * 100).round()}%，策略有效性较强');
+  } else if (avgReturn > 0) {
+    buf.write('平均盈利${avgReturn.toStringAsFixed(1)}%');
+    if (avgAlpha < -1) buf.write('(跑输大盘${avgAlpha.abs().toStringAsFixed(1)}%)');
+    buf.write('，胜率${((positiveCount / reflections.length) * 100).round()}%，表现尚可');
+  } else if (avgReturn > -3) {
+    buf.write('平均亏损${avgReturn.abs().toStringAsFixed(1)}%');
+    buf.write('，胜率${((positiveCount / reflections.length) * 100).round()}%，需谨慎参考');
+  } else {
+    buf.write('平均亏损${avgReturn.abs().toStringAsFixed(1)}%');
+    buf.write('，胜率${((positiveCount / reflections.length) * 100).round()}%，策略近期失效');
+  }
+
+  return buf.toString();
+}
+
+/// v2.54: AI多智能体辩论 - 异步执行，不阻塞主分析流程
+Future<void> _runAIDebate({
+  required QuoteData quote,
+  required double totalScore,
+  required Map<String, dynamic> dimensionScores,
+  required List<String> reasons,
+  List<dynamic>? newsList,
+  required List<Map<String, dynamic>> historicalReflections,
+}) async {
+  if (!AILayerProvider.instance.isAvailable) return;
+
+  final newsTitles = <String>[];
+  if (newsList != null) {
+    for (final news in newsList) {
+      if (news is Map<String, dynamic>) {
+        final title = (news['title'] ?? news['title_ch'] ?? '').toString();
+        if (title.isNotEmpty) newsTitles.add(title);
+      }
+    }
+  }
+
+  final debateEngine = DebateEngine(AILayerProvider.instance);
+  final debateResult = await debateEngine.debate(
+    stockCode: quote.code,
+    stockName: quote.name,
+    totalScore: totalScore,
+    dimensionScores: dimensionScores,
+    newsTitles: newsTitles,
+    historicalReflections: historicalReflections,
+  );
+
+  if (debateResult.synthesis.conclusion.isNotEmpty) {
+    reasons.add('AI分析结论: ${debateResult.synthesis.conclusion}');
+  }
+  if (debateResult.synthesis.reasons.isNotEmpty) {
+    for (final reason in debateResult.synthesis.reasons) {
+      reasons.add('AI理由: $reason');
+    }
+  }
+  if (debateResult.synthesis.riskFactors.isNotEmpty) {
+    for (final risk in debateResult.synthesis.riskFactors) {
+      reasons.add('AI风险提示: $risk');
+    }
+  }
 }

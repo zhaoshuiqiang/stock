@@ -10,6 +10,27 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.55.0',
+        'date': '2026-07-03',
+        'changes': [
+          'AI多智能体辩论：集成GLM-4.7-Flash进行多空观点辩论，综合技术面维度数据生成分析结论',
+          'AI情绪分析：支持新闻标题情感倾向分析，异步执行不阻塞主流程',
+          'AI反思生成：推荐追踪20日完成后自动调用LLM生成决策反思，完成持续学习闭环',
+          'UI展示增强：TradingDashboard新增AI分析卡片，展示AI结论、理由和风险提示',
+          '代码审查修复：API密钥环境变量注入、HTTP超时与重试机制、资源释放优化',
+        ],
+      },
+      {
+        'version': 'v2.54.0',
+        'date': '2026-07-03',
+        'changes': [
+          '决策反馈闭环：引入TradingAgents的持续学习机制，历史推荐收益自动生成反思总结',
+          'RecommendationTracker增强：增加反思存储、Alpha计算、历史决策注入能力',
+          '信号引擎集成：自动获取历史决策反思并追加到分析理由中，提升分析置信度',
+          'AI层抽象：创建AILayer协议和配置管理，为后续LLM多智能体辩论预留扩展点',
+        ],
+      },
+      {
         'version': 'v2.53.0',
         'date': '2026-07-03',
         'changes': [

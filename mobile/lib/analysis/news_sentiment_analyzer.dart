@@ -1,8 +1,20 @@
+import 'package:flutter/foundation.dart';
 import '../models/stock_models.dart';
+import 'ai_layer.dart';
 
 /// 新闻情绪分析器 - 参考 TradingAgents Sentiment/News Analyst
-/// 基于关键词规则分析新闻标题情绪，无需LLM
+/// 基于关键词规则分析新闻标题情绪，支持AI替换
 class NewsSentimentAnalyzer {
+  static AILayer? _aiLayer;
+
+  static void setAILayer(AILayer layer) {
+    _aiLayer = layer;
+  }
+
+  static void clearAILayer() {
+    _aiLayer = null;
+  }
+
   // 利好关键词及权重
   static const Map<String, int> _positiveKeywords = {
     '业绩增长': 3, '净利增长': 3, '营收增长': 2, '利润增长': 3,
@@ -53,8 +65,9 @@ class NewsSentimentAnalyzer {
     '超预期': '强化',
   };
 
-  /// 分析新闻列表的情绪
+  /// 分析新闻列表的情绪（同步版本）
   /// newsList: 新闻列表，每条需包含 'title' 字段
+  /// v2.54: 使用关键词规则分析，AI分析通过 analyzeAsync 异步执行
   static NewsSentiment analyze(List<dynamic> newsList) {
     if (newsList.isEmpty) {
       return NewsSentiment(
@@ -207,6 +220,44 @@ class NewsSentimentAnalyzer {
       }
     }
     return null;
+  }
+
+  /// 分析新闻列表的情绪（异步版本 - AI增强）
+  /// v2.54: 当AILayer可用时使用AI分析，否则回退到规则模式
+  static Future<NewsSentiment> analyzeAsync(List<dynamic> newsList) async {
+    if (newsList.isEmpty) {
+      return NewsSentiment(
+        score: 0,
+        positiveCount: 0,
+        negativeCount: 0,
+        neutralCount: 0,
+        keyFactors: [],
+      );
+    }
+
+    if (_aiLayer != null && _aiLayer!.isAvailable) {
+      final titles = newsList.map((news) {
+        if (news is Map<String, dynamic>) {
+          return (news['title'] ?? news['title_ch'] ?? '').toString();
+        }
+        return news.toString();
+      }).where((t) => t.isNotEmpty).toList();
+
+      try {
+        final aiResult = await _aiLayer!.analyzeSentiment(titles);
+        return NewsSentiment(
+          score: aiResult.score,
+          positiveCount: aiResult.positiveCount,
+          negativeCount: aiResult.negativeCount,
+          neutralCount: aiResult.neutralCount,
+          keyFactors: aiResult.keyFactors,
+        );
+      } catch (e) {
+        debugPrint('[NewsSentimentAnalyzer] AI分析失败，回退到规则模式: $e');
+      }
+    }
+
+    return analyze(newsList);
   }
 }
 

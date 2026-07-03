@@ -37,7 +37,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 13,
+      version: 14,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -271,6 +271,19 @@ class DatabaseService {
             await txn.execute('CREATE INDEX idx_limit_up_pool_code ON limit_up_pool(code)');
             debugPrint('[DB] v12→v13: rebuilt limit_up_pool table with all columns');
           }
+          if (oldVersion < 14) {
+            // v2.53: AI决策反馈闭环 — 增加反思存储和Alpha计算字段
+            await txn.execute('''
+              ALTER TABLE recommendation_tracking ADD COLUMN reflection TEXT DEFAULT ''
+            ''');
+            await txn.execute('''
+              ALTER TABLE recommendation_tracking ADD COLUMN alpha_vs_market REAL
+            ''');
+            await txn.execute('''
+              ALTER TABLE recommendation_tracking ADD COLUMN confidence_adjustment TEXT DEFAULT ''
+            ''');
+            debugPrint('[DB] v13→v14: added reflection/alpha/confidence_adjustment columns');
+          }
           // 索引补建（幂等，保证升级路径和新装路径都有）
           await txn.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
           await txn.execute('CREATE INDEX IF NOT EXISTS idx_alerts_code ON alerts(code)');
@@ -405,7 +418,10 @@ class DatabaseService {
         day20_price REAL,
         day20_return REAL,
         last_checked_date INTEGER,
-        is_closed INTEGER DEFAULT 0
+        is_closed INTEGER DEFAULT 0,
+        reflection TEXT DEFAULT '',
+        alpha_vs_market REAL,
+        confidence_adjustment TEXT DEFAULT ''
       )
     ''');
 

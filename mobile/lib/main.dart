@@ -1,5 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:stock_analyzer/core/navigator_key.dart';
+import 'package:stock_analyzer/core/ai_config.dart';
+import 'package:stock_analyzer/analysis/ai_layer.dart';
+import 'package:stock_analyzer/analysis/news_sentiment_analyzer.dart';
 import 'package:stock_analyzer/screens/home_screen.dart';
 import 'package:stock_analyzer/screens/watchlist_screen.dart';
 import 'package:stock_analyzer/screens/news_screen.dart';
@@ -50,6 +54,22 @@ void main() async {
   await notificationService.init();
   // 预加载概念标签数据
   await ConceptTagProvider.instance.load();
+
+  // v2.54: 初始化AI层（GLM-4.7-Flash）
+  // 开发环境：从环境变量读取，或使用下面的默认值
+  AIConfig.setApiKey(Platform.environment['GLM_API_KEY'] ?? '6d967e3ee89f4521ae8ab01bf988f839.ssMxPWrBzDvKYFVT');
+
+  if (AIConfig.enableAIEnhancement && AIConfig.effectiveApiKey.isNotEmpty) {
+    final aiLayer = GLM47FlashLayer(
+      apiKey: AIConfig.effectiveApiKey,
+      endpoint: AIConfig.apiEndpoint,
+      model: AIConfig.defaultModel,
+    );
+    AILayerProvider.set(aiLayer);
+    NewsSentimentAnalyzer.setAILayer(aiLayer);
+    debugPrint('[AI] GLM-4.7-Flash AI层已初始化');
+  }
+
   // 如果用户已开启推送，启动轮询
   if (await notificationService.isEnabled()) {
     notificationService.startPolling();

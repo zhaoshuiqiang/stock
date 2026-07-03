@@ -2,9 +2,12 @@ import 'package:flutter/foundation.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
 import '../data/concept_tag_provider.dart';
+import '../core/ai_config.dart';
 import 'market_structure_analyzer.dart';
+import 'ai_layer.dart';
 
 /// 推荐快照 - 用于追踪推荐信号的实际表现
+/// v2.53: 增加反思存储和Alpha计算字段（决策反馈闭环）
 class RecommendationSnapshot {
   final int? id;
   final String code;
@@ -19,6 +22,9 @@ class RecommendationSnapshot {
   final double? day20Return;
   final double? day20Price;
   final bool isClosed;
+  final String? reflection;
+  final double? alphaVsMarket;
+  final String? confidenceAdjustment;
 
   RecommendationSnapshot({
     this.id,
@@ -34,6 +40,9 @@ class RecommendationSnapshot {
     this.day20Return,
     this.day20Price,
     this.isClosed = false,
+    this.reflection,
+    this.alphaVsMarket,
+    this.confidenceAdjustment,
   });
 
   factory RecommendationSnapshot.fromMap(Map<String, dynamic> map) {
@@ -51,6 +60,9 @@ class RecommendationSnapshot {
       day20Return: (map['day20_return'] as num?)?.toDouble(),
       day20Price: (map['day20_price'] as num?)?.toDouble(),
       isClosed: (map['is_closed'] as int?) == 1,
+      reflection: map['reflection'] as String? ?? '',
+      alphaVsMarket: (map['alpha_vs_market'] as num?)?.toDouble(),
+      confidenceAdjustment: map['confidence_adjustment'] as String? ?? '',
     );
   }
 
@@ -72,6 +84,9 @@ class RecommendationSnapshot {
       'day20_return': day20Return,
       'last_checked_date': null,
       'is_closed': isClosed ? 1 : 0,
+      'reflection': reflection ?? '',
+      'alpha_vs_market': alphaVsMarket,
+      'confidence_adjustment': confidenceAdjustment ?? '',
     };
   }
 }
@@ -238,10 +253,23 @@ class RecommendationTracker {
             where: 'id = ?', whereArgs: [id]);
         }
         if (daysSince >= 20 && row['day20_return'] == null) {
+          final name = row['name'] as String? ?? '';
+          final strategy = row['strategy'] as String? ?? '';
+
           await txn.update('recommendation_tracking',
             {'day20_price': currentPrice, 'day20_return': returnPct, 'last_checked_date': nowMs},
             where: 'id = ?', whereArgs: [id]);
-          // 20日追踪完成
+
+          _generateReflectionAsync(
+            id: id,
+            code: code,
+            name: name,
+            signalPrice: signalPrice,
+            signalDate: signalDate,
+            realizedReturn: returnPct,
+            originalRecommendation: strategy,
+          );
+
           await txn.update('recommendation_tracking',
             {'is_closed': 1},
             where: 'id = ?', whereArgs: [id]);
@@ -260,5 +288,177 @@ class RecommendationTracker {
       'day10': (existing['day10_return'] as num?)?.toDouble() ?? 0,
       'day20': (existing['day20_return'] as num?)?.toDouble() ?? 0,
     };
+  }
+
+  /// 获取历史决策反思，注入下次分析
+  /// 返回该股票的最近3条已关闭的推荐记录及其反思
+  Future<List<Map<String, dynamic>>> getHistoricalReflections(String code) async {
+    if (!_initialized) await init();
+
+    final db = await _dbService.database;
+    final rows = await db.query(
+      'recommendation_tracking',
+      columns: ['signal_date', 'signal_price', 'strategy', 'day20_return', 'alpha_vs_market', 'reflection'],
+      where: 'code = ? AND is_closed = 1 AND day20_return IS NOT NULL',
+      orderBy: 'signal_date DESC',
+      limit: 3,
+    );
+
+    final reflections = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      final ret = <String, dynamic>{
+        'signal_date': DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int),
+        'signal_price': (row['signal_price'] as num).toDouble(),
+        'strategy': row['strategy'] as String? ?? '',
+        'day20_return': (row['day20_return'] as num).toDouble(),
+        'alpha_vs_market': (row['alpha_vs_market'] as num?)?.toDouble() ?? 0,
+        'reflection': row['reflection'] as String? ?? '',
+      };
+      reflections.add(ret);
+    }
+    return reflections;
+  }
+
+  /// 获取全市场历史决策统计（用于跨股票学习）
+  /// 返回最近20条已关闭推荐的收益分布和反思
+  Future<List<Map<String, dynamic>>> getMarketWideReflections({int limit = 20}) async {
+    if (!_initialized) await init();
+
+    final db = await _dbService.database;
+    final rows = await db.query(
+      'recommendation_tracking',
+      columns: ['code', 'name', 'signal_date', 'strategy', 'day20_return', 'alpha_vs_market', 'reflection'],
+      where: 'is_closed = 1 AND day20_return IS NOT NULL',
+      orderBy: 'signal_date DESC',
+      limit: limit,
+    );
+
+    final reflections = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      reflections.add({
+        'code': row['code'] as String,
+        'name': row['name'] as String? ?? '',
+        'signal_date': DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int),
+        'strategy': row['strategy'] as String? ?? '',
+        'day20_return': (row['day20_return'] as num).toDouble(),
+        'alpha_vs_market': (row['alpha_vs_market'] as num?)?.toDouble() ?? 0,
+        'reflection': row['reflection'] as String? ?? '',
+      });
+    }
+    return reflections;
+  }
+
+  /// 存储AI生成的反思
+  Future<void> saveReflection(int snapshotId, String reflection) async {
+    if (!_initialized) await init();
+
+    final db = await _dbService.database;
+    await db.update(
+      'recommendation_tracking',
+      {'reflection': reflection},
+      where: 'id = ?',
+      whereArgs: [snapshotId],
+    );
+  }
+
+  /// 计算相对大盘Alpha
+  /// marketReturn: 同期大盘收益率（如沪深300）
+  Future<void> saveAlpha(int snapshotId, double marketReturn, double stockReturn) async {
+    if (!_initialized) await init();
+
+    final alpha = stockReturn - marketReturn;
+    final db = await _dbService.database;
+    await db.update(
+      'recommendation_tracking',
+      {'alpha_vs_market': alpha},
+      where: 'id = ?',
+      whereArgs: [snapshotId],
+    );
+  }
+
+  /// 生成规则引擎反思（无需LLM）
+  /// 根据实际收益与预期的偏差生成反思总结
+  String generateRuleBasedReflection(
+    RecommendationSnapshot snapshot,
+    double marketReturn,
+  ) {
+    final stockReturn = snapshot.day20Return ?? 0;
+    final alpha = stockReturn - marketReturn;
+    final signalDate = snapshot.signalDate;
+
+    final buf = StringBuffer();
+    buf.write('【${snapshot.name}(${snapshot.code})】');
+    buf.write('信号日期: ${signalDate.year}-${signalDate.month.toString().padLeft(2, '0')}-${signalDate.day.toString().padLeft(2, '0')}');
+    buf.write(' | 策略: ${snapshot.strategy.isNotEmpty ? snapshot.strategy : '综合评分'}');
+    buf.write(' | 信号价: ${snapshot.signalPrice.toStringAsFixed(2)}');
+
+    if (stockReturn > 5) {
+      buf.write(' | ✅ 盈利${stockReturn.toStringAsFixed(1)}%');
+      if (alpha > 2) buf.write('(跑赢大盘${alpha.toStringAsFixed(1)}%)');
+      buf.write(' | 反思: 技术面信号准确，策略有效');
+    } else if (stockReturn > 0) {
+      buf.write(' | 🟡 微利${stockReturn.toStringAsFixed(1)}%');
+      if (alpha < -2) buf.write('(跑输大盘${alpha.abs().toStringAsFixed(1)}%)');
+      buf.write(' | 反思: 小幅盈利，需关注大盘环境影响');
+    } else if (stockReturn > -5) {
+      buf.write(' | 🟡 微亏${stockReturn.abs().toStringAsFixed(1)}%');
+      buf.write(' | 反思: 小幅亏损，策略信号可靠性一般');
+    } else {
+      buf.write(' | ❌ 亏损${stockReturn.abs().toStringAsFixed(1)}%');
+      buf.write(' | 反思: 信号失效，需检查市场结构和策略条件');
+    }
+
+    return buf.toString();
+  }
+
+  /// 异步生成AI反思（决策反馈闭环）
+  /// v2.54: 当20日追踪完成时调用，生成反思并保存到数据库
+  void _generateReflectionAsync({
+    required int id,
+    required String code,
+    required String name,
+    required double signalPrice,
+    required DateTime signalDate,
+    required double realizedReturn,
+    required String originalRecommendation,
+  }) {
+    Future(() async {
+      try {
+        String reflection;
+        if (AIConfig.enableAIEnhancement && AILayerProvider.instance.isAvailable) {
+          reflection = await AILayerProvider.instance.generateReflection(
+            stockCode: code,
+            stockName: name,
+            signalPrice: signalPrice,
+            signalDate: signalDate,
+            realizedReturn: realizedReturn,
+            alphaVsMarket: 0,
+            originalRecommendation: originalRecommendation.isNotEmpty ? originalRecommendation : '综合评分',
+          );
+        } else {
+          reflection = generateRuleBasedReflection(
+            RecommendationSnapshot(
+              id: id,
+              code: code,
+              name: name,
+              signalPrice: signalPrice,
+              signalDate: signalDate,
+              day20Return: realizedReturn,
+              strategy: originalRecommendation,
+            ),
+            0,
+          );
+        }
+
+        if (reflection.isNotEmpty) {
+          await saveReflection(id, reflection);
+          debugPrint('[RecommendationTracker] 反思已保存: $code');
+        }
+      } catch (e) {
+        debugPrint('[RecommendationTracker] 生成反思失败: $e');
+      }
+    }).catchError((e) {
+      debugPrint('[RecommendationTracker] 反思异步任务失败: $e');
+    });
   }
 }
