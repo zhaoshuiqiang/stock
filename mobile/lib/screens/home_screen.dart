@@ -6,8 +6,10 @@ import '../analysis/limit_up_analyzer.dart';
 import '../analysis/limit_up_scan_engine.dart';
 import '../analysis/market_timing.dart';
 import '../analysis/sector_pick_engine.dart';
+import '../analysis/intraday_scan_engine.dart';
 import '../storage/database_service.dart';
 import '../widgets/sentiment_thermometer_card.dart';
+import '../core/trading_session.dart';
 import 'quote_screen.dart';
 import 'sector_screen.dart';
 import 'quant_screen.dart';
@@ -205,10 +207,25 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       }
       int lowBuy = 0;
-      for (final r in exploreResults) {
-        if (r.recommendation.contains('买入') &&
-            r.changePct >= -3 && r.changePct <= 5 && r.score >= 6) {
-          lowBuy++;
+      if (TradingSession.isInTradingSession()) {
+        try {
+          final intradayResults = await IntradayScanEngine.scan();
+          lowBuy = intradayResults.length;
+        } catch (e) {
+          debugPrint('Intraday scan failed: $e');
+          for (final r in exploreResults) {
+            if (r.recommendation.contains('买入') &&
+                r.changePct >= -3 && r.changePct <= 5 && r.score >= 6) {
+              lowBuy++;
+            }
+          }
+        }
+      } else {
+        for (final r in exploreResults) {
+          if (r.recommendation.contains('买入') &&
+              r.changePct >= -3 && r.changePct <= 5 && r.score >= 6) {
+            lowBuy++;
+          }
         }
       }
       // 情绪温度计：读取扫描引擎缓存（DiscoverScreen 扫描时填充），不在本地重算

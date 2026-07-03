@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.53.0',
+        'date': '2026-07-03',
+        'changes': [
+          '修复首页短线工作台分时低吸计数与发现页面不一致问题：交易时段内使用真实分时扫描结果',
+          '首页分时低吸计数现在与发现页面使用相同的IntradayScanEngine扫描，确保数据一致性',
+          '非交易时段保持原日线数据估算逻辑，避免不必要的API请求',
+        ],
+      },
+      {
         'version': 'v2.52.0',
         'date': '2026-07-03',
         'changes': [
