@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.50.0',
+        'date': '2026-07-03',
+        'changes': [
+          '环球市场页面新增热门板块Tab：展示A股行业板块涨跌排行，便于分析热门和冷门题材',
+          '热门板块趋势总结：显示板块整体涨跌方向、平均涨幅、热门板块和冷门板块',
+          '板块卡片显示龙头股信息和股票数量，点击可跳转到龙头股详情页',
+        ],
+      },
+      {
         'version': 'v2.49.0',
         'date': '2026-07-03',
         'changes': [
