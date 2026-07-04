@@ -252,6 +252,8 @@ class GLM47FlashLayer implements AILayer {
   final String _endpoint;
   final String _model;
   final http.Client _client;
+  DateTime? _lastRequestTime;
+  int _retryDelaySeconds = 0;
 
   GLM47FlashLayer({
     required String apiKey,
@@ -575,6 +577,21 @@ $newsSection
   bool get isAvailable => _apiKey.isNotEmpty;
 
   Future<String> _callAPI(String prompt, {int maxRetries = 2, Duration timeout = const Duration(seconds: 30)}) async {
+    final now = DateTime.now();
+    
+    if (_lastRequestTime != null) {
+      final elapsed = now.difference(_lastRequestTime!);
+      if (_retryDelaySeconds > 0 && elapsed.inSeconds < _retryDelaySeconds) {
+        throw Exception('API请求过于频繁，请${_retryDelaySeconds - elapsed.inSeconds}秒后重试');
+      }
+      if (elapsed.inSeconds < 10) {
+        throw Exception('请求过于频繁，请${10 - elapsed.inSeconds}秒后重试');
+      }
+    }
+
+    _lastRequestTime = now;
+    _retryDelaySeconds = 0;
+
     final request = {
       'model': _model,
       'messages': [
@@ -582,8 +599,6 @@ $newsSection
       ],
       'temperature': 0.7,
       'max_tokens': 2048,
-      // 禁用思考模式：glm-4.7-flash 默认进行长思考，会消耗所有 max_tokens
-      // 导致 content 字段为空。禁用后直接输出答案，响应更快、更省 tokens。
       'thinking': {'type': 'disabled'},
     };
 
@@ -611,6 +626,13 @@ $newsSection
             throw Exception('API返回空结果');
           }
           return content;
+        }
+
+        if (response.statusCode == 429) {
+          _retryDelaySeconds = (5 * (attempt + 1)).clamp(5, 60);
+          lastError = Exception('请求过于频繁，请${_retryDelaySeconds}秒后重试');
+          await Future.delayed(Duration(seconds: _retryDelaySeconds));
+          continue;
         }
 
         if (response.statusCode >= 500) {
@@ -670,6 +692,9 @@ class _ParsedAISentimentResult implements AISentimentResult {
 /// 将异常转换为用户友好的 AI 错误信息（顶层函数，解耦具体 AI 实现）
 String formatAIError(dynamic e) {
   final msg = e.toString();
+  if (msg.contains('请') && msg.contains('秒后重试')) {
+    return msg.replaceFirst('Exception:', '').trim();
+  }
   if (msg.contains('429') || msg.contains('Too Many Requests') || msg.contains('速率限制')) {
     return '请求过于频繁（429），请稍后再试';
   } else if (msg.contains('401') || msg.contains('Unauthorized')) {

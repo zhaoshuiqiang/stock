@@ -73,6 +73,9 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   final List<AIChatResult> _chatHistory = [];
   final TextEditingController _questionController = TextEditingController();
   bool _isAsking = false;
+  // 重试倒计时
+  int _retryCountdown = 0;
+  Timer? _retryTimer;
   // 分时图数据：key=分钟偏移量(0~239), value=价格
   Map<int, double> _timeshareData = {};
   // 分时图均价数据：key=分钟偏移量, value=均价
@@ -2343,18 +2346,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                         ),
                         const SizedBox(height: 8),
                         if (aiAvailable)
-                          ElevatedButton.icon(
-                            onPressed: _analyzeAI,
-                            icon: const Icon(Icons.refresh, size: 14),
-                            label: const Text('重试', style: TextStyle(fontSize: 12)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFE74C3C).withOpacity(0.2),
-                              foregroundColor: const Color(0xFFE74C3C),
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                              minimumSize: const Size(0, 28),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                            ),
-                          ),
+                          _buildRetryButton(),
                       ],
                     ),
                   ),
@@ -2857,8 +2849,55 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           _isAIAnalyzing = false;
           _aiStatus = '分析失败';
         });
+        final msg = e.toString();
+        final match = RegExp(r'请(\d+)秒后重试').firstMatch(msg);
+        if (match != null) {
+          _startRetryCountdown(int.parse(match.group(1)!));
+        }
       }
     }
+  }
+
+  void _startRetryCountdown(int seconds) {
+    _retryTimer?.cancel();
+    setState(() => _retryCountdown = seconds);
+    _retryTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_retryCountdown > 0) {
+        setState(() => _retryCountdown--);
+      } else {
+        timer.cancel();
+        _retryTimer = null;
+      }
+    });
+  }
+
+  Widget _buildRetryButton() {
+    if (_retryCountdown > 0) {
+      return ElevatedButton.icon(
+        onPressed: null,
+        icon: const Icon(Icons.timer, size: 14),
+        label: Text('${_retryCountdown}秒后重试', style: const TextStyle(fontSize: 12)),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFFE74C3C).withOpacity(0.1),
+          foregroundColor: const Color(0xFFE74C3C).withOpacity(0.6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          minimumSize: const Size(0, 28),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+      );
+    }
+    return ElevatedButton.icon(
+      onPressed: _analyzeAI,
+      icon: const Icon(Icons.refresh, size: 14),
+      label: const Text('重试', style: TextStyle(fontSize: 12)),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFFE74C3C).withOpacity(0.2),
+        foregroundColor: const Color(0xFFE74C3C),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        minimumSize: const Size(0, 28),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+    );
   }
 
   String _formatVolume(double volumeInShou) {
@@ -2982,6 +3021,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     _apiClient.dispose();
     _tabController?.dispose();
     _questionController.dispose();
+    _retryTimer?.cancel();
     _pollingTimer?.cancel();
     _analysisRefreshTimer?.cancel();
     _timeshareData.clear();
