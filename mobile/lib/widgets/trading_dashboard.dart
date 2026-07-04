@@ -49,10 +49,6 @@ class TradingDashboard extends StatelessWidget {
             const SizedBox(height: 8),
             _buildMarketContextRow(),
           ],
-          if (_hasAIInsights) ...[
-            const SizedBox(height: 10),
-            _buildAIInsights(),
-          ],
         ],
       ),
     );
@@ -642,115 +638,6 @@ class TradingDashboard extends StatelessWidget {
               style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
             ),
           ],
-        ],
-      ),
-    );
-  }
-
-  // ─── AI分析见解 ───────────────────────────────────────────
-
-  bool get _hasAIInsights {
-    final reasons = analysis!.reasons;
-    return reasons.any((r) => r.startsWith('AI'));
-  }
-
-  Widget _buildAIInsights() {
-    final aiReasons = analysis!.reasons.where((r) => r.startsWith('AI')).toList();
-
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFF58A6FF).withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.smart_toy, size: 16, color: Color(0xFF58A6FF)),
-              SizedBox(width: 4),
-              Text(
-                'AI分析',
-                style: TextStyle(
-                  color: Color(0xFFF0F6FC),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          ...aiReasons.map((reason) {
-            if (reason.startsWith('AI分析结论')) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Text(
-                  reason.replaceFirst('AI分析结论: ', ''),
-                  style: const TextStyle(
-                    color: Color(0xFF58A6FF),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    height: 1.4,
-                  ),
-                ),
-              );
-            } else if (reason.startsWith('AI理由')) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.arrow_right, size: 12, color: Color(0xFF58A6FF)),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        reason.replaceFirst('AI理由: ', ''),
-                        style: const TextStyle(
-                          color: Color(0xFF8B949E),
-                          fontSize: 11,
-                          height: 1.4,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            } else if (reason.startsWith('AI风险提示')) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.warning, size: 12, color: Color(0xFFE74C3C)),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        reason.replaceFirst('AI风险提示: ', ''),
-                        style: const TextStyle(
-                          color: Color(0xFFE74C3C),
-                          fontSize: 11,
-                          height: 1.4,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Text(
-                reason,
-                style: const TextStyle(
-                  color: Color(0xFF8B949E),
-                  fontSize: 11,
-                  height: 1.4,
-                ),
-              ),
-            );
-          }),
         ],
       ),
     );

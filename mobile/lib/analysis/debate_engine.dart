@@ -13,6 +13,7 @@ class DebateEngine {
     required Map<String, dynamic> dimensionScores,
     required List<String> newsTitles,
     required List<Map<String, dynamic>> historicalReflections,
+    void Function(String status, int progress)? onProgress,
   }) async {
     if (!_aiLayer.isAvailable) {
       return DebateResult.empty();
@@ -30,10 +31,11 @@ class DebateEngine {
         technicalData: techData,
         newsTitles: newsTitles,
         historicalReflections: historicalReflections,
+        onProgress: onProgress,
       );
     } catch (e) {
       debugPrint('[DebateEngine] 辩论失败: $e');
-      return DebateResult.empty();
+      return DebateResult.withError(formatAIError(e));
     }
   }
 }

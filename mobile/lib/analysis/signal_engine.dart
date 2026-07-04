@@ -237,6 +237,9 @@ String? mapSignalToBacktestKey(String signalName) {
 }
 
 /// 生成分析结果（薄编排器）
+/// [onAIUpdate] - AI分析完成后的回调，用于UI刷新
+/// [onAIProgress] - AI分析进度回调
+/// [autoTriggerAI] - 是否自动触发AI分析（默认false，改为手动触发）
 AnalysisResult generateAnalysis(
   List<HistoryKline> data,
   QuoteData? quote, {
@@ -244,6 +247,9 @@ AnalysisResult generateAnalysis(
   List<dynamic>? newsList,
   String? sectorName,
   List<SectorAnalysis>? sectorAnalysis,
+  void Function(List<String> aiReasons)? onAIUpdate,
+  void Function(String status, int progress)? onAIProgress,
+  bool autoTriggerAI = false,
 }) {
   if (data.isEmpty) {
     return AnalysisResult(
@@ -473,7 +479,9 @@ AnalysisResult generateAnalysis(
 
   // 13b. AI多智能体辩论（v2.54: 参考 TradingAgents 辩论机制）
   // 异步执行，不阻塞主分析流程
-  if (quote != null && AIConfig.enableAIEnhancement && AILayerProvider.instance.isAvailable) {
+  // 仅当 autoTriggerAI=true 时才触发（用户手动点击"开始分析"）
+  if (autoTriggerAI && quote != null && AIConfig.enableAIEnhancement && AILayerProvider.instance.isAvailable) {
+    debugPrint('[信号引擎] 启动AI辩论: ${quote.name}(${quote.code}), 评分: $totalScore');
     _runAIDebate(
       quote: quote,
       totalScore: totalScore.toDouble(),
@@ -487,7 +495,23 @@ AnalysisResult generateAnalysis(
       reasons: reasons,
       newsList: newsList,
       historicalReflections: historicalReflections,
-    ).catchError((e) { debugPrint('[信号引擎] AI辩论失败: $e'); });
+      onAIUpdate: onAIUpdate,
+      onAIProgress: onAIProgress,
+    ).then((_) {
+      debugPrint('[信号引擎] AI辩论完成: ${quote.name}(${quote.code}), reasons数量: ${reasons.length}');
+    }).catchError((e) { 
+      debugPrint('[信号引擎] AI辩论失败: $e'); 
+      if (onAIUpdate != null) {
+        onAIUpdate!([]);
+      }
+    });
+  } else {
+    debugPrint('[信号引擎] AI辩论未启动: quote=$quote, enableAI=${AIConfig.enableAIEnhancement}, available=${AILayerProvider.instance.isAvailable}');
+    // AI 不可用：标记终态，避免 UI 永远停留在"AI分析生成中..."
+    if (onAIUpdate != null) {
+      reasons.add('AI分析暂不可用：未启用AI增强或API Key未配置');
+      onAIUpdate([]);
+    }
   }
 
   // 追加打板理由（若当日涨停）
@@ -716,8 +740,17 @@ Future<void> _runAIDebate({
   required List<String> reasons,
   List<dynamic>? newsList,
   required List<Map<String, dynamic>> historicalReflections,
+  void Function(List<String> aiReasons)? onAIUpdate,
+  void Function(String status, int progress)? onAIProgress,
 }) async {
-  if (!AILayerProvider.instance.isAvailable) return;
+  if (!AILayerProvider.instance.isAvailable) {
+    // AI 层不可用：标记终态并通知 UI，避免一直显示"生成中"
+    if (onAIUpdate != null) {
+      reasons.add('AI分析暂不可用：API Key未配置或AI层未初始化');
+      onAIUpdate([]);
+    }
+    return;
+  }
 
   final newsTitles = <String>[];
   if (newsList != null) {
@@ -737,19 +770,31 @@ Future<void> _runAIDebate({
     dimensionScores: dimensionScores,
     newsTitles: newsTitles,
     historicalReflections: historicalReflections,
+    onProgress: onAIProgress,
   );
 
+  final aiReasons = <String>[];
   if (debateResult.synthesis.conclusion.isNotEmpty) {
-    reasons.add('AI分析结论: ${debateResult.synthesis.conclusion}');
+    aiReasons.add('AI分析结论: ${debateResult.synthesis.conclusion}');
   }
   if (debateResult.synthesis.reasons.isNotEmpty) {
     for (final reason in debateResult.synthesis.reasons) {
-      reasons.add('AI理由: $reason');
+      aiReasons.add('AI理由: $reason');
     }
   }
   if (debateResult.synthesis.riskFactors.isNotEmpty) {
     for (final risk in debateResult.synthesis.riskFactors) {
-      reasons.add('AI风险提示: $risk');
+      aiReasons.add('AI风险提示: $risk');
     }
+  }
+
+  reasons.addAll(aiReasons);
+  if (aiReasons.isEmpty) {
+    // 辩论失败或返回空结果：标记终态，避免 UI 永远停留在"AI分析生成中..."
+    final errMsg = debateResult.error ?? 'API调用失败，请稍后重试';
+    reasons.add('AI分析暂不可用：$errMsg');
+  }
+  if (onAIUpdate != null) {
+    onAIUpdate(aiReasons);
   }
 }

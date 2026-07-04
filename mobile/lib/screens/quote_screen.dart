@@ -17,6 +17,7 @@ import '../widgets/trading_dashboard.dart';
 import '../core/trading_session.dart';
 import '../analysis/intraday_level_analyzer.dart';
 import '../analysis/sector_rotation.dart';
+import '../analysis/ai_layer.dart';
 
 const _kChartLeftReservedSize = 42.0;
 
@@ -63,6 +64,15 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   String _lastUpdateTime = '';
   TabController? _tabController;
   int _updateCount = 0; // 轮询更新计数，用于控制分析刷新频率
+  // AI分析状态
+  String? _aiStatus;
+  int _aiProgress = 0;
+  bool _isAIAnalyzing = false;
+  // 模板分析和自定义提问状态
+  AnalysisTemplate _selectedTemplate = AnalysisTemplate.debate;
+  final List<AIChatResult> _chatHistory = [];
+  final TextEditingController _questionController = TextEditingController();
+  bool _isAsking = false;
   // 分时图数据：key=分钟偏移量(0~239), value=价格
   Map<int, double> _timeshareData = {};
   // 分时图均价数据：key=分钟偏移量, value=均价
@@ -95,7 +105,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
     _loadData();
     _checkFavorite();
     _startRealtime();
@@ -345,7 +355,15 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
       if (!mounted) return;
 
       final calculated = calcAllIndicators(klines);
-      final analysis = generateAnalysis(calculated, _quote);
+      final analysis = generateAnalysis(calculated, _quote,
+        onAIUpdate: (aiReasons) {
+          if (mounted) {
+            setState(() {
+              _isAIAnalyzing = false;
+            });
+          }
+        },
+      );
 
       // Recalculate tech analysis
       final tech = <String, dynamic>{};
@@ -634,6 +652,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
               Tab(text: '信号'),
               Tab(text: '战法'),
               Tab(text: '决策'),
+              Tab(text: 'AI'),
               Tab(text: '指标'),
             ],
           ),
@@ -648,6 +667,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                 _buildSignalList(),
                 StrategyPanel(klines: _klines, signals: _analysis?.signals ?? [], marketStructure: _analysis?.marketStructure),
                 _buildDashboard(),
+                _buildAIAnalysisTab(),
                 TechnicalIndicatorsPanel(klines: _klines),
               ],
             ),
@@ -2133,6 +2153,711 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     );
   }
 
+  /// AI分析独立Tab页
+  Widget _buildAIAnalysisTab() {
+    final aiAvailable = AILayerProvider.instance.isAvailable;
+    final allAI = _analysis?.reasons.where((r) => r.startsWith('AI')).toList() ?? [];
+    final unavailable = allAI.where((r) => r.startsWith('AI分析暂不可用')).toList();
+    final aiReasons = allAI.where((r) => !r.startsWith('AI分析暂不可用')).toList();
+    final hasAIResults = aiReasons.isNotEmpty;
+    final showAnalyzeButton = !hasAIResults && !_isAIAnalyzing;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 顶部状态卡片
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF161B22),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF58A6FF).withOpacity(0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.smart_toy, size: 18, color: Color(0xFF58A6FF)),
+                    const SizedBox(width: 6),
+                    Text(
+                      _quote != null ? 'AI分析 · ${_quote!.name}' : 'AI分析',
+                      style: const TextStyle(
+                        color: Color(0xFFF0F6FC),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (!aiAvailable)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF8B949E).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          '未启用',
+                          style: TextStyle(color: Color(0xFF8B949E), fontSize: 11),
+                        ),
+                      )
+                    else if (_isAIAnalyzing)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF58A6FF).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          '分析中',
+                          style: TextStyle(color: Color(0xFF58A6FF), fontSize: 11),
+                        ),
+                      )
+                    else if (hasAIResults)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2ECC71).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          '已完成',
+                          style: TextStyle(color: Color(0xFF2ECC71), fontSize: 11),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // 主操作按钮
+                if (showAnalyzeButton && aiAvailable)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _analyzeAI,
+                      icon: const Icon(Icons.play_arrow, size: 18),
+                      label: const Text('开始AI分析'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF58A6FF),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  )
+                else if (!aiAvailable)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF21262D),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Column(
+                      children: [
+                        Icon(Icons.warning_amber, color: Color(0xFF8B949E), size: 24),
+                        SizedBox(height: 6),
+                        Text(
+                          'AI层未启用',
+                          style: TextStyle(color: Color(0xFFF0F6FC), fontSize: 13, fontWeight: FontWeight.w500),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          '请检查API Key配置或网络连接',
+                          style: TextStyle(color: Color(0xFF8B949E), fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                // 进度显示
+                if (_isAIAnalyzing) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF58A6FF)),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _aiStatus ?? 'AI分析中...',
+                          style: const TextStyle(color: Color(0xFF58A6FF), fontSize: 12),
+                        ),
+                      ),
+                      Text(
+                        '$_aiProgress%',
+                        style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(
+                    value: _aiProgress / 100,
+                    backgroundColor: const Color(0xFF21262D),
+                    color: const Color(0xFF58A6FF),
+                    borderRadius: BorderRadius.circular(4),
+                    minHeight: 5,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          // 错误提示
+          if (unavailable.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE74C3C).withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE74C3C).withOpacity(0.3)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.error_outline, size: 16, color: Color(0xFFE74C3C)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '分析失败',
+                          style: TextStyle(
+                            color: Color(0xFFE74C3C),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          unavailable.first.replaceFirst('AI分析暂不可用：', ''),
+                          style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12, height: 1.4),
+                        ),
+                        const SizedBox(height: 8),
+                        if (aiAvailable)
+                          ElevatedButton.icon(
+                            onPressed: _analyzeAI,
+                            icon: const Icon(Icons.refresh, size: 14),
+                            label: const Text('重试', style: TextStyle(fontSize: 12)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFE74C3C).withOpacity(0.2),
+                              foregroundColor: const Color(0xFFE74C3C),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                              minimumSize: const Size(0, 28),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          // AI分析结果
+          if (hasAIResults) ...[
+            const SizedBox(height: 10),
+            ...aiReasons.map((reason) {
+              if (reason.startsWith('AI分析结论')) {
+                return Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF58A6FF).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF58A6FF).withOpacity(0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.flag, size: 14, color: Color(0xFF58A6FF)),
+                          SizedBox(width: 4),
+                          Text(
+                            '分析结论',
+                            style: TextStyle(
+                              color: Color(0xFF58A6FF),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        reason.replaceFirst('AI分析结论: ', ''),
+                        style: const TextStyle(
+                          color: Color(0xFFF0F6FC),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              } else if (reason.startsWith('AI理由')) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.arrow_right, size: 14, color: Color(0xFF58A6FF)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          reason.replaceFirst('AI理由: ', ''),
+                          style: const TextStyle(color: Color(0xFFC9D1D9), fontSize: 12, height: 1.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              } else if (reason.startsWith('AI风险提示')) {
+                return Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(top: 6),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE74C3C).withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.warning, size: 14, color: Color(0xFFE74C3C)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          reason.replaceFirst('AI风险提示: ', ''),
+                          style: const TextStyle(color: Color(0xFFE74C3C), fontSize: 12, height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Text(reason, style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12)),
+              );
+            }),
+            const SizedBox(height: 12),
+            // 重新分析按钮
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _isAIAnalyzing ? null : _analyzeAI,
+                icon: const Icon(Icons.refresh, size: 14),
+                label: const Text('重新分析', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF58A6FF),
+                  side: const BorderSide(color: Color(0xFF30363D)),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+          ],
+          // ─── 预设模板分析 ───────────────────────────
+          const SizedBox(height: 14),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+            child: Row(
+              children: [
+                Icon(Icons.view_module, size: 14, color: Color(0xFF8B949E)),
+                SizedBox(width: 4),
+                Text(
+                  '专题分析',
+                  style: TextStyle(color: Color(0xFF8B949E), fontSize: 12, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          ),
+          // 模板选择器
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: AnalysisTemplate.values.map((t) {
+              final selected = t == _selectedTemplate;
+              return ChoiceChip(
+                label: Text(t.label, style: TextStyle(fontSize: 11, color: selected ? const Color(0xFFF0F6FC) : const Color(0xFF8B949E))),
+                selected: selected,
+                onSelected: (_isAsking || _isAIAnalyzing) ? null : (v) {
+                  if (v) setState(() => _selectedTemplate = t);
+                },
+                selectedColor: const Color(0xFF58A6FF),
+                backgroundColor: const Color(0xFF21262D),
+                side: BorderSide(color: selected ? const Color(0xFF58A6FF) : const Color(0xFF30363D)),
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 8),
+          // 当前模板描述
+          Text(
+            _selectedTemplate.description,
+            style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11, fontStyle: FontStyle.italic),
+          ),
+          const SizedBox(height: 8),
+          // 执行模板分析按钮
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _isAsking || _isAIAnalyzing ? null : _runTemplateAnalysis,
+              icon: _isAsking && _aiStatus == _selectedTemplate.label
+                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.auto_awesome, size: 14),
+              label: Text(_isAsking && _aiStatus == _selectedTemplate.label ? '分析中...' : '执行$_selectedTemplate.label'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2EA043),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                textStyle: const TextStyle(fontSize: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+          // ─── 聊天历史 ────────────────────────────────
+          if (_chatHistory.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            ..._chatHistory.map((r) => _buildChatBubble(r)),
+          ],
+          // 提问中的占位气泡（首次提问、history 还没添加时）
+          if (_isAsking && _aiStatus != _selectedTemplate.label && _chatHistory.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF58A6FF)))),
+            ),
+          // ─── 自定义提问输入框 ─────────────────────────
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF161B22),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF30363D)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.chat_bubble_outline, size: 14, color: Color(0xFF58A6FF)),
+                    SizedBox(width: 4),
+                    Text(
+                      '自定义提问',
+                      style: TextStyle(color: Color(0xFF58A6FF), fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // 快捷问题
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    '现在能买吗?',
+                    '压力位和支撑位在哪?',
+                    '资金流向如何?',
+                    '适合做T吗?',
+                  ].map((q) => ActionChip(
+                    label: Text(q, style: const TextStyle(fontSize: 11, color: Color(0xFF8B949E))),
+                    backgroundColor: const Color(0xFF21262D),
+                    side: const BorderSide(color: Color(0xFF30363D)),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    onPressed: (_isAsking || _isAIAnalyzing) ? null : () {
+                      _questionController.text = q;
+                      _askQuestion();
+                    },
+                  )).toList(),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _questionController,
+                  maxLines: 3,
+                  minLines: 1,
+                  enabled: !_isAsking && !_isAIAnalyzing,
+                  style: const TextStyle(color: Color(0xFFF0F6FC), fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: '输入你的问题，如：现在能买吗？',
+                    hintStyle: const TextStyle(color: Color(0xFF484F58), fontSize: 12),
+                    filled: true,
+                    fillColor: const Color(0xFF0D1117),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFF30363D)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFF30363D)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFF58A6FF)),
+                    ),
+                  ),
+                  onSubmitted: (_) => _askQuestion(),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    if (_isAsking || _isAIAnalyzing)
+                      const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF58A6FF)))
+                    else
+                      const Icon(Icons.info_outline, size: 12, color: Color(0xFF484F58)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        (_isAsking || _isAIAnalyzing) ? 'AI思考中...' : 'AI会基于当前股票数据回答你的问题',
+                        style: TextStyle(color: (_isAsking || _isAIAnalyzing) ? const Color(0xFF58A6FF) : const Color(0xFF484F58), fontSize: 11),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: (_isAsking || _isAIAnalyzing) ? null : _askQuestion,
+                      icon: const Icon(Icons.send, size: 14),
+                      label: const Text('发送', style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF58A6FF),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        minimumSize: const Size(0, 32),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+
+  /// 构造聊天气泡
+  Widget _buildChatBubble(AIChatResult r) {
+    final hasError = r.error != null;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: hasError ? const Color(0xFFE74C3C).withOpacity(0.06) : const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: hasError ? const Color(0xFFE74C3C).withOpacity(0.3) : const Color(0xFF30363D)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 用户问题
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.person_outline, size: 13, color: Color(0xFF58A6FF)),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  r.question,
+                  style: const TextStyle(color: Color(0xFF58A6FF), fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // AI回答
+          if (hasError)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.error_outline, size: 13, color: Color(0xFFE74C3C)),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    r.error!,
+                    style: const TextStyle(color: Color(0xFFE74C3C), fontSize: 12, height: 1.5),
+                  ),
+                ),
+              ],
+            )
+          else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.smart_toy, size: 13, color: Color(0xFF2EA043)),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: SelectableText(
+                    r.answer,
+                    style: const TextStyle(color: Color(0xFFC9D1D9), fontSize: 12, height: 1.6),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 执行模板分析
+  Future<void> _runTemplateAnalysis() async {
+    if (_isAsking || _isAIAnalyzing || _klines.isEmpty || _quote == null) return;
+    final ai = AILayerProvider.instance;
+    if (!ai.isAvailable) return;
+
+    final template = _selectedTemplate;
+    final quote = _quote!;
+    final techData = _buildTechDataMap();
+
+    setState(() {
+      _isAsking = true;
+      _aiStatus = template.label;
+    });
+
+    try {
+      final result = await ai.analyzeByTemplate(
+        template: template,
+        stockCode: quote.code,
+        stockName: quote.name,
+        technicalData: techData,
+        newsTitles: const [],
+      );
+      setState(() {
+        _chatHistory.add(result);
+        _isAsking = false;
+        _aiStatus = null;
+      });
+    } catch (e) {
+      setState(() {
+        _chatHistory.add(AIChatResult.withError(template.label, '分析异常: $e'));
+        _isAsking = false;
+        _aiStatus = null;
+      });
+    }
+  }
+
+  /// 自定义提问
+  Future<void> _askQuestion() async {
+    final q = _questionController.text.trim();
+    if (q.isEmpty || _isAsking || _isAIAnalyzing || _quote == null) return;
+    final ai = AILayerProvider.instance;
+    if (!ai.isAvailable) {
+      setState(() {
+        _chatHistory.add(AIChatResult.withError(q, 'AI层未启用，请检查配置'));
+      });
+      return;
+    }
+
+    final quote = _quote!;
+    final techData = _buildTechDataMap();
+    _questionController.clear();
+
+    setState(() {
+      _isAsking = true;
+      _aiStatus = '思考中';
+    });
+
+    try {
+      final result = await ai.askCustomQuestion(
+        question: q,
+        stockCode: quote.code,
+        stockName: quote.name,
+        technicalData: techData,
+        newsTitles: const [],
+      );
+      setState(() {
+        _chatHistory.add(result);
+        _isAsking = false;
+        _aiStatus = null;
+      });
+    } catch (e) {
+      setState(() {
+        _chatHistory.add(AIChatResult.withError(q, '提问失败: $e'));
+        _isAsking = false;
+        _aiStatus = null;
+      });
+    }
+  }
+
+  /// 构造技术面数据Map（供AI分析）
+  Map<String, dynamic> _buildTechDataMap() {
+    if (_analysis == null || _quote == null) return {};
+    final a = _analysis!;
+    final q = _quote!;
+    return {
+      '综合评分': a.score,
+      '推荐': a.recommendation,
+      '价格': q.price.toStringAsFixed(2),
+      '涨跌幅': '${q.changePct.toStringAsFixed(2)}%',
+      '成交量': q.volume,
+      '换手率': '${q.turnover.toStringAsFixed(2)}%',
+      'PE': q.pe.toStringAsFixed(1),
+      'PB': q.pb.toStringAsFixed(1),
+      '总市值': '${(q.totalMarketCap / 100000000).toStringAsFixed(1)}亿',
+      '共振评分': a.confluenceScore,
+      '市场结构': a.marketStructure?.structure.toString() ?? 'N/A',
+      '主力净流入': '${(q.mainNetFlow / 10000).toStringAsFixed(0)}万',
+    };
+  }
+
+  Future<void> _analyzeAI() async {
+    if (_isAIAnalyzing || _isAsking || _klines.isEmpty || _quote == null) return;
+
+    setState(() {
+      _isAIAnalyzing = true;
+      _aiStatus = 'AI分析开始...';
+      _aiProgress = 0;
+    });
+
+    try {
+      final calculated = calcAllIndicators(_klines);
+      final analysis = generateAnalysis(calculated, _quote,
+        onAIUpdate: (aiReasons) {
+          if (mounted) {
+            setState(() {
+              _isAIAnalyzing = false;
+            });
+          }
+        },
+        onAIProgress: (status, progress) {
+          if (mounted) {
+            setState(() {
+              _aiStatus = status;
+              _aiProgress = progress;
+            });
+          }
+        },
+        autoTriggerAI: true,
+      );
+
+      if (mounted) {
+        setState(() {
+          _analysis = analysis;
+        });
+      }
+    } catch (e) {
+      debugPrint('AI分析失败: $e');
+      if (mounted) {
+        setState(() {
+          _isAIAnalyzing = false;
+          _aiStatus = '分析失败';
+        });
+      }
+    }
+  }
+
   String _formatVolume(double volumeInShou) {
     // 腾讯API返回的成交量单位是手(1手=100股)
     final volumeInGu = volumeInShou * 100; // 转换为股
@@ -2253,6 +2978,7 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
     WidgetsBinding.instance.removeObserver(this);
     _apiClient.dispose();
     _tabController?.dispose();
+    _questionController.dispose();
     _pollingTimer?.cancel();
     _analysisRefreshTimer?.cancel();
     _timeshareData.clear();
