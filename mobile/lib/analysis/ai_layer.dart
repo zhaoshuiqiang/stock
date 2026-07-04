@@ -581,7 +581,10 @@ $newsSection
         {'role': 'user', 'content': prompt},
       ],
       'temperature': 0.7,
-      'max_tokens': 1024,
+      'max_tokens': 2048,
+      // 禁用思考模式：glm-4.7-flash 默认进行长思考，会消耗所有 max_tokens
+      // 导致 content 字段为空。禁用后直接输出答案，响应更快、更省 tokens。
+      'thinking': {'type': 'disabled'},
     };
 
     Exception? lastError;
