@@ -649,9 +649,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           if (_quote != null) _buildQuoteHeader(_quote!, color),
           TabBar(
             controller: _tabController,
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            labelPadding: const EdgeInsets.symmetric(horizontal: 12),
+            isScrollable: false,
+            tabAlignment: TabAlignment.fill,
             tabs: const [
               Tab(text: '实时'),
               Tab(text: 'K线'),

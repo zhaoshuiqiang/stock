@@ -46,8 +46,8 @@ class _AISentimentResultFromNews implements AISentimentResult {
 }
 
 class DebateResult {
-  final String? bullCase;
-  final String? bearCase;
+  final List<String>? bullCase;
+  final List<String>? bearCase;
   final DebateSynthesis synthesis;
   final double? adjustedConfidence;
   final String? error;
@@ -98,7 +98,6 @@ class DebateSynthesis {
   });
 }
 
-/// AI分析模板枚举
 enum AnalysisTemplate {
   debate('多空辩论', '多空双方辩论，给出综合结论'),
   shortTerm('短线分析', 'K线形态、量价关系、买卖点'),
@@ -110,7 +109,6 @@ enum AnalysisTemplate {
   const AnalysisTemplate(this.label, this.description);
 }
 
-/// 自定义问答结果
 class AIChatResult {
   final String question;
   final String answer;
@@ -124,6 +122,24 @@ class AIChatResult {
 
   factory AIChatResult.withError(String question, String error) {
     return AIChatResult(question: question, answer: '', error: error);
+  }
+}
+
+enum AIProvider {
+  zhipu('智谱AI', 'glm-4.7-flash', 'https://open.bigmodel.cn/api/paas/v4/chat/completions'),
+  openrouter('OpenRouter', 'anthropic/claude-sonnet-4', 'https://openrouter.ai/api/v1/chat/completions'),
+  cliproxyapi('CliProxyAPI', 'gpt-5.4', 'http://10.210.2.201:8319/v1/chat/completions');
+
+  final String label;
+  final String defaultModel;
+  final String endpoint;
+  const AIProvider(this.label, this.defaultModel, this.endpoint);
+
+  static AIProvider fromString(String name) {
+    for (final provider in values) {
+      if (provider.name == name) return provider;
+    }
+    return zhipu;
   }
 }
 
@@ -149,7 +165,6 @@ abstract class AILayer {
     required String originalRecommendation,
   });
 
-  /// 按预设模板分析
   Future<AIChatResult> analyzeByTemplate({
     required AnalysisTemplate template,
     required String stockCode,
@@ -158,7 +173,6 @@ abstract class AILayer {
     required List<String> newsTitles,
   });
 
-  /// 自定义提问
   Future<AIChatResult> askCustomQuestion({
     required String question,
     required String stockCode,
@@ -168,6 +182,8 @@ abstract class AILayer {
   });
 
   bool get isAvailable;
+
+  AIProvider get provider;
 
   factory AILayer.nullLayer() = NullAILayer;
 }
@@ -227,6 +243,9 @@ class NullAILayer implements AILayer {
 
   @override
   bool get isAvailable => false;
+
+  @override
+  AIProvider get provider => AIProvider.zhipu;
 }
 
 class AILayerProvider {
@@ -240,29 +259,37 @@ class AILayerProvider {
   }
 
   static void reset() {
-    if (_instance is GLM47FlashLayer) {
-      (_instance as GLM47FlashLayer).close();
+    if (_instance is ChatCompletionLayer) {
+      (_instance as ChatCompletionLayer).close();
     }
     _instance = null;
   }
 }
 
-class GLM47FlashLayer implements AILayer {
+class ChatCompletionLayer implements AILayer {
   final String _apiKey;
   final String _endpoint;
   final String _model;
+  final AIProvider _provider;
   final http.Client _client;
   DateTime? _lastRequestTime;
   int _retryDelaySeconds = 0;
+  bool _isRequesting = false;
+  Completer<String>? _pendingRequest;
 
-  GLM47FlashLayer({
+  ChatCompletionLayer({
     required String apiKey,
-    String endpoint = 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
-    String model = 'glm-4.7-flash',
+    required AIProvider provider,
+    String? endpoint,
+    String? model,
   })  : _apiKey = apiKey,
-        _endpoint = endpoint,
-        _model = model,
+        _provider = provider,
+        _endpoint = endpoint ?? provider.endpoint,
+        _model = model ?? provider.defaultModel,
         _client = http.Client();
+
+  @override
+  AIProvider get provider => _provider;
 
   @override
   Future<AISentimentResult> analyzeSentiment(List<String> newsTitles) async {
@@ -291,7 +318,7 @@ ${newsTitles.join('\n')}
       final json = jsonDecode(response) as Map<String, dynamic>;
       return _parseSentimentResult(json);
     } catch (e) {
-      debugPrint('[GLM47Flash] 情绪分析失败: $e');
+      debugPrint('[$_provider] 情绪分析失败: $e');
       return AISentimentResult.empty();
     }
   }
@@ -316,81 +343,62 @@ ${newsTitles.join('\n')}
       }
     }
 
-    final bullPrompt = '''
-你是一个专业的股票分析师（看多）。请基于以下数据分析${stockName}(${stockCode})的看多理由：
+    final newsSection = newsTitles.isEmpty ? '暂无' : newsStr;
+
+    final prompt = '''
+你是一个专业的A股投资决策顾问。请基于以下数据，对$stockName($stockCode)进行多空辩论分析并给出最终建议。
 
 技术面数据：
-${techDataStr}
+$techDataStr
 
 近期新闻：
-${newsStr}
+$newsSection
 
-${historyStr}
+$historyStr
 
-请列出3-5条看多理由，每条不超过30字。
-''';
+请完成以下三个步骤，并返回结构化JSON：
 
-    final bearPrompt = '''
-你是一个专业的股票分析师（看空）。请基于以下数据分析${stockName}(${stockCode})的看空理由：
+1. 看多理由：列出3-5条看多理由，每条不超过30字
+2. 看空理由：列出3-5条看空理由，每条不超过30字
+3. 综合评估：综合多空观点，给出最终投资建议
 
-技术面数据：
-${techDataStr}
-
-近期新闻：
-${newsStr}
-
-${historyStr}
-
-请列出3-5条看空理由，每条不超过30字。
-''';
-
-    try {
-      onProgress?.call('分析看多观点...', 0);
-      final bullCase = await _callAPI(bullPrompt);
-
-      onProgress?.call('分析看空观点...', 33);
-      final bearCase = await _callAPI(bearPrompt);
-
-      onProgress?.call('综合评估中...', 66);
-      final synthesisPrompt = '''
-你是一个专业的投资决策顾问。请综合看多和看空观点，给出最终投资建议：
-
-股票：${stockName}(${stockCode})
-
-看多观点：
-${bullCase}
-
-看空观点：
-${bearCase}
-
-请返回如下JSON格式（不要包含其他文本）：
+请返回如下JSON格式（不要包含其他文本，严格遵守JSON格式）：
 {
-  "conclusion": "最终结论（买入/卖出/观望）",
+  "bullCase": ["看多理由1", "看多理由2", "看多理由3"],
+  "bearCase": ["看空理由1", "看空理由2", "看空理由3"],
+  "conclusion": "最终结论（买入/卖出/观望/谨慎买入/谨慎卖出）",
   "confidenceLevel": "高/中/低",
-  "reasons": ["支持结论的理由1", "支持结论的理由2"],
+  "reasons": ["综合理由1", "综合理由2", "综合理由3"],
   "riskFactors": ["风险因素1", "风险因素2"],
   "adjustedConfidence": 0-1之间的数值
 }
 ''';
 
-      final synthesisStr = await _callAPI(synthesisPrompt);
+    try {
+      onProgress?.call('分析看多观点...', 0);
+      await Future.delayed(const Duration(milliseconds: 300));
+      onProgress?.call('分析看空观点...', 33);
+      await Future.delayed(const Duration(milliseconds: 300));
+      onProgress?.call('综合评估中...', 66);
+
+      final result = await _callAPI(prompt);
       onProgress?.call('分析完成', 100);
 
-      final synthesisJson = jsonDecode(synthesisStr) as Map<String, dynamic>;
+      final json = jsonDecode(result) as Map<String, dynamic>;
 
       return DebateResult(
-        bullCase: bullCase,
-        bearCase: bearCase,
+        bullCase: (json['bullCase'] as List?)?.cast<String>() ?? [],
+        bearCase: (json['bearCase'] as List?)?.cast<String>() ?? [],
         synthesis: DebateSynthesis(
-          conclusion: synthesisJson['conclusion'] as String? ?? '',
-          confidenceLevel: synthesisJson['confidenceLevel'] as String? ?? '',
-          reasons: (synthesisJson['reasons'] as List?)?.cast<String>() ?? [],
-          riskFactors: (synthesisJson['riskFactors'] as List?)?.cast<String>() ?? [],
+          conclusion: json['conclusion'] as String? ?? '',
+          confidenceLevel: json['confidenceLevel'] as String? ?? '',
+          reasons: (json['reasons'] as List?)?.cast<String>() ?? [],
+          riskFactors: (json['riskFactors'] as List?)?.cast<String>() ?? [],
         ),
-        adjustedConfidence: (synthesisJson['adjustedConfidence'] as num?)?.toDouble(),
+        adjustedConfidence: (json['adjustedConfidence'] as num?)?.toDouble(),
       );
     } catch (e) {
-      debugPrint('[GLM47Flash] 辩论分析失败: $e');
+      debugPrint('[$_provider] 辩论分析失败: $e');
       return DebateResult.withError(formatAIError(e));
     }
   }
@@ -408,12 +416,12 @@ ${bearCase}
     final prompt = '''
 你是一个专业的投资反思顾问。请基于以下交易结果生成反思总结：
 
-股票：${stockName}(${stockCode})
+股票：$stockName($stockCode)
 信号日期：${signalDate.toIso8601String().split('T')[0]}
-信号价格：${signalPrice}
-实际收益：${realizedReturn}%
-相对大盘Alpha：${alphaVsMarket}%
-原始推荐：${originalRecommendation}
+信号价格：$signalPrice
+实际收益：$realizedReturn%
+相对大盘Alpha：$alphaVsMarket%
+原始推荐：$originalRecommendation
 
 请生成一份详细的反思总结（100-200字），包括：
 1. 推荐是否有效
@@ -424,7 +432,7 @@ ${bearCase}
     try {
       return await _callAPI(prompt);
     } catch (e) {
-      debugPrint('[GLM47Flash] 反思生成失败: $e');
+      debugPrint('[$_provider] 反思生成失败: $e');
       return '';
     }
   }
@@ -448,7 +456,7 @@ ${bearCase}
       final answer = await _callAPI(prompt);
       return AIChatResult(question: template.label, answer: answer);
     } catch (e) {
-      debugPrint('[GLM47Flash] 模板分析失败($template): $e');
+      debugPrint('[$_provider] 模板分析失败($template): $e');
       return AIChatResult.withError(template.label, formatAIError(e));
     }
   }
@@ -470,7 +478,7 @@ ${bearCase}
         : '近期新闻：\n${newsTitles.take(5).join('\n')}';
     final prompt = '''你是一位专业的A股投资顾问。请基于以下数据回答用户问题。
 
-股票：${stockName}(${stockCode})
+股票：$stockName($stockCode)
 
 技术面数据：
 $techDataStr
@@ -489,12 +497,11 @@ $newsSection
       final answer = await _callAPI(prompt);
       return AIChatResult(question: question, answer: answer);
     } catch (e) {
-      debugPrint('[GLM47Flash] 自定义提问失败: $e');
+      debugPrint('[$_provider] 自定义提问失败: $e');
       return AIChatResult.withError(question, formatAIError(e));
     }
   }
 
-  /// 构造预设模板的提示词
   String _buildTemplatePrompt({
     required AnalysisTemplate template,
     required String stockCode,
@@ -509,7 +516,7 @@ $newsSection
 
     switch (template) {
       case AnalysisTemplate.shortTerm:
-        return '''你是专业的A股短线交易分析师。请基于以下数据，从短线交易视角分析${stockName}(${stockCode})：
+        return '''你是专业的A股短线交易分析师。请基于以下数据，从短线交易视角分析$stockName($stockCode)：
 
 技术面数据：
 $techDataStr
@@ -526,7 +533,7 @@ $newsSection
 注意：不要给出明确买卖指令，仅提供分析参考。''';
 
       case AnalysisTemplate.fundamental:
-        return '''你是专业的A股基本面分析师。请基于以下数据，从基本面视角分析${stockName}(${stockCode})：
+        return '''你是专业的A股基本面分析师。请基于以下数据，从基本面视角分析$stockName($stockCode)：
 
 技术面数据（含估值）：
 $techDataStr
@@ -543,7 +550,7 @@ $newsSection
 注意：不要给出明确买卖指令，仅提供分析参考。''';
 
       case AnalysisTemplate.risk:
-        return '''你是专业的A股风险评估师。请基于以下数据，评估${stockName}(${stockCode})的投资风险：
+        return '''你是专业的A股风险评估师。请基于以下数据，评估$stockName($stockCode)的投资风险：
 
 技术面数据：
 $techDataStr
@@ -560,7 +567,7 @@ $newsSection
 注意：不要给出明确买卖指令，仅提供分析参考。''';
 
       case AnalysisTemplate.debate:
-        return '''你是专业的投资决策顾问。请基于以下数据，对${stockName}(${stockCode})进行多空综合分析：
+        return '''你是专业的投资决策顾问。请基于以下数据，对$stockName($stockCode)进行多空综合分析：
 
 技术面数据：
 $techDataStr
@@ -584,12 +591,21 @@ $newsSection
       if (_retryDelaySeconds > 0 && elapsed.inSeconds < _retryDelaySeconds) {
         throw Exception('API请求过于频繁，请${_retryDelaySeconds - elapsed.inSeconds}秒后重试');
       }
-      if (elapsed.inSeconds < 10) {
-        throw Exception('请求过于频繁，请${10 - elapsed.inSeconds}秒后重试');
+      if (elapsed.inSeconds < 15) {
+        await Future.delayed(Duration(seconds: 15 - elapsed.inSeconds));
       }
     }
 
-    _lastRequestTime = now;
+    if (_isRequesting) {
+      if (_pendingRequest != null) {
+        return await _pendingRequest!.future;
+      }
+      throw Exception('当前有请求正在处理，请稍后再试');
+    }
+
+    _isRequesting = true;
+    _pendingRequest = Completer<String>();
+    _lastRequestTime = DateTime.now();
     _retryDelaySeconds = 0;
 
     final request = {
@@ -599,8 +615,11 @@ $newsSection
       ],
       'temperature': 0.7,
       'max_tokens': 2048,
-      'thinking': {'type': 'disabled'},
     };
+
+    if (_provider == AIProvider.zhipu) {
+      request['thinking'] = {'type': 'disabled'};
+    }
 
     Exception? lastError;
     for (int attempt = 0; attempt < maxRetries; attempt++) {
@@ -625,31 +644,38 @@ $newsSection
           if (content == null || content is! String || content.isEmpty) {
             throw Exception('API返回空结果');
           }
+          _pendingRequest!.complete(content);
+          _isRequesting = false;
+          _pendingRequest = null;
           return content;
         }
 
         if (response.statusCode == 429) {
-          _retryDelaySeconds = (5 * (attempt + 1)).clamp(5, 60);
-          lastError = Exception('请求过于频繁，请${_retryDelaySeconds}秒后重试');
+          _retryDelaySeconds = (10 * (attempt + 1)).clamp(10, 120);
+          lastError = Exception('请求过于频繁，请$_retryDelaySeconds秒后重试');
+          debugPrint('[$_provider] 429限流，等待$_retryDelaySeconds秒后重试');
           await Future.delayed(Duration(seconds: _retryDelaySeconds));
           continue;
         }
 
         if (response.statusCode >= 500) {
           lastError = Exception('API服务器错误: ${response.statusCode}');
-          await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+          await Future.delayed(Duration(milliseconds: 1000 * (attempt + 1)));
           continue;
         }
 
         throw Exception('API调用失败: ${response.statusCode} ${response.body}');
       } on TimeoutException {
         lastError = Exception('API调用超时');
-        await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+        await Future.delayed(Duration(milliseconds: 1000 * (attempt + 1)));
       } catch (e) {
         lastError = e is Exception ? e : Exception('API调用异常: $e');
       }
     }
 
+    _pendingRequest!.completeError(lastError ?? Exception('API调用失败'));
+    _isRequesting = false;
+    _pendingRequest = null;
     throw lastError ?? Exception('API调用失败');
   }
 
@@ -689,7 +715,6 @@ class _ParsedAISentimentResult implements AISentimentResult {
   });
 }
 
-/// 将异常转换为用户友好的 AI 错误信息（顶层函数，解耦具体 AI 实现）
 String formatAIError(dynamic e) {
   final msg = e.toString();
   if (msg.contains('请') && msg.contains('秒后重试')) {
