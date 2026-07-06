@@ -1141,6 +1141,9 @@ class Position {
   final String name;
   final int quantity;       // 持仓股数
   final double avgPrice;   // 持仓均价
+  final double floatPnl;   // 浮动盈亏（来自Excel）
+  final double pnlPct;     // 盈亏比例（来自Excel）
+  final double marketValue; // 市值（来自Excel）
   final DateTime? buyDate; // 买入日期
   final String notes;       // 备注
   final DateTime createdAt;
@@ -1151,6 +1154,9 @@ class Position {
     required this.name,
     required this.quantity,
     required this.avgPrice,
+    this.floatPnl = 0.0,
+    this.pnlPct = 0.0,
+    this.marketValue = 0.0,
     this.buyDate,
     this.notes = '',
     DateTime? createdAt,
@@ -1174,6 +1180,9 @@ class Position {
       name: map['name'] as String? ?? '',
       quantity: (map['quantity'] as num?)?.toInt() ?? 0,
       avgPrice: (map['avg_price'] as num?)?.toDouble() ?? 0.0,
+      floatPnl: (map['float_pnl'] as num?)?.toDouble() ?? 0.0,
+      pnlPct: (map['pnl_pct'] as num?)?.toDouble() ?? 0.0,
+      marketValue: (map['market_value'] as num?)?.toDouble() ?? 0.0,
       buyDate: map['buy_date'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['buy_date'] as int)
           : null,
@@ -1191,6 +1200,9 @@ class Position {
       'name': name,
       'quantity': quantity,
       'avg_price': avgPrice,
+      'float_pnl': floatPnl,
+      'pnl_pct': pnlPct,
+      'market_value': marketValue,
       'buy_date': buyDate?.millisecondsSinceEpoch,
       'notes': notes,
       'created_at': createdAt.millisecondsSinceEpoch,

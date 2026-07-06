@@ -919,10 +919,12 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
   Widget _buildPositionCard(Position pos, QuoteData quote, OpportunityResult? opp) {
     final currentPrice = quote.price > 0 ? quote.price : pos.avgPrice;
-    final pnl = (currentPrice - pos.avgPrice) * pos.quantity;
-    final pnlPct = pos.avgPrice > 0
+    
+    // 优先使用Excel中的浮动盈亏和盈亏比例，没有则计算
+    final pnl = pos.floatPnl != 0 ? pos.floatPnl : (currentPrice - pos.avgPrice) * pos.quantity;
+    final pnlPct = pos.pnlPct != 0 ? pos.pnlPct : (pos.avgPrice > 0
         ? ((currentPrice - pos.avgPrice) / pos.avgPrice * 100)
-        : 0.0;
+        : 0.0);
     final pnlColor = pnl >= 0 ? _upColor : _downColor;
 
     return Card(
@@ -1259,6 +1261,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
       final headerRow = rows[headerRowIndex];
       int codeCol = -1, nameCol = -1, quantityCol = -1, balanceCol = -1;
       int avgPriceCol = -1, latestPriceCol = -1, floatPnlCol = -1;
+      int pnlPctCol = -1, marketValueCol = -1;
       for (var i = 0; i < headerRow.length; i++) {
         final header = _parseCellValue(headerRow[i]);
         if (header.contains('证券代码') || header.contains('代码')) {
@@ -1275,6 +1278,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
           latestPriceCol = i;
         } else if (header.contains('浮动盈亏') || header.contains('盈亏')) {
           floatPnlCol = i;
+        } else if (header.contains('盈亏比例') || header.contains('盈亏比')) {
+          pnlPctCol = i;
+        } else if (header.contains('市值') || header.contains('证券市值')) {
+          marketValueCol = i;
         }
       }
 
@@ -1287,7 +1294,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
         return;
       }
 
-      debugPrint('Excel导入: codeCol=$codeCol nameCol=$nameCol quantityCol=$quantityCol balanceCol=$balanceCol avgPriceCol=$avgPriceCol latestPriceCol=$latestPriceCol floatPnlCol=$floatPnlCol');
+      debugPrint('Excel导入: codeCol=$codeCol nameCol=$nameCol quantityCol=$quantityCol balanceCol=$balanceCol avgPriceCol=$avgPriceCol latestPriceCol=$latestPriceCol floatPnlCol=$floatPnlCol pnlPctCol=$pnlPctCol marketValueCol=$marketValueCol');
 
       // 从表头下一行开始读取数据
       for (var rowIndex = headerRowIndex + 1; rowIndex < rows.length; rowIndex++) {
@@ -1302,6 +1309,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
         final avgPriceCell = avgPriceCol >= 0 && avgPriceCol < row.length ? row[avgPriceCol] : null;
         final latestPriceCell = latestPriceCol >= 0 && latestPriceCol < row.length ? row[latestPriceCol] : null;
         final floatPnlCell = floatPnlCol >= 0 && floatPnlCol < row.length ? row[floatPnlCol] : null;
+        final pnlPctCell = pnlPctCol >= 0 && pnlPctCol < row.length ? row[pnlPctCol] : null;
+        final marketValueCell = marketValueCol >= 0 && marketValueCol < row.length ? row[marketValueCol] : null;
 
         final code = _parseCellValue(codeCell);
         final name = _parseCellValue(nameCell);
@@ -1310,8 +1319,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
         final avgPriceStr = _parseCellValue(avgPriceCell);
         final latestPriceStr = _parseCellValue(latestPriceCell);
         final floatPnlStr = _parseCellValue(floatPnlCell);
+        final pnlPctStr = _parseCellValue(pnlPctCell);
+        final marketValueStr = _parseCellValue(marketValueCell);
 
-        debugPrint('Excel导入: 行$rowIndex code=$code name=$name balance=$balanceStr quantity=$quantityStr avgPrice=$avgPriceStr latestPrice=$latestPriceStr floatPnl=$floatPnlStr');
+        debugPrint('Excel导入: 行$rowIndex code=$code name=$name balance=$balanceStr quantity=$quantityStr avgPrice=$avgPriceStr latestPrice=$latestPriceStr floatPnl=$floatPnlStr pnlPct=$pnlPctStr marketValue=$marketValueStr');
 
         if (code.isEmpty || name.isEmpty) continue;
 
@@ -1338,12 +1349,20 @@ class WatchlistScreenState extends State<WatchlistScreen>
           }
         }
 
+        // 获取浮动盈亏、盈亏比例、市值
+        final floatPnl = double.tryParse(floatPnlStr) ?? 0.0;
+        final pnlPct = double.tryParse(pnlPctStr) ?? 0.0;
+        final marketValue = double.tryParse(marketValueStr) ?? 0.0;
+
         if (code.isNotEmpty && name.isNotEmpty) {
           positions.add(Position(
             code: code,
             name: name,
             quantity: quantity,
             avgPrice: avgPrice,
+            floatPnl: floatPnl,
+            pnlPct: pnlPct,
+            marketValue: marketValue,
           ));
         }
       }

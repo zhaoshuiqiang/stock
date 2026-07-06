@@ -37,7 +37,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 14,
+      version: 15,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -283,6 +283,19 @@ class DatabaseService {
               ALTER TABLE recommendation_tracking ADD COLUMN confidence_adjustment TEXT DEFAULT ''
             ''');
             debugPrint('[DB] v13→v14: added reflection/alpha/confidence_adjustment columns');
+          }
+          if (oldVersion < 15) {
+            // v3.0: 持仓增加浮动盈亏、盈亏比例、市值字段
+            await txn.execute('''
+              ALTER TABLE positions ADD COLUMN float_pnl REAL NOT NULL DEFAULT 0
+            ''');
+            await txn.execute('''
+              ALTER TABLE positions ADD COLUMN pnl_pct REAL NOT NULL DEFAULT 0
+            ''');
+            await txn.execute('''
+              ALTER TABLE positions ADD COLUMN market_value REAL NOT NULL DEFAULT 0
+            ''');
+            debugPrint('[DB] v14→v15: added float_pnl/pnl_pct/market_value columns to positions');
           }
           // 索引补建（幂等，保证升级路径和新装路径都有）
           await txn.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
