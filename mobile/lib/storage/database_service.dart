@@ -1039,7 +1039,39 @@ class DatabaseService {
 
   Future<int> addPosition(Position position) async {
     final db = await database;
-    return await db.insert('positions', position.toMap());
+    try {
+      return await db.insert('positions', position.toMap());
+    } catch (e) {
+      debugPrint('[DB] addPosition 失败: $e');
+      // 检查表结构，自动修复缺失的列
+      await _ensurePositionsColumns(db);
+      return await db.insert('positions', position.toMap());
+    }
+  }
+
+  /// 确保 positions 表包含所有必要列（防止升级失败导致缺列）
+  Future<void> _ensurePositionsColumns(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(positions)');
+    final existing = columns.map((c) => c['name'] as String).toSet();
+    debugPrint('[DB] positions 表现有列: $existing');
+
+    const required = {
+      'float_pnl': 'REAL NOT NULL DEFAULT 0',
+      'pnl_pct': 'REAL NOT NULL DEFAULT 0',
+      'market_value': 'REAL NOT NULL DEFAULT 0',
+      'today_pnl': 'REAL NOT NULL DEFAULT 0',
+      'today_pnl_pct': 'REAL NOT NULL DEFAULT 0',
+      'latest_price': 'REAL NOT NULL DEFAULT 0',
+    };
+
+    for (final entry in required.entries) {
+      if (!existing.contains(entry.key)) {
+        debugPrint('[DB] 补建缺失列: ${entry.key}');
+        await db.execute(
+          'ALTER TABLE positions ADD COLUMN ${entry.key} ${entry.value}',
+        );
+      }
+    }
   }
 
   Future<void> updatePosition(Position position) async {
