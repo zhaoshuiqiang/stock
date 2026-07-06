@@ -19,11 +19,17 @@ class SectorRotation {
       int cd = 0;
       if (historyData != null && historyData.containsKey(s.code)) for (int i = (historyData[s.code]?.length ?? 0) - 1; i >= 0; i--) { if ((historyData[s.code]?[i] ?? 0) >= 5.0) cd++; else break; }
       if (cd >= 3) ss += 1.0; else if (cd >= 2) ss += 0.5;
-      analyses.add(SectorAnalysis(name: s.name, code: s.code, changePct: s.changePct, limitUpCount: s.limitUpCount, mainNetFlow: s.mainNetFlow, consecutiveStrongDays: cd, strengthScore: ss, isMainLine: ss >= 5.5 && s.limitUpCount >= 1));
+      // 主线判定：强度足够高即可，涨停数作为加分项而非硬性要求
+      analyses.add(SectorAnalysis(name: s.name, code: s.code, changePct: s.changePct, limitUpCount: s.limitUpCount, mainNetFlow: s.mainNetFlow, consecutiveStrongDays: cd, strengthScore: ss, isMainLine: ss >= 4.5));
     }
     analyses.sort((a, b) => b.strengthScore.compareTo(a.strengthScore));
     final topSectors = analyses.take(5).toList();
-    final mainLines = analyses.asMap().entries.where((e) => e.value.isMainLine || (e.key < 3 && e.value.strengthScore >= 4.5)).map((e) => e.value).toList();
+    // 主线：强度达标的板块，或前2名且强度 >= 3.5（兜底，确保至少有主线展示）
+    var mainLines = analyses.asMap().entries.where((e) {
+      if (e.value.isMainLine) return true;
+      if (e.key < 2 && e.value.strengthScore >= 3.5) return true; // 兜底：前2名且强度够
+      return false;
+    }).map((e) => e.value).toList();
     return SectorRotationResult(topSectors: topSectors, mainLines: mainLines, updateTime: DateTime.now());
   }
 

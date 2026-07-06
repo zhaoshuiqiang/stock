@@ -524,10 +524,14 @@ class DiscoverScreenState extends State<DiscoverScreen>
       ].where((g) => g.items.isNotEmpty).toList();
     }
 
-    // 主线龙头：仅展示主线板块个股；无主线命中时显示空状态，不回退展示全部精选
+    // 主线龙头：优先展示主线板块个股；无主线命中时回退展示评分最高的精选个股
     final all = _sectorPickResults;
     // mainLine 经 SQLite 往返后为 int(0/1)，从引擎直接获取时为 bool
     var picks = all.where((p) => p['mainLine'] == 1 || p['mainLine'] == true).toList();
+    // 回退：无主线命中时，展示所有精选个股（按评分排序）
+    if (picks.isEmpty && all.isNotEmpty) {
+      picks = all.toList();
+    }
     // 注意：db.query() 返回的 QueryResultSet 是只读的（operator []= 抛 read-only），
     // 不能直接赋值后 sort，必须创建可变副本
     if (picks.isNotEmpty) {
@@ -1020,7 +1024,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
     } else if (_hasMainLineHit) {
       hint = '主线板块内精选个股，含轮动加成';
     } else {
-      hint = '暂无主线命中，盘后更新';
+      hint = '精选个股推荐（暂无主线命中，按评分排序）';
     }
     return Column(
       children: [
@@ -1051,7 +1055,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
                   icon: Icons.military_tech_outlined,
                   text: _sectorPickResults.isEmpty
                       ? '暂无板块精选数据'
-                      : '当前无明确主线板块，盘后更新',
+                      : '当前无主线板块命中',
                   actionText: _sectorPickResults.isEmpty && !_isPickingSectors
                       ? '开始精选' : null,
                   onAction: _sectorPickResults.isEmpty && !_isPickingSectors

@@ -125,11 +125,17 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   Future<void> _refreshQuotes() async {
-    if (_watchlist.isEmpty) return;
+    // 合并自选和持仓的股票代码，一起获取行情
+    final codeSet = <String>{};
+    for (final item in _watchlist) {
+      codeSet.add(_apiClient.addMarketPrefix(item.code));
+    }
+    for (final pos in _positionMap.values) {
+      codeSet.add(_apiClient.addMarketPrefix(pos.code));
+    }
+    if (codeSet.isEmpty) return;
     try {
-      final codes =
-          _watchlist.map((item) => _apiClient.addMarketPrefix(item.code)).toList();
-      final quotes = await _apiClient.getBatchRealtimeQuotes(codes);
+      final quotes = await _apiClient.getBatchRealtimeQuotes(codeSet.toList());
       if (mounted) {
         setState(() {
           _quotes = quotes;
@@ -471,6 +477,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
       final map = await _dbService.getPositionMap();
       if (mounted) {
         setState(() => _positionMap = map);
+        // 持仓变化后刷新行情，确保持仓股票有最新价格
+        _refreshQuotes();
       }
     } catch (_) {}
   }
