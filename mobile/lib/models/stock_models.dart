@@ -1168,6 +1168,40 @@ class Position {
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
+  Position copyWith({
+    int? id,
+    String? code,
+    String? name,
+    int? quantity,
+    double? avgPrice,
+    double? floatPnl,
+    double? pnlPct,
+    double? marketValue,
+    double? todayPnl,
+    double? todayPnlPct,
+    double? latestPrice,
+    DateTime? buyDate,
+    String? notes,
+    DateTime? createdAt,
+  }) {
+    return Position(
+      id: id ?? this.id,
+      code: code ?? this.code,
+      name: name ?? this.name,
+      quantity: quantity ?? this.quantity,
+      avgPrice: avgPrice ?? this.avgPrice,
+      floatPnl: floatPnl ?? this.floatPnl,
+      pnlPct: pnlPct ?? this.pnlPct,
+      marketValue: marketValue ?? this.marketValue,
+      todayPnl: todayPnl ?? this.todayPnl,
+      todayPnlPct: todayPnlPct ?? this.todayPnlPct,
+      latestPrice: latestPrice ?? this.latestPrice,
+      buyDate: buyDate ?? this.buyDate,
+      notes: notes ?? this.notes,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
   /// 持仓市值（按均价计算的投入成本）
   double get cost => quantity * avgPrice;
 

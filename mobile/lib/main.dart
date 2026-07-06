@@ -100,6 +100,19 @@ class _MyAppState extends State<MyApp> {
   int _currentIndex = 0;
   final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
   final GlobalKey<DiscoverScreenState> _discoverKey = GlobalKey<DiscoverScreenState>();
+  late final List<Widget> _pages;
+
+  @override
+  void initState() {
+    super.initState();
+    _pages = [
+      HomeScreen(key: _homeKey),
+      const WatchlistScreen(),
+      DiscoverScreen(key: _discoverKey),
+      const NewsScreen(),
+      const ArchiveScreen(),
+    ];
+  }
 
   void _onTabChanged(int index) {
     setState(() {
@@ -117,14 +130,6 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      HomeScreen(key: _homeKey),
-      const WatchlistScreen(),
-      DiscoverScreen(key: _discoverKey),
-      const NewsScreen(),
-      const ArchiveScreen(),
-    ];
-
     final titles = [
       '首页',
       '自选',
@@ -201,7 +206,10 @@ class _MyAppState extends State<MyApp> {
                   ]
                 : null,
         ),
-        body: pages[_currentIndex],
+        body: IndexedStack(
+          index: _currentIndex,
+          children: _pages,
+        ),
         bottomNavigationBar: BottomNavigationBar(
           type: BottomNavigationBarType.fixed,
           currentIndex: _currentIndex,

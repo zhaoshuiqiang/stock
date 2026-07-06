@@ -2618,14 +2618,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
                 final existing = _findPosition(code);
                 if (existing != null) {
-                  await _dbService.updatePosition(Position(
-                    id: existing.id,
-                    code: position.code,
-                    name: position.name,
-                    quantity: position.quantity,
-                    avgPrice: position.avgPrice,
-                    notes: existing.notes,
-                    createdAt: existing.createdAt,
+                  await _dbService.updatePosition(existing.copyWith(
+                    quantity: quantity,
+                    avgPrice: avgPrice,
                   ));
                 } else {
                   await _dbService.addPosition(position);
@@ -2745,14 +2740,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 return;
               }
 
-              await _dbService.updatePosition(Position(
-                id: pos.id,
-                code: pos.code,
-                name: pos.name,
+              await _dbService.updatePosition(pos.copyWith(
                 quantity: quantity,
                 avgPrice: avgPrice,
-                notes: pos.notes,
-                createdAt: pos.createdAt,
               ));
               await _loadPositions();
 
@@ -3384,14 +3374,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 return;
               }
               if (existing != null) {
-                await _dbService.updatePosition(Position(
-                  id: existing.id,
-                  code: existing.code,
-                  name: existing.name,
+                await _dbService.updatePosition(existing.copyWith(
                   quantity: qty,
                   avgPrice: price,
                   notes: notesCtrl.text.trim(),
-                  createdAt: existing.createdAt,
                 ));
               } else {
                 await _dbService.addPosition(Position(
