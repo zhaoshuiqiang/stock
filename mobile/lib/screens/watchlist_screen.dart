@@ -928,13 +928,14 @@ class WatchlistScreenState extends State<WatchlistScreen>
             (q) => q.code.endsWith(pos.code),
             orElse: () => QuoteData.empty(),
           );
-          return _buildPositionCard(pos, quote);
+          final opp = _oppMap[pos.code];
+          return _buildPositionCard(pos, quote, opp);
         },
       ),
     );
   }
 
-  Widget _buildPositionCard(Position pos, QuoteData quote) {
+  Widget _buildPositionCard(Position pos, QuoteData quote, OpportunityResult? opp) {
     final currentPrice = quote.price > 0 ? quote.price : pos.avgPrice;
     final pnl = (currentPrice - pos.avgPrice) * pos.quantity;
     final pnlPct = pos.avgPrice > 0
@@ -1036,11 +1037,100 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   ),
                 ],
               ),
+              if (opp != null) ...[
+                const SizedBox(height: 12),
+                const Divider(color: _borderColor, height: 1),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _getRecommendationColor(opp.recommendation).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        opp.recommendation,
+                        style: TextStyle(
+                          color: _getRecommendationColor(opp.recommendation),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _accentColor.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '评分 ${opp.score}',
+                        style: const TextStyle(
+                          color: _accentColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (opp.confluenceScore > 0) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _accentColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '共振${opp.confluenceScore}',
+                          style: const TextStyle(
+                            color: _accentColor,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                if (opp.topSignals.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: opp.topSignals.take(3).map((s) {
+                      final isBuy = s.startsWith('▲');
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: (isBuy ? _upColor : _downColor).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          s,
+                          style: TextStyle(
+                            color: isBuy ? _upColor : _downColor,
+                            fontSize: 10,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ],
             ],
           ),
         ),
       ),
     );
+  }
+
+  Color _getRecommendationColor(String recommendation) {
+    if (recommendation.contains('强烈买入')) return _upColor;
+    if (recommendation.contains('买入')) return const Color(0xFFFF8C00);
+    if (recommendation.contains('卖出')) return _downColor;
+    if (recommendation.contains('强烈卖出')) return const Color(0xFF8B0000);
+    return _textSecondary;
   }
 
   Widget _buildPositionDetail(String label, String value, {Color? color}) {
