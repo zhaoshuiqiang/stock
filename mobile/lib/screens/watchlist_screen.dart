@@ -54,6 +54,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
   // ─── 持仓状态 (v2.33) ────────────────────────────────────────
   Map<String, Position> _positionMap = {}; // code → Position
+  double _totalAssets = 0;
+  double _totalMarketValue = 0;
+  double _availableCash = 0;
+  double _totalFloatPnl = 0;
 
   // ─── AI 持仓分析状态 ──────────────────────────────────────────
   bool _isPortfolioAnalyzing = false;
@@ -760,49 +764,85 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   Widget _buildPositionHeader() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: _cardColor,
-        border: Border(bottom: BorderSide(color: _borderColor)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          const Text(
-            '持仓',
-            style: TextStyle(
-              color: _textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: _cardColor,
+            border: Border(bottom: BorderSide(color: _borderColor)),
           ),
-          Row(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              IconButton(
-                icon: const Icon(Icons.auto_awesome, color: _accentColor, size: 20),
-                onPressed: _analyzePortfolio,
-                tooltip: 'AI分析持仓',
+              const Text(
+                '持仓',
+                style: TextStyle(
+                  color: _textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-              IconButton(
-                icon: const Icon(Icons.bar_chart, color: _accentColor, size: 20),
-                onPressed: _showBacktestDialog,
-                tooltip: '回测分析',
-              ),
-              IconButton(
-                icon: const Icon(Icons.upload_file, color: _accentColor, size: 20),
-                onPressed: _importPositionsFromExcel,
-                tooltip: '导入持仓Excel',
-              ),
-              IconButton(
-                icon: const Icon(Icons.add, color: _accentColor, size: 20),
-                onPressed: () => _showAddPositionDialog(),
-                tooltip: '手动添加',
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.auto_awesome, color: _accentColor, size: 20),
+                    onPressed: _analyzePortfolio,
+                    tooltip: 'AI分析持仓',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.bar_chart, color: _accentColor, size: 20),
+                    onPressed: _showBacktestDialog,
+                    tooltip: '回测分析',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.upload_file, color: _accentColor, size: 20),
+                    onPressed: _importPositionsFromExcel,
+                    tooltip: '导入持仓Excel',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add, color: _accentColor, size: 20),
+                    onPressed: () => _showAddPositionDialog(),
+                    tooltip: '手动添加',
+                  ),
+                ],
               ),
             ],
           ),
-        ],
-      ),
+        ),
+        if (_totalAssets > 0 || _totalMarketValue > 0)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: _cardColor,
+              border: Border(bottom: BorderSide(color: _borderColor)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildAssetStat('总资产', _totalAssets),
+                _buildAssetStat('总市值', _totalMarketValue),
+                _buildAssetStat('可用资金', _availableCash),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildAssetStat(String label, double value) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: _textSecondary, fontSize: 12),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '¥${value.toStringAsFixed(2)}',
+          style: const TextStyle(color: _textPrimary, fontSize: 14, fontWeight: FontWeight.bold),
+        ),
+      ],
     );
   }
 
@@ -842,7 +882,37 @@ class WatchlistScreenState extends State<WatchlistScreen>
             orElse: () => QuoteData.empty(),
           );
           final opp = _oppMap[pos.code];
-          return _buildPositionCard(pos, quote, opp);
+          return Dismissible(
+            key: Key(pos.code),
+            direction: DismissDirection.endToStart,
+            background: Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: EdgeInsets.only(right: 20),
+                  child: Text(
+                    '删除',
+                    style: TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                ),
+              ),
+            ),
+            onDismissed: (direction) async {
+              await _dbService.deletePosition(pos.id!);
+              await _loadPositions();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('已删除 ${pos.name}')),
+                );
+              }
+            },
+            child: _buildPositionCard(pos, quote, opp),
+          );
         },
       ),
     );
@@ -907,24 +977,32 @@ class WatchlistScreenState extends State<WatchlistScreen>
                       ],
                     ),
                   ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                  Row(
                     children: [
-                      Text(
-                        '¥${currentPrice.toStringAsFixed(2)}',
-                        style: TextStyle(
-                          color: quote.changePct >= 0 ? _upColor : _downColor,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      IconButton(
+                        icon: const Icon(Icons.edit, size: 18, color: Colors.white54),
+                        onPressed: () => _showEditPositionDialog(pos),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${quote.changePct >= 0 ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
-                        style: TextStyle(
-                          color: quote.changePct >= 0 ? _upColor : _downColor,
-                          fontSize: 14,
-                        ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '¥${currentPrice.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              color: quote.changePct >= 0 ? _upColor : _downColor,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${quote.changePct >= 0 ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
+                            style: TextStyle(
+                              color: quote.changePct >= 0 ? _upColor : _downColor,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -1118,6 +1196,30 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
       debugPrint('Excel导入: 总行数=${rows.length}');
 
+      // 解析资产汇总数据
+      for (var i = 0; i < rows.length && i < 10; i++) {
+        final row = rows[i];
+        if (row.isNotEmpty) {
+          final firstCell = row[0]?.value?.toString() ?? '';
+          if (firstCell.contains('资产')) {
+            // 这是资产汇总表头行，下一行是数据
+            if (i + 1 < rows.length) {
+              final dataRow = rows[i + 1];
+              if (dataRow.length > 4) {
+                _availableCash = double.tryParse(dataRow[1]?.value?.toString() ?? '0') ?? 0;
+              }
+              if (dataRow.length > 4) {
+                _totalAssets = double.tryParse(dataRow[4]?.value?.toString() ?? '0') ?? 0;
+              }
+              if (dataRow.length > 5) {
+                _totalMarketValue = double.tryParse(dataRow[5]?.value?.toString() ?? '0') ?? 0;
+              }
+            }
+            break;
+          }
+        }
+      }
+
       // 查找表头行（包含"证券代码"的行）
       int headerRowIndex = -1;
       for (var i = 0; i < rows.length; i++) {
@@ -1144,7 +1246,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
       // 解析表头，动态查找列位置
       final headerRow = rows[headerRowIndex];
-      int codeCol = -1, nameCol = -1, quantityCol = -1, balanceCol = -1, avgPriceCol = -1;
+      int codeCol = -1, nameCol = -1, quantityCol = -1, balanceCol = -1;
+      int avgPriceCol = -1, latestPriceCol = -1, floatPnlCol = -1;
       for (var i = 0; i < headerRow.length; i++) {
         final header = _parseCellValue(headerRow[i]);
         if (header.contains('证券代码') || header.contains('代码')) {
@@ -1157,6 +1260,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
           balanceCol = i;
         } else if (header.contains('盈亏成本') || header.contains('成本')) {
           avgPriceCol = i;
+        } else if (header.contains('最新价') || header.contains('现价')) {
+          latestPriceCol = i;
+        } else if (header.contains('浮动盈亏') || header.contains('盈亏')) {
+          floatPnlCol = i;
         }
       }
 
@@ -1169,7 +1276,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
         return;
       }
 
-      debugPrint('Excel导入: codeCol=$codeCol nameCol=$nameCol quantityCol=$quantityCol balanceCol=$balanceCol avgPriceCol=$avgPriceCol');
+      debugPrint('Excel导入: codeCol=$codeCol nameCol=$nameCol quantityCol=$quantityCol balanceCol=$balanceCol avgPriceCol=$avgPriceCol latestPriceCol=$latestPriceCol floatPnlCol=$floatPnlCol');
 
       // 从表头下一行开始读取数据
       for (var rowIndex = headerRowIndex + 1; rowIndex < rows.length; rowIndex++) {
@@ -1182,14 +1289,18 @@ class WatchlistScreenState extends State<WatchlistScreen>
         final balanceCell = balanceCol >= 0 && balanceCol < row.length ? row[balanceCol] : null;
         final quantityCell = quantityCol >= 0 && quantityCol < row.length ? row[quantityCol] : null;
         final avgPriceCell = avgPriceCol >= 0 && avgPriceCol < row.length ? row[avgPriceCol] : null;
+        final latestPriceCell = latestPriceCol >= 0 && latestPriceCol < row.length ? row[latestPriceCol] : null;
+        final floatPnlCell = floatPnlCol >= 0 && floatPnlCol < row.length ? row[floatPnlCol] : null;
 
         final code = _parseCellValue(codeCell);
         final name = _parseCellValue(nameCell);
         final balanceStr = _parseCellValue(balanceCell);
         final quantityStr = _parseCellValue(quantityCell);
         final avgPriceStr = _parseCellValue(avgPriceCell);
+        final latestPriceStr = _parseCellValue(latestPriceCell);
+        final floatPnlStr = _parseCellValue(floatPnlCell);
 
-        debugPrint('Excel导入: 行$rowIndex code=$code name=$name balance=$balanceStr quantity=$quantityStr price=$avgPriceStr');
+        debugPrint('Excel导入: 行$rowIndex code=$code name=$name balance=$balanceStr quantity=$quantityStr avgPrice=$avgPriceStr latestPrice=$latestPriceStr floatPnl=$floatPnlStr');
 
         if (code.isEmpty || name.isEmpty) continue;
 
@@ -1202,7 +1313,19 @@ class WatchlistScreenState extends State<WatchlistScreen>
           quantity = int.tryParse(quantityStr) ?? 0;
         }
 
-        final avgPrice = double.tryParse(avgPriceStr) ?? 0.0;
+        // 获取盈亏成本
+        double avgPrice = double.tryParse(avgPriceStr) ?? 0.0;
+
+        // 如果盈亏成本为0，尝试从最新价和浮动盈亏反推成本价
+        // 公式: avgPrice = (latestPrice * quantity - floatPnl) / quantity
+        if (avgPrice <= 0 && quantity > 0) {
+          final latestPrice = double.tryParse(latestPriceStr) ?? 0.0;
+          final floatPnl = double.tryParse(floatPnlStr) ?? 0.0;
+          if (latestPrice > 0) {
+            avgPrice = (latestPrice * quantity - floatPnl) / quantity;
+            debugPrint('Excel导入: 行$rowIndex 反推成本价=$avgPrice (latestPrice=$latestPrice quantity=$quantity floatPnl=$floatPnl)');
+          }
+        }
 
         if (code.isNotEmpty && name.isNotEmpty) {
           positions.add(Position(
@@ -1223,22 +1346,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
         return;
       }
 
-      // 批量添加到数据库（存在则更新）
+      // 批量添加到数据库（先清除现有数据）
+      await _dbService.deleteAllPositions();
       for (final pos in positions) {
-        final existing = _positionMap[pos.code];
-        if (existing != null) {
-          await _dbService.updatePosition(Position(
-            id: existing.id,
-            code: pos.code,
-            name: pos.name,
-            quantity: pos.quantity,
-            avgPrice: pos.avgPrice,
-            notes: existing.notes,
-            createdAt: existing.createdAt,
-          ));
-        } else {
-          await _dbService.addPosition(pos);
-        }
+        await _dbService.addPosition(pos);
       }
 
       await _loadPositions();
@@ -1411,23 +1522,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   Future<void> _showBacktestDialog() async {
-    final archives = await _dbService.getArchives();
-    if (archives.isEmpty) {
+    if (_positionMap.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('暂无历史留档数据，无法回测')),
+          const SnackBar(content: Text('暂无持仓数据，无法回测')),
         );
       }
       return;
-    }
-
-    // 按股票代码分组，取每只股票最早的留档记录
-    final stockArchives = <String, ArchiveRecord>{};
-    for (final archive in archives) {
-      if (!stockArchives.containsKey(archive.code) ||
-          archive.archivedAt.isBefore(stockArchives[archive.code]!.archivedAt)) {
-        stockArchives[archive.code] = archive;
-      }
     }
 
     if (!mounted) return;
@@ -1449,17 +1550,17 @@ class WatchlistScreenState extends State<WatchlistScreen>
               style: TextStyle(color: Colors.white70, fontSize: 14),
             ),
             const SizedBox(height: 16),
-            _buildStrategyButton('MACD金叉', context, stockArchives),
+            _buildStrategyButton('MACD金叉', context),
             const SizedBox(height: 8),
-            _buildStrategyButton('MA金叉', context, stockArchives),
+            _buildStrategyButton('MA金叉', context),
             const SizedBox(height: 8),
-            _buildStrategyButton('KDJ超卖', context, stockArchives),
+            _buildStrategyButton('KDJ超卖', context),
             const SizedBox(height: 8),
-            _buildStrategyButton('RSI超卖', context, stockArchives),
+            _buildStrategyButton('RSI超卖', context),
             const SizedBox(height: 8),
-            _buildStrategyButton('布林支撑', context, stockArchives),
+            _buildStrategyButton('布林支撑', context),
             const SizedBox(height: 8),
-            _buildStrategyButton('均线多头', context, stockArchives),
+            _buildStrategyButton('均线多头', context),
           ],
         ),
         actions: [
@@ -1475,7 +1576,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
   Widget _buildStrategyButton(
     String strategy,
     BuildContext context,
-    Map<String, ArchiveRecord> stockArchives,
   ) {
     return SizedBox(
       width: double.infinity,
@@ -1486,7 +1586,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
         ),
         onPressed: () async {
           Navigator.pop(context);
-          await _runBacktest(strategy, stockArchives);
+          await _runBacktest(strategy);
         },
         child: Text(
           strategy,
@@ -1496,13 +1596,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
     );
   }
 
-  Future<void> _runBacktest(
-    String strategy,
-    Map<String, ArchiveRecord> stockArchives,
-  ) async {
+  Future<void> _runBacktest(String strategy) async {
     if (!mounted) return;
 
-    // 显示加载对话框
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1526,29 +1622,23 @@ class WatchlistScreenState extends State<WatchlistScreen>
       final results = <String, BacktestResult>{};
       final klineData = <String, List<HistoryKline>>{};
 
-      // 获取每只股票的历史K线数据
-      for (final entry in stockArchives.entries) {
-        final code = entry.key;
-        final archive = entry.value;
+      for (final pos in _positionMap.values) {
+        if (pos.quantity <= 0) continue;
 
-        // 计算从留档日期到今天的天数
-        final days = DateTime.now().difference(archive.archivedAt).inDays;
-        if (days < 30) continue; // 至少需要30天数据
-
-        final prefixedCode = _apiClient.addMarketPrefix(code);
+        final prefixedCode = _apiClient.addMarketPrefix(pos.code);
         final klines = await _apiClient.getStockHistory(
           prefixedCode,
-          days: days.clamp(30, 365),
+          days: 180,
         );
 
         if (klines.length >= 60) {
-          klineData[code] = klines;
+          klineData[pos.code] = klines;
         }
       }
 
       if (klineData.isEmpty) {
         if (mounted) {
-          Navigator.pop(context); // 关闭加载对话框
+          Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('无足够的历史数据进行回测')),
           );
@@ -1556,7 +1646,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
         return;
       }
 
-      // 对每只股票运行回测
       for (final entry in klineData.entries) {
         final code = entry.key;
         final klines = entry.value;
@@ -1589,12 +1678,12 @@ class WatchlistScreenState extends State<WatchlistScreen>
       }
 
       if (mounted) {
-        Navigator.pop(context); // 关闭加载对话框
-        _showBacktestResults(strategy, results, stockArchives);
+        Navigator.pop(context);
+        _showBacktestResults(strategy, results);
       }
     } catch (e) {
       if (mounted) {
-        Navigator.pop(context); // 关闭加载对话框
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('回测失败: $e')),
         );
@@ -1602,11 +1691,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     }
   }
 
-  void _showBacktestResults(
-    String strategy,
-    Map<String, BacktestResult> results,
-    Map<String, ArchiveRecord> stockArchives,
-  ) {
+  void _showBacktestResults(String strategy, Map<String, BacktestResult> results) {
     if (results.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('无回测结果')),
@@ -1686,8 +1771,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   final entry = results.entries.elementAt(index);
                   final code = entry.key;
                   final result = entry.value;
-                  final archive = stockArchives[code];
-                  final name = archive?.name ?? code;
+                  final pos = _positionMap[code];
+                  final name = pos?.name ?? code;
 
                   return Card(
                     color: const Color(0xFF2A2A2A),
@@ -1909,6 +1994,129 @@ class WatchlistScreenState extends State<WatchlistScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _showEditPositionDialog(Position pos) async {
+    final quantityController = TextEditingController(text: pos.quantity.toString());
+    final avgPriceController = TextEditingController(text: pos.avgPrice.toStringAsFixed(3));
+
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _cardColor,
+        title: Text(
+          '编辑持仓 - ${pos.name}',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                enabled: false,
+                style: const TextStyle(color: Colors.white70),
+                decoration: InputDecoration(
+                  labelText: '股票代码',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  hintText: pos.code,
+                  hintStyle: const TextStyle(color: Colors.white38),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                enabled: false,
+                style: const TextStyle(color: Colors.white70),
+                decoration: InputDecoration(
+                  labelText: '股票名称',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  hintText: pos.name,
+                  hintStyle: const TextStyle(color: Colors.white38),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: quantityController,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: '持仓数量',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  hintText: '例如: 100',
+                  hintStyle: TextStyle(color: Colors.white38),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: avgPriceController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: '成本价格',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  hintText: '例如: 1800.50',
+                  hintStyle: TextStyle(color: Colors.white38),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final quantityStr = quantityController.text.trim();
+              final avgPriceStr = avgPriceController.text.trim();
+
+              if (quantityStr.isEmpty || avgPriceStr.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('请填写完整信息')),
+                );
+                return;
+              }
+
+              final quantity = int.tryParse(quantityStr);
+              final avgPrice = double.tryParse(avgPriceStr);
+
+              if (quantity == null || quantity <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('持仓数量必须大于0')),
+                );
+                return;
+              }
+
+              if (avgPrice == null || avgPrice <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('成本价格必须大于0')),
+                );
+                return;
+              }
+
+              await _dbService.updatePosition(Position(
+                id: pos.id,
+                code: pos.code,
+                name: pos.name,
+                quantity: quantity,
+                avgPrice: avgPrice,
+                notes: pos.notes,
+                createdAt: pos.createdAt,
+              ));
+              await _loadPositions();
+
+              if (mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('持仓编辑成功')),
+                );
+              }
+            },
+            child: const Text('保存'),
+          ),
+        ],
       ),
     );
   }

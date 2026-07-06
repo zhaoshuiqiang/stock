@@ -995,6 +995,11 @@ class DatabaseService {
     await db.delete('positions', where: 'id = ?', whereArgs: [id]);
   }
 
+  Future<void> deleteAllPositions() async {
+    final db = await database;
+    await db.delete('positions');
+  }
+
   Future<List<Position>> getPositions() async {
     final db = await database;
     final result = await db.query('positions', orderBy: 'created_at DESC');
