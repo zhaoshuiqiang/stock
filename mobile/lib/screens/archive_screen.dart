@@ -25,6 +25,18 @@ const _kReasonableColor = Colors.orange;
 const _kDeviationColor = Color(0xFF26a69a);
 const _kVeryDeviationColor = Color(0xFFef5350);
 
+class ReliabilityInfo {
+  final String label;
+  final String description;
+  final Color color;
+
+  const ReliabilityInfo({
+    required this.label,
+    required this.description,
+    required this.color,
+  });
+}
+
 
 class ArchiveScreen extends StatefulWidget {
   const ArchiveScreen({super.key});
@@ -85,72 +97,101 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
 
   /// 判断留档推荐的可靠性等级（4级）
   /// 
-  /// v2.59.0优化：非对称阈值，严格要求方向正确才算合理
-  /// - 买入推荐：涨才算合理，跌就是偏差
-  ///   * 非常合理：涨幅 >= 阈值(如2%) - 方向正确且收益达标
-  ///   * 合理：涨幅 0% ~ 阈值 - 方向正确但收益未达标
-  ///   * 偏差：跌幅 0% ~ 阈值 - 方向错误但跌幅不大
-  ///   * 非常偏差：跌幅 > 阈值 - 方向错误且跌幅较大
-  /// - 卖出推荐：跌才算合理，涨就是偏差（对称反向）
-  /// - 观望推荐：价格波动小才算合理
+  /// 全新设计（v3.0）：更加直观的评价体系
+  /// 
+  /// 买入推荐：
+  ///   * 非常合理（绿）：涨幅 ≥ +3% → 推荐正确且收益显著
+  ///   * 合理（橙）：涨幅 +0.5% ~ +3% → 方向正确，小幅盈利
+  ///   * 偏差（青）：跌幅 -0.5% ~ -3% → 方向错误，小幅亏损
+  ///   * 非常偏差（红）：跌幅 ≤ -3% → 方向错误，大幅亏损
+  /// 
+  /// 卖出推荐（反向）：
+  ///   * 非常合理（绿）：跌幅 ≤ -3% → 推荐正确且跌幅显著
+  ///   * 合理（橙）：跌幅 -3% ~ -0.5% → 方向正确，小幅下跌
+  ///   * 偏差（青）：涨幅 +0.5% ~ +3% → 方向错误，小幅上涨
+  ///   * 非常偏差（红）：涨幅 ≥ +3% → 方向错误，大幅上涨
+  /// 
+  /// 观望推荐：
+  ///   * 非常合理（绿）：波动 < 2% → 预测正确，无明显趋势
+  ///   * 合理（橙）：波动 2% ~ 5% → 基本正确，小幅波动
+  ///   * 偏差（青）：波动 5% ~ 10% → 预测偏差，明显趋势
+  ///   * 非常偏差（红）：波动 ≥ 10% → 预测错误，大幅波动
+  /// 
+  /// 手续费缓冲区：±0.5%（买入后小跌在手续费范围内算合理）
   static ReliabilityLevel _getReliabilityLevel(ArchiveRecord record, double currentPrice) {
     if (currentPrice <= 0 || record.price <= 0) return ReliabilityLevel.reasonable;
 
     final priceChangePct = (currentPrice - record.price) / record.price * 100;
-    final (threshold, neutralThreshold) = _calculateThresholds(record);
+    final absChange = priceChangePct.abs();
 
     final wasBuy = record.recommendation.contains('买入');
     final wasSell = record.recommendation.contains('卖出');
     final wasNeutral = record.recommendation.contains('观望');
 
     if (wasBuy) {
-      // 买入推荐：方向正确（涨）才算合理，-0.5%以内小跌算合理（考虑手续费）
-      if (priceChangePct >= threshold) {
-        return ReliabilityLevel.veryReasonable; // >= +2%：推荐正确且收益达标
-      } else if (priceChangePct >= -0.5) {
-        return ReliabilityLevel.reasonable; // -0.5% ~ +2%：方向基本正确或小跌（手续费范围内）
-      } else if (priceChangePct >= -threshold) {
-        return ReliabilityLevel.deviation; // -2% ~ -0.5%：推荐方向错误，亏损超过手续费
+      // 买入推荐：涨=正确，跌=错误
+      if (priceChangePct >= 3.0) {
+        return ReliabilityLevel.veryReasonable; // ≥ +3%：方向正确且收益显著
+      } else if (priceChangePct >= 0.5) {
+        return ReliabilityLevel.reasonable; // +0.5% ~ +3%：方向正确，小幅盈利
+      } else if (priceChangePct >= -3.0) {
+        return ReliabilityLevel.deviation; // -3% ~ -0.5%：方向错误，小幅亏损
       } else {
-        return ReliabilityLevel.veryDeviation; // < -2%：推荐方向错误，大幅亏损
+        return ReliabilityLevel.veryDeviation; // < -3%：方向错误，大幅亏损
       }
     } else if (wasSell) {
-      // 卖出推荐：方向正确（跌）才算合理，+0.5%以内小涨算合理（考虑手续费）
-      if (priceChangePct <= -threshold) {
-        return ReliabilityLevel.veryReasonable; // <= -2%：推荐正确且跌幅达标
-      } else if (priceChangePct <= 0.5) {
-        return ReliabilityLevel.reasonable; // -2% ~ +0.5%：方向基本正确或小涨（手续费范围内）
-      } else if (priceChangePct <= threshold) {
-        return ReliabilityLevel.deviation; // +0.5% ~ +2%：推荐方向错误，涨幅超过手续费
+      // 卖出推荐：跌=正确，涨=错误（完全反向）
+      if (priceChangePct <= -3.0) {
+        return ReliabilityLevel.veryReasonable; // ≤ -3%：方向正确且跌幅显著
+      } else if (priceChangePct <= -0.5) {
+        return ReliabilityLevel.reasonable; // -3% ~ -0.5%：方向正确，小幅下跌
+      } else if (priceChangePct <= 3.0) {
+        return ReliabilityLevel.deviation; // +0.5% ~ +3%：方向错误，小幅上涨
       } else {
-        return ReliabilityLevel.veryDeviation; // > +2%：推荐方向错误，大幅上涨
+        return ReliabilityLevel.veryDeviation; // > +3%：方向错误，大幅上涨
       }
     } else if (wasNeutral) {
-      // 观望推荐：波动小才算合理
-      if (priceChangePct.abs() < 0.5 * neutralThreshold) {
-        return ReliabilityLevel.veryReasonable;
-      } else if (priceChangePct.abs() <= neutralThreshold) {
-        return ReliabilityLevel.reasonable;
-      } else if (priceChangePct.abs() <= 2 * neutralThreshold) {
-        return ReliabilityLevel.deviation;
+      // 观望推荐：波动小=正确，波动大=错误
+      if (absChange < 2.0) {
+        return ReliabilityLevel.veryReasonable; // < 2%：预测正确，无明显趋势
+      } else if (absChange <= 5.0) {
+        return ReliabilityLevel.reasonable; // 2% ~ 5%：基本正确，小幅波动
+      } else if (absChange <= 10.0) {
+        return ReliabilityLevel.deviation; // 5% ~ 10%：预测偏差，明显趋势
       } else {
-        return ReliabilityLevel.veryDeviation;
+        return ReliabilityLevel.veryDeviation; // ≥ 10%：预测错误，大幅波动
       }
     }
     return ReliabilityLevel.reasonable;
   }
 
-  /// 获取可靠性等级对应的标签和颜色
-  static (String label, Color color) _getReliabilityInfo(ReliabilityLevel level) {
+  /// 获取可靠性等级对应的标签、描述和颜色
+  static ReliabilityInfo _getReliabilityInfo(ReliabilityLevel level) {
     switch (level) {
       case ReliabilityLevel.veryReasonable:
-        return ('非常合理', _kVeryReasonableColor);
+        return const ReliabilityInfo(
+          label: '非常合理',
+          description: '推荐方向正确且收益/跌幅达标',
+          color: _kVeryReasonableColor,
+        );
       case ReliabilityLevel.reasonable:
-        return ('合理', _kReasonableColor);
+        return const ReliabilityInfo(
+          label: '合理',
+          description: '推荐方向正确但收益/跌幅未达标',
+          color: _kReasonableColor,
+        );
       case ReliabilityLevel.deviation:
-        return ('偏差', _kDeviationColor);
+        return const ReliabilityInfo(
+          label: '偏差',
+          description: '推荐方向错误但亏损/涨幅较小',
+          color: _kDeviationColor,
+        );
       case ReliabilityLevel.veryDeviation:
-        return ('非常偏差', _kVeryDeviationColor);
+        return const ReliabilityInfo(
+          label: '非常偏差',
+          description: '推荐方向错误且亏损/涨幅较大',
+          color: _kVeryDeviationColor,
+        );
     }
   }
 
@@ -283,8 +324,8 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
         record.recommendation.contains('观望'))) {
       final level = _getReliabilityLevel(record, currentPrice);
       final info = _getReliabilityInfo(level);
-      reliability = info.$1;
-      reliabilityColor = info.$2;
+      reliability = info.label;
+      reliabilityColor = info.color;
     } else {
       reliability = '推荐合理';
       reliabilityColor = Colors.orange;
@@ -448,7 +489,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
             record.recommendation.contains('卖出') ||
             record.recommendation.contains('观望'))) {
           final level = _getReliabilityLevel(record, currentPrice);
-          reliability = _getReliabilityInfo(level).$1;
+          reliability = _getReliabilityInfo(level).label;
           isDeviation = level == ReliabilityLevel.deviation || level == ReliabilityLevel.veryDeviation;
         }
 
@@ -780,8 +821,8 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
               record.recommendation.contains('观望'))) {
             final level = _getReliabilityLevel(record, currentPrice);
             final info = _getReliabilityInfo(level);
-            reliabilityLabel = info.$1;
-            reliabilityColor = info.$2;
+            reliabilityLabel = info.label;
+            reliabilityColor = info.color;
           }
 
           final recColor = record.recommendation.contains('买入')
