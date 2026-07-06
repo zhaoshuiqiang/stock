@@ -1871,10 +1871,17 @@ class WatchlistScreenState extends State<WatchlistScreen>
     if (cell == null) return '';
     if (cell is String) return cell.trim();
     if (cell is num) return cell.toString();
+
+    // excel 4.x: cell 是 Data 类型，cell.value 是 CellValue? 子类
     final value = cell.value;
     if (value == null) return '';
+
+    // 直接的 String/num（兼容旧版本）
     if (value is String) return value.trim();
     if (value is num) return value.toString();
+
+    // CellValue 子类：TextCellValue/IntCellValue/DoubleCellValue 等
+    // 这些类的 toString() 已返回纯文本值
     return value.toString().trim();
   }
 
