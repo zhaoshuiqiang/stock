@@ -1142,27 +1142,66 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
       debugPrint('Excel导入: 表头行索引=$headerRowIndex');
 
+      // 解析表头，动态查找列位置
+      final headerRow = rows[headerRowIndex];
+      int codeCol = -1, nameCol = -1, quantityCol = -1, balanceCol = -1, avgPriceCol = -1;
+      for (var i = 0; i < headerRow.length; i++) {
+        final header = _parseCellValue(headerRow[i]);
+        if (header.contains('证券代码') || header.contains('代码')) {
+          codeCol = i;
+        } else if (header.contains('证券名称') || header.contains('名称')) {
+          nameCol = i;
+        } else if (header.contains('拥股数量') || header.contains('数量')) {
+          quantityCol = i;
+        } else if (header.contains('股票余额') || header.contains('余额')) {
+          balanceCol = i;
+        } else if (header.contains('盈亏成本') || header.contains('成本')) {
+          avgPriceCol = i;
+        }
+      }
+
+      if (codeCol == -1 || nameCol == -1) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('未找到必需的列（证券代码/证券名称）')),
+          );
+        }
+        return;
+      }
+
+      debugPrint('Excel导入: codeCol=$codeCol nameCol=$nameCol quantityCol=$quantityCol balanceCol=$balanceCol avgPriceCol=$avgPriceCol');
+
       // 从表头下一行开始读取数据
       for (var rowIndex = headerRowIndex + 1; rowIndex < rows.length; rowIndex++) {
         final row = rows[rowIndex];
         if (row == null || row.isEmpty) continue;
 
         // 获取单元格值，处理不同类型
-        final codeCell = row.length > 0 ? row[0] : null;
-        final nameCell = row.length > 1 ? row[1] : null;
-        final quantityCell = row.length > 2 ? row[2] : null;
-        final avgPriceCell = row.length > 5 ? row[5] : null;
+        final codeCell = codeCol < row.length ? row[codeCol] : null;
+        final nameCell = nameCol < row.length ? row[nameCol] : null;
+        final balanceCell = balanceCol >= 0 && balanceCol < row.length ? row[balanceCol] : null;
+        final quantityCell = quantityCol >= 0 && quantityCol < row.length ? row[quantityCol] : null;
+        final avgPriceCell = avgPriceCol >= 0 && avgPriceCol < row.length ? row[avgPriceCol] : null;
 
         final code = _parseCellValue(codeCell);
         final name = _parseCellValue(nameCell);
+        final balanceStr = _parseCellValue(balanceCell);
         final quantityStr = _parseCellValue(quantityCell);
         final avgPriceStr = _parseCellValue(avgPriceCell);
 
-        debugPrint('Excel导入: 行$rowIndex code=$code name=$name qty=$quantityStr price=$avgPriceStr');
+        debugPrint('Excel导入: 行$rowIndex code=$code name=$name balance=$balanceStr quantity=$quantityStr price=$avgPriceStr');
 
         if (code.isEmpty || name.isEmpty) continue;
 
-        final quantity = int.tryParse(quantityStr) ?? 0;
+        // 优先使用股票余额，没有则使用拥股数量
+        int quantity = 0;
+        if (balanceStr.isNotEmpty) {
+          quantity = int.tryParse(balanceStr) ?? 0;
+        }
+        if (quantity <= 0 && quantityStr.isNotEmpty) {
+          quantity = int.tryParse(quantityStr) ?? 0;
+        }
+
         final avgPrice = double.tryParse(avgPriceStr) ?? 0.0;
 
         if (code.isNotEmpty && name.isNotEmpty) {
