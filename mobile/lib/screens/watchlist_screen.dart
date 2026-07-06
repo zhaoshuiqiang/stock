@@ -753,6 +753,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     return Column(
       children: [
         _buildPositionHeader(),
+        _buildPortfolioAnalysisResult(),
         Expanded(child: _buildPositionList()),
       ],
     );
@@ -778,6 +779,16 @@ class WatchlistScreenState extends State<WatchlistScreen>
           ),
           Row(
             children: [
+              IconButton(
+                icon: const Icon(Icons.auto_awesome, color: _accentColor, size: 20),
+                onPressed: _analyzePortfolio,
+                tooltip: 'AI分析持仓',
+              ),
+              IconButton(
+                icon: const Icon(Icons.bar_chart, color: _accentColor, size: 20),
+                onPressed: _showBacktestDialog,
+                tooltip: '回测分析',
+              ),
               IconButton(
                 icon: const Icon(Icons.upload_file, color: _accentColor, size: 20),
                 onPressed: _importPositionsFromExcel,
@@ -1701,123 +1712,151 @@ class WatchlistScreenState extends State<WatchlistScreen>
     final nameController = TextEditingController();
     final quantityController = TextEditingController();
     final avgPriceController = TextEditingController();
+    bool isSearching = false;
 
     return showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: _cardColor,
-        title: const Text(
-          '手动添加持仓',
-          style: TextStyle(color: Colors.white),
+      builder: (context) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          backgroundColor: _cardColor,
+          title: const Text(
+            '手动添加持仓',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: codeController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: '股票代码',
+                    labelStyle: TextStyle(color: Colors.white70),
+                    hintText: '例如: 600519',
+                    hintStyle: TextStyle(color: Colors.white38),
+                  ),
+                  onChanged: (value) async {
+                    if (value.length >= 6) {
+                      setState(() => isSearching = true);
+                      try {
+                        final results = await _apiClient.searchStocks(value);
+                        if (results.isNotEmpty) {
+                          final stock = results.first;
+                          setState(() {
+                            nameController.text = stock.name;
+                          });
+                        }
+                      } catch (_) {}
+                      setState(() => isSearching = false);
+                    } else {
+                      setState(() => nameController.text = '');
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nameController,
+                  enabled: false,
+                  style: const TextStyle(color: Colors.white70),
+                  decoration: InputDecoration(
+                    labelText: '股票名称',
+                    labelStyle: const TextStyle(color: Colors.white70),
+                    hintText: isSearching ? '搜索中...' : '输入代码自动获取',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    suffixIcon: isSearching
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : null,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: quantityController,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: '持仓数量',
+                    labelStyle: TextStyle(color: Colors.white70),
+                    hintText: '例如: 100',
+                    hintStyle: TextStyle(color: Colors.white38),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: avgPriceController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: '成本价格',
+                    labelStyle: TextStyle(color: Colors.white70),
+                    hintText: '例如: 1800.50',
+                    hintStyle: TextStyle(color: Colors.white38),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final code = codeController.text.trim();
+                final name = nameController.text.trim();
+                final quantityStr = quantityController.text.trim();
+                final avgPriceStr = avgPriceController.text.trim();
+
+                if (code.isEmpty || name.isEmpty || quantityStr.isEmpty || avgPriceStr.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('请填写完整信息')),
+                  );
+                  return;
+                }
+
+                final quantity = int.tryParse(quantityStr);
+                final avgPrice = double.tryParse(avgPriceStr);
+
+                if (quantity == null || quantity <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('持仓数量必须大于0')),
+                  );
+                  return;
+                }
+
+                if (avgPrice == null || avgPrice <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('成本价格必须大于0')),
+                  );
+                  return;
+                }
+
+                final position = Position(
+                  code: code,
+                  name: name,
+                  quantity: quantity,
+                  avgPrice: avgPrice,
+                );
+
+                await _dbService.addPosition(position);
+                await _loadPositions();
+
+                if (mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('持仓添加成功')),
+                  );
+                }
+              },
+              child: const Text('添加'),
+            ),
+          ],
         ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: codeController,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: '股票代码',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  hintText: '例如: 600519',
-                  hintStyle: TextStyle(color: Colors.white38),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: nameController,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: '股票名称',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  hintText: '例如: 贵州茅台',
-                  hintStyle: TextStyle(color: Colors.white38),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: quantityController,
-                keyboardType: TextInputType.number,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: '持仓数量',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  hintText: '例如: 100',
-                  hintStyle: TextStyle(color: Colors.white38),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: avgPriceController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: '成本价格',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  hintText: '例如: 1800.50',
-                  hintStyle: TextStyle(color: Colors.white38),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () async {
-              final code = codeController.text.trim();
-              final name = nameController.text.trim();
-              final quantityStr = quantityController.text.trim();
-              final avgPriceStr = avgPriceController.text.trim();
-
-              if (code.isEmpty || name.isEmpty || quantityStr.isEmpty || avgPriceStr.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('请填写完整信息')),
-                );
-                return;
-              }
-
-              final quantity = int.tryParse(quantityStr);
-              final avgPrice = double.tryParse(avgPriceStr);
-
-              if (quantity == null || quantity <= 0) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('持仓数量必须大于0')),
-                );
-                return;
-              }
-
-              if (avgPrice == null || avgPrice <= 0) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('成本价格必须大于0')),
-                );
-                return;
-              }
-
-              final position = Position(
-                code: code,
-                name: name,
-                quantity: quantity,
-                avgPrice: avgPrice,
-              );
-
-              await _dbService.addPosition(position);
-              await _loadPositions();
-
-              if (mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('持仓添加成功')),
-                );
-              }
-            },
-            child: const Text('添加'),
-          ),
-        ],
       ),
     );
   }
