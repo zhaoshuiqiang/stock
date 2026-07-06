@@ -10,6 +10,17 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v2.60.0',
+        'date': '2026-07-06',
+        'changes': [
+          '修复持仓Excel导入解析问题，支持动态表头识别',
+          '优化留档页面合理评估逻辑（非对称阈值+手续费缓冲区）',
+          '修复发现页面主线龙头显示问题，调整阈值并添加回退展示',
+          '持仓Tab关联自选分析数据，显示推荐等级和评分',
+          '主线龙头回退展示时标注【非主线精选】避免混淆',
+        ],
+      },
+      {
         'version': 'v2.59.0',
         'date': '2026-07-06',
         'changes': [

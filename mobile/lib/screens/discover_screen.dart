@@ -1024,7 +1024,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
     } else if (_hasMainLineHit) {
       hint = '主线板块内精选个股，含轮动加成';
     } else {
-      hint = '精选个股推荐（暂无主线命中，按评分排序）';
+      hint = '【非主线精选】按评分排序推荐';
     }
     return Column(
       children: [
