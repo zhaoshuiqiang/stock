@@ -8,9 +8,9 @@ class AIConfig {
   static const int maxDebateRounds = 2;
   static const double aiConfidenceWeight = 0.3;
 
-  static const String _zhipuApiKey = 'REDACTED';
-  static const String _openrouterApiKey = 'REDACTED';
-  static const String _cliproxyApiKey = 'REDACTED';
+  static const String _zhipuApiKey = '';
+  static const String _openrouterApiKey = '';
+  static const String _cliproxyApiKey = '';
 
   static String getApiKeyForProvider(AIProvider provider) {
     switch (provider) {
