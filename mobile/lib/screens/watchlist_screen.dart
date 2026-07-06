@@ -57,7 +57,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
   double _totalAssets = 0;
   double _totalMarketValue = 0;
   double _availableCash = 0;
-  double _totalFloatPnl = 0;
 
   // ─── AI 持仓分析状态 ──────────────────────────────────────────
   bool _isPortfolioAnalyzing = false;
@@ -1205,14 +1204,26 @@ class WatchlistScreenState extends State<WatchlistScreen>
             // 这是资产汇总表头行，下一行是数据
             if (i + 1 < rows.length) {
               final dataRow = rows[i + 1];
-              if (dataRow.length > 4) {
-                _availableCash = double.tryParse(dataRow[1]?.value?.toString() ?? '0') ?? 0;
+              // 动态查找列位置
+              int availableCol = -1, totalAssetsCol = -1, totalMarketValueCol = -1;
+              for (var j = 0; j < row.length; j++) {
+                final header = row[j]?.value?.toString() ?? '';
+                if (header.contains('可用')) {
+                  availableCol = j;
+                } else if (header.contains('总资产')) {
+                  totalAssetsCol = j;
+                } else if (header.contains('总市值')) {
+                  totalMarketValueCol = j;
+                }
               }
-              if (dataRow.length > 4) {
-                _totalAssets = double.tryParse(dataRow[4]?.value?.toString() ?? '0') ?? 0;
+              if (availableCol >= 0 && availableCol < dataRow.length) {
+                _availableCash = double.tryParse(dataRow[availableCol]?.value?.toString() ?? '0') ?? 0;
               }
-              if (dataRow.length > 5) {
-                _totalMarketValue = double.tryParse(dataRow[5]?.value?.toString() ?? '0') ?? 0;
+              if (totalAssetsCol >= 0 && totalAssetsCol < dataRow.length) {
+                _totalAssets = double.tryParse(dataRow[totalAssetsCol]?.value?.toString() ?? '0') ?? 0;
+              }
+              if (totalMarketValueCol >= 0 && totalMarketValueCol < dataRow.length) {
+                _totalMarketValue = double.tryParse(dataRow[totalMarketValueCol]?.value?.toString() ?? '0') ?? 0;
               }
             }
             break;
@@ -1340,11 +1351,36 @@ class WatchlistScreenState extends State<WatchlistScreen>
       if (positions.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('未找到有效的持仓数据（数量>0且成本价>0）')),
+            const SnackBar(content: Text('未找到有效的持仓数据')),
           );
         }
         return;
       }
+
+      // 导入前确认
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: _cardColor,
+          title: const Text('确认导入', style: TextStyle(color: Colors.white)),
+          content: Text(
+            '导入将清除现有持仓数据并替换为新数据，确定继续吗？\n\n将导入 ${positions.length} 只股票',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('确认'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirm != true) return;
 
       // 批量添加到数据库（先清除现有数据）
       await _dbService.deleteAllPositions();
