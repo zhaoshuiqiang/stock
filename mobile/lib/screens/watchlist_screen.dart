@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
@@ -754,151 +753,45 @@ class WatchlistScreenState extends State<WatchlistScreen>
     return Column(
       children: [
         _buildPositionHeader(),
-        Expanded(
-          child: SingleChildScrollView(
-            child: Column(
-              children: [
-                _buildPositionList(),
-                if (_portfolioAnalysisResult != null)
-                  _buildPortfolioAnalysisResult(),
-              ],
-            ),
-          ),
-        ),
+        Expanded(child: _buildPositionList()),
       ],
     );
   }
 
   Widget _buildPositionHeader() {
     return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _borderColor),
+        border: Border(bottom: BorderSide(color: _borderColor)),
       ),
-      child: Column(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
+          const Text(
+            '持仓',
+            style: TextStyle(
+              color: _textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                '持仓概览',
-                style: TextStyle(
-                  color: _textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+              IconButton(
+                icon: const Icon(Icons.upload_file, color: _accentColor, size: 20),
+                onPressed: _importPositionsFromExcel,
+                tooltip: '导入持仓Excel',
               ),
-              Row(
-                children: [
-                  IconButton(
-                    icon: _isPortfolioAnalyzing
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(_accentColor),
-                            ),
-                          )
-                        : const Icon(Icons.auto_awesome, color: _accentColor, size: 20),
-                    onPressed: _isPortfolioAnalyzing ? null : _analyzePortfolio,
-                    tooltip: 'AI持仓分析',
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.history, color: _accentColor, size: 20),
-                    onPressed: _showBacktestDialog,
-                    tooltip: '回测',
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.upload_file, color: _accentColor, size: 20),
-                    onPressed: _showImportOptions,
-                    tooltip: '导入数据',
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.add, color: _accentColor, size: 20),
-                    onPressed: () => _showAddPositionDialog(),
-                    tooltip: '手动添加',
-                  ),
-                ],
+              IconButton(
+                icon: const Icon(Icons.add, color: _accentColor, size: 20),
+                onPressed: () => _showAddPositionDialog(),
+                tooltip: '手动添加',
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          _buildPositionStats(),
         ],
       ),
-    );
-  }
-
-  Widget _buildPositionStats() {
-    final positions = _positionMap.values.toList();
-    if (positions.isEmpty) {
-      return const Text(
-        '暂无持仓数据',
-        style: TextStyle(color: _textSecondary, fontSize: 14),
-      );
-    }
-
-    double totalCost = 0;
-    double totalMarketValue = 0;
-
-    for (final pos in positions) {
-      final quote = _quotes.firstWhere(
-        (q) => q.code.endsWith(pos.code),
-        orElse: () => QuoteData.empty(),
-      );
-      final currentPrice = quote.price > 0 ? quote.price : pos.avgPrice;
-      totalCost += pos.quantity * pos.avgPrice;
-      totalMarketValue += pos.quantity * currentPrice;
-    }
-
-    final totalPnl = totalMarketValue - totalCost;
-    final totalPnlPct = totalCost > 0 ? (totalPnl / totalCost * 100) : 0;
-    final pnlColor = totalPnl >= 0 ? _upColor : _downColor;
-
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildStatItem('总成本', totalCost.toStringAsFixed(2)),
-            _buildStatItem('总市值', totalMarketValue.toStringAsFixed(2)),
-            _buildStatItem(
-              '总盈亏',
-              '${totalPnl >= 0 ? '+' : ''}${totalPnl.toStringAsFixed(2)}',
-              color: pnlColor,
-            ),
-            _buildStatItem(
-              '收益率',
-              '${totalPnlPct >= 0 ? '+' : ''}${totalPnlPct.toStringAsFixed(2)}%',
-              color: pnlColor,
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildStatItem(String label, String value, {Color? color}) {
-    return Column(
-      children: [
-        Text(
-          label,
-          style: const TextStyle(color: _textSecondary, fontSize: 12),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: TextStyle(
-            color: color ?? _textPrimary,
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ],
     );
   }
 
@@ -1166,151 +1059,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   // ─── 持仓导入和添加 ─────────────────────────────────────────────
-
-  Future<void> _showImportOptions() async {
-    if (!mounted) return;
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: _cardColor,
-        title: const Text('选择导入方式', style: TextStyle(color: _textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _importPositionsFromExcel();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _accentColor,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              ),
-              child: const Text('导入持仓Excel文件', style: TextStyle(color: Colors.white)),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                _importArchiveFromCSV();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _darkSurface,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              ),
-              child: const Text('导入留档CSV数据', style: TextStyle(color: _textPrimary)),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消', style: TextStyle(color: _textSecondary)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _importArchiveFromCSV() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['csv'],
-        allowMultiple: false,
-      );
-
-      if (result == null || result.files.isEmpty) return;
-
-      final file = File(result.files.single.path!);
-      final content = await file.readAsString(encoding: const Utf8Codec());
-
-      final lines = content.split('\n');
-      if (lines.length < 2) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('CSV文件为空或格式不正确')),
-          );
-        }
-        return;
-      }
-
-      final headers = lines[0].split(',');
-      final codeIndex = headers.indexWhere((h) => h.contains('代码'));
-      final nameIndex = headers.indexWhere((h) => h.contains('名称'));
-      final priceIndex = headers.indexWhere((h) => h.contains('留档价格'));
-      final scoreIndex = headers.indexWhere((h) => h.contains('评分'));
-      final recommendationIndex = headers.indexWhere((h) => h.contains('推荐'));
-
-      if (codeIndex == -1 || nameIndex == -1) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('CSV文件缺少必要的列（代码/名称）')),
-          );
-        }
-        return;
-      }
-
-      int importedCount = 0;
-      for (var i = 1; i < lines.length; i++) {
-        final line = lines[i].trim();
-        if (line.isEmpty) continue;
-
-        final parts = line.split(',');
-        if (parts.length <= codeIndex || parts.length <= nameIndex) continue;
-
-        String code = parts[codeIndex].trim();
-        final name = parts[nameIndex].trim();
-
-        if (code.isEmpty || name.isEmpty) continue;
-
-        if (!code.startsWith('sh') && !code.startsWith('sz')) {
-          if (code.startsWith('6')) {
-            code = 'sh$code';
-          } else if (code.startsWith('0') || code.startsWith('3')) {
-            code = 'sz$code';
-          }
-        }
-
-        final priceStr = priceIndex >= 0 && priceIndex < parts.length ? parts[priceIndex].trim() : '0';
-        final scoreStr = scoreIndex >= 0 && scoreIndex < parts.length ? parts[scoreIndex].trim() : '0';
-        final recommendation = recommendationIndex >= 0 && recommendationIndex < parts.length ? parts[recommendationIndex].trim() : '';
-
-        final price = double.tryParse(priceStr) ?? 0.0;
-        final score = int.tryParse(scoreStr) ?? 0;
-
-        await _dbService.addArchive(ArchiveRecord(
-          code: code,
-          name: name,
-          price: price,
-          changePct: 0,
-          score: score,
-          recommendation: recommendation,
-          riskLevel: '',
-          buySignalCount: 0,
-          sellSignalCount: 0,
-          activeStrategyCount: 0,
-          confluenceScore: 0,
-          archivedAt: DateTime.now(),
-        ));
-        importedCount++;
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('成功导入 $importedCount 条留档记录')),
-        );
-      }
-    } catch (e) {
-      debugPrint('CSV导入失败: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('导入失败: $e')),
-        );
-      }
-    }
-  }
 
   Future<void> _importPositionsFromExcel() async {
     try {
