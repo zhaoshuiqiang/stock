@@ -29,6 +29,8 @@ mobile/.flutter-plugins-dependencies
 mobile/android/.gradle/
 mobile/android/local.properties
 mobile/android/app/google-services.json
+# API密钥配置文件（本地保留，不提交到git）
+mobile/assets/secrets.json
 mobile/ios/
 mobile/macos/
 mobile/windows/

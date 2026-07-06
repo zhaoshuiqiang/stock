@@ -58,6 +58,7 @@ void main() async {
 
   // v2.54: 初始化AI层
   if (AIConfig.enableAIEnhancement) {
+    await AIConfig.init();
     final prefs = await SharedPreferences.getInstance();
     final providerName = prefs.getString('ai_provider');
     final provider = providerName != null ? AIProvider.fromString(providerName) : AIProvider.zhipu;
