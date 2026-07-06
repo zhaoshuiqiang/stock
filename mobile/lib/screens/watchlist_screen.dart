@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_client.dart';
 import '../api/websocket_client.dart';
@@ -61,7 +62,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
   // ─── 持仓状态 (v2.33) ────────────────────────────────────────
   Map<String, Position> _positionMap = {}; // code → Position
   double _totalAssets = 0;
-  double _totalMarketValue = 0;
   double _availableCash = 0;
 
   // ─── AI 持仓分析状态 ──────────────────────────────────────────
@@ -244,12 +244,15 @@ class WatchlistScreenState extends State<WatchlistScreen>
           _quotes = quotes;
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[Watchlist] 刷新行情失败: $e');
+    }
   }
 
   Future<void> _loadWatchlist() async {
     try {
       final watchlist = await _dbService.getWatchlist();
+      if (!mounted) return;
       setState(() {
         _watchlist = watchlist;
         _isLoading = false;
@@ -257,7 +260,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
       if (watchlist.isNotEmpty) {
         _refreshQuotes();
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[Watchlist] 加载自选失败: $e');
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
@@ -488,6 +493,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     if (_selectedCodes.isEmpty) return;
     final removedCodes = Set<String>.from(_selectedCodes);
     await _dbService.batchRemoveFromWatchlist(removedCodes.toList());
+    if (!mounted) return;
     setState(() {
       _isEditMode = false;
       _selectedCodes.clear();
@@ -570,7 +576,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
           }).toSet();
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[Watchlist] 加载预警失败: $e');
+    }
   }
 
   // ─── 持仓加载 (v2.33) ─────────────────────────────────────────
@@ -586,7 +594,27 @@ class WatchlistScreenState extends State<WatchlistScreen>
         _maybeStartPositionPolling();
         _recordSnapshotIfNeeded();
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[Watchlist] 加载持仓失败: $e');
+    }
+  }
+
+  /// 规范化股票代码：去除 sh/sz/bj 前缀，返回纯数字代码
+  String _normalizeCode(String code) {
+    return code.replaceFirst(RegExp(r'^(sh|sz|bj)', caseSensitive: false), '');
+  }
+
+  /// 按 code 查找持仓，双向兼容 watchlist/positions 中带 sh/sz/bj 前缀的记录
+  Position? _findPosition(String code) {
+    final exact = _positionMap[code];
+    if (exact != null) return exact;
+    final normalized = _positionMap[_normalizeCode(code)];
+    if (normalized != null) return normalized;
+    final target = _normalizeCode(code);
+    for (final p in _positionMap.values) {
+      if (_normalizeCode(p.code) == target) return p;
+    }
+    return null;
   }
 
   // ─── 精选板块选股 ──────────────────────────────────────────────
@@ -613,7 +641,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('正在分析热门板块...'), duration: Duration(seconds: 1)),
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[Watchlist] 板块选股失败: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('分析失败，请稍后重试'), duration: Duration(seconds: 1)),
       );
@@ -955,8 +984,17 @@ class WatchlistScreenState extends State<WatchlistScreen>
                     tooltip: 'AI模型设置',
                   ),
                   IconButton(
-                    icon: const Icon(Icons.auto_awesome, color: _accentColor, size: 20),
-                    onPressed: _analyzePortfolio,
+                    icon: _isPortfolioAnalyzing
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: _accentColor,
+                            ),
+                          )
+                        : const Icon(Icons.auto_awesome, color: _accentColor, size: 20),
+                    onPressed: _isPortfolioAnalyzing ? null : _analyzePortfolio,
                     tooltip: 'AI分析持仓',
                   ),
                   IconButton(
@@ -1090,69 +1128,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
           Text(value, style: const TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
         ],
       ),
-    );
-  }
-
-  Widget _buildPnlStat(String label, double pnl, double pnlPct, Color color, {bool isLarge = false}) {
-    final fontSize = isLarge ? 18.0 : 14.0;
-    final labelSize = isLarge ? 12.0 : 11.0;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(color: _textSecondary, fontSize: labelSize),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '${pnl >= 0 ? '+' : ''}¥${pnl.toStringAsFixed(2)}',
-          style: TextStyle(
-            color: color,
-            fontSize: fontSize,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          '${pnlPct >= 0 ? '+' : ''}${pnlPct.toStringAsFixed(2)}%',
-          style: TextStyle(
-            color: color,
-            fontSize: labelSize,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSmallStat(String label, double value) {
-    return Column(
-      children: [
-        Text(
-          label,
-          style: const TextStyle(color: _textSecondary, fontSize: 11),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '¥${value.toStringAsFixed(0)}',
-          style: const TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAssetStat(String label, double value) {
-    return Column(
-      children: [
-        Text(
-          label,
-          style: const TextStyle(color: _textSecondary, fontSize: 12),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '¥${value.toStringAsFixed(2)}',
-          style: const TextStyle(color: _textPrimary, fontSize: 14, fontWeight: FontWeight.bold),
-        ),
-      ],
     );
   }
 
@@ -1549,7 +1524,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
       }
 
       final rows = sheet.rows;
-      if (rows == null || rows.isEmpty) {
+      if (rows.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Excel文件为空')),
@@ -1570,15 +1545,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
             if (i + 1 < rows.length) {
               final dataRow = rows[i + 1];
               // 动态查找列位置
-              int availableCol = -1, totalAssetsCol = -1, totalMarketValueCol = -1;
+              int availableCol = -1, totalAssetsCol = -1;
               for (var j = 0; j < row.length; j++) {
                 final header = row[j]?.value?.toString() ?? '';
                 if (header.contains('可用')) {
                   availableCol = j;
                 } else if (header.contains('总资产')) {
                   totalAssetsCol = j;
-                } else if (header.contains('总市值')) {
-                  totalMarketValueCol = j;
                 }
               }
               if (availableCol >= 0 && availableCol < dataRow.length) {
@@ -1586,9 +1559,6 @@ class WatchlistScreenState extends State<WatchlistScreen>
               }
               if (totalAssetsCol >= 0 && totalAssetsCol < dataRow.length) {
                 _totalAssets = double.tryParse(dataRow[totalAssetsCol]?.value?.toString() ?? '0') ?? 0;
-              }
-              if (totalMarketValueCol >= 0 && totalMarketValueCol < dataRow.length) {
-                _totalMarketValue = double.tryParse(dataRow[totalMarketValueCol]?.value?.toString() ?? '0') ?? 0;
               }
             }
             break;
@@ -1670,7 +1640,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
       // 从表头下一行开始读取数据
       for (var rowIndex = headerRowIndex + 1; rowIndex < rows.length; rowIndex++) {
         final row = rows[rowIndex];
-        if (row == null || row.isEmpty) continue;
+        if (row.isEmpty) continue;
 
         // 获取单元格值，处理不同类型
         final codeCell = codeCol < row.length ? row[codeCol] : null;
@@ -1704,13 +1674,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
         // 跳过合计行
         if (code.contains('合计') || name.contains('合计')) continue;
 
-        // 优先使用股票余额，没有则使用拥股数量
+        // 优先使用拥股数量（实际持仓）；列存在时以其值为准（0=已清仓），
+        // 仅当拥股数量列缺失或为空时才回退到股票余额
         int quantity = 0;
-        if (balanceStr.isNotEmpty) {
-          quantity = int.tryParse(balanceStr) ?? 0;
-        }
-        if (quantity <= 0 && quantityStr.isNotEmpty) {
+        if (quantityCol >= 0 && quantityStr.isNotEmpty) {
           quantity = int.tryParse(quantityStr) ?? 0;
+        } else if (balanceStr.isNotEmpty) {
+          quantity = int.tryParse(balanceStr) ?? 0;
         }
 
         // 获取盈亏成本
@@ -1728,16 +1698,16 @@ class WatchlistScreenState extends State<WatchlistScreen>
         // 解析盈亏比例（去掉%号）
         double pnlPct = 0.0;
         if (pnlPctStr.isNotEmpty && pnlPctStr != '--') {
-          pnlPct = double.tryParse(pnlPctStr.replaceAll('%', '')) ?? 0.0;
+          pnlPct = double.tryParse(pnlPctStr.replaceAll('%', '').trim()) ?? 0.0;
         }
-        
+
         // 解析当日盈亏
-        double todayPnl = double.tryParse(todayPnlStr) ?? 0.0;
-        
+        double todayPnl = double.tryParse(todayPnlStr.trim()) ?? 0.0;
+
         // 解析当日盈亏比例（去掉%号）
         double todayPnlPct = 0.0;
         if (todayPnlPctStr.isNotEmpty && todayPnlPctStr != '--') {
-          todayPnlPct = double.tryParse(todayPnlPctStr.replaceAll('%', '')) ?? 0.0;
+          todayPnlPct = double.tryParse(todayPnlPctStr.replaceAll('%', '').trim()) ?? 0.0;
         }
         
         // 解析市值
@@ -1947,6 +1917,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
         totalPnlPct: totalPnlPct,
       );
 
+      if (!mounted) return;
       setState(() {
         _portfolioAnalysisResult = result;
         _lastPortfolioAnalysisTime = DateTime.now();
@@ -1959,6 +1930,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
         );
       }
     } catch (e) {
+      debugPrint('[Watchlist] AI持仓分析失败: $e');
+      if (!mounted) return;
       setState(() => _isPortfolioAnalyzing = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('分析失败: $e')),
@@ -1975,6 +1948,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       padding: const EdgeInsets.all(16),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.42,
+      ),
       decoration: BoxDecoration(
         color: _cardColor,
         borderRadius: BorderRadius.circular(12),
@@ -1982,6 +1958,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
@@ -2002,24 +1979,48 @@ class WatchlistScreenState extends State<WatchlistScreen>
               const Spacer(),
               if (!isError && result.answer.isNotEmpty)
                 TextButton.icon(
-                  icon: const Icon(Icons.copy, size: 16),
+                  icon: const Icon(Icons.copy_outlined, size: 16),
                   label: const Text('复制', style: TextStyle(fontSize: 12)),
                   onPressed: () {
-                    // TODO: 实现复制功能
+                    Clipboard.setData(ClipboardData(text: result.answer));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('已复制到剪贴板'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
                   },
                 ),
+              TextButton.icon(
+                icon: const Icon(Icons.close, size: 16),
+                label: const Text('清除', style: TextStyle(fontSize: 12)),
+                onPressed: () {
+                  setState(() {
+                    _portfolioAnalysisResult = null;
+                    _lastPortfolioAnalysisTime = null;
+                  });
+                },
+              ),
             ],
           ),
           const SizedBox(height: 12),
           if (isError)
-            Text(
-              result.error!,
-              style: const TextStyle(color: Colors.red, fontSize: 14),
+            Flexible(
+              child: SingleChildScrollView(
+                child: Text(
+                  result.error!,
+                  style: const TextStyle(color: Colors.red, fontSize: 14),
+                ),
+              ),
             )
           else
-            Text(
-              result.answer,
-              style: const TextStyle(color: _textPrimary, fontSize: 14, height: 1.6),
+            Flexible(
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  result.answer,
+                  style: const TextStyle(color: _textPrimary, fontSize: 14, height: 1.6),
+                ),
+              ),
             ),
         ],
       ),
@@ -2283,7 +2284,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   final entry = results.entries.elementAt(index);
                   final code = entry.key;
                   final result = entry.value;
-                  final pos = _positionMap[code];
+                  final pos = _findPosition(code);
                   final name = pos?.name ?? code;
 
                   return Card(
@@ -2517,7 +2518,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
                             nameController.text = stock.name;
                           });
                         }
-                      } catch (_) {}
+                      } catch (e) {
+                        debugPrint('[Watchlist] 搜索股票失败: $e');
+                      }
                       setState(() => isSearching = false);
                     } else {
                       setState(() => nameController.text = '');
@@ -2613,7 +2616,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   avgPrice: avgPrice,
                 );
 
-                final existing = _positionMap[code];
+                final existing = _findPosition(code);
                 if (existing != null) {
                   await _dbService.updatePosition(Position(
                     id: existing.id,
@@ -3059,8 +3062,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
   /// 合并卡片：同时显示行情 + 分析数据
   Widget _buildMergedCard(
       WatchlistItem item, QuoteData quote, String codeWithPrefix, OpportunityResult? opp) {
-    // 持仓查找 (v2.33)
-    final position = _positionMap[item.code];
+    // 持仓查找 (v2.33) - 兼容 watchlist 中带 sh/sz/bj 前缀的 code
+    final position = _findPosition(item.code);
     final hasPosition = position != null && position.quantity > 0;
 
     // 信号标签
@@ -3222,11 +3225,11 @@ class WatchlistScreenState extends State<WatchlistScreen>
             ),
             ListTile(
               leading: Icon(
-                _positionMap[item.code] != null ? Icons.edit_note : Icons.account_balance_wallet_outlined,
+                _findPosition(item.code) != null ? Icons.edit_note : Icons.account_balance_wallet_outlined,
                 color: _accentColor, size: 22,
               ),
               title: Text(
-                _positionMap[item.code] != null ? '编辑持仓' : '添加持仓',
+                _findPosition(item.code) != null ? '编辑持仓' : '添加持仓',
                 style: const TextStyle(color: _textPrimary, fontSize: 15),
               ),
               onTap: () {
@@ -3284,7 +3287,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
   // ─── 持仓管理对话框 (v2.33) ───────────────────────────────────
 
   void _showPositionDialog(WatchlistItem item) {
-    final existing = _positionMap[item.code];
+    final existing = _findPosition(item.code);
     final qtyCtrl = TextEditingController(text: existing?.quantity.toString() ?? '');
     final priceCtrl = TextEditingController(text: existing?.avgPrice.toStringAsFixed(3) ?? '');
     final notesCtrl = TextEditingController(text: existing?.notes ?? '');
