@@ -51,6 +51,8 @@ class TechnicalScorer {
   }
 
   /// 1. 信号评分 (0-3分) - 按信号强度加权
+  /// v2.60.0: 新增买入信号数量惩罚 — 买入信号过多(>=3)时降低评分，
+  ///         因为数据分析显示买入信号越多胜率越低(>=5仅33.3%)
   static double _scoreSignal(
     List<HistoryKline> data,
     List<SignalItem> buySignals,
@@ -67,6 +69,18 @@ class TechnicalScorer {
         totalStrength > 0 ? (totalStrength * 0.6).clamp(30.0, 150.0) : 150.0;
     double signalRaw = (buyStrength - sellStrength) / maxTotal * 3;
     signalRaw = signalRaw.clamp(-3.0, 3.0);
+
+    // v2.60.0: 买入信号数量惩罚 — 信号过多意味着可能过度拟合或信号冲突
+    // 数据表明：买入信号>=5胜率33.3%，>=3胜率38.4%，远低于平均水平
+    final buySignalCount = buySignals.length;
+    if (buySignalCount >= 5) {
+      signalRaw *= 0.6;
+    } else if (buySignalCount >= 4) {
+      signalRaw *= 0.75;
+    } else if (buySignalCount >= 3) {
+      signalRaw *= 0.88;
+    }
+
     double signalScore = (signalRaw + 3.0) / 2.0;
     return signalScore;
   }
