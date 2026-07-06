@@ -19,11 +19,11 @@ class SectorRotation {
       int cd = 0;
       if (historyData != null && historyData.containsKey(s.code)) for (int i = (historyData[s.code]?.length ?? 0) - 1; i >= 0; i--) { if ((historyData[s.code]?[i] ?? 0) >= 5.0) cd++; else break; }
       if (cd >= 3) ss += 1.0; else if (cd >= 2) ss += 0.5;
-      analyses.add(SectorAnalysis(name: s.name, code: s.code, changePct: s.changePct, limitUpCount: s.limitUpCount, mainNetFlow: s.mainNetFlow, consecutiveStrongDays: cd, strengthScore: ss, isMainLine: ss >= 6.5 && s.limitUpCount >= 2));
+      analyses.add(SectorAnalysis(name: s.name, code: s.code, changePct: s.changePct, limitUpCount: s.limitUpCount, mainNetFlow: s.mainNetFlow, consecutiveStrongDays: cd, strengthScore: ss, isMainLine: ss >= 5.5 && s.limitUpCount >= 1));
     }
     analyses.sort((a, b) => b.strengthScore.compareTo(a.strengthScore));
     final topSectors = analyses.take(5).toList();
-    final mainLines = analyses.asMap().entries.where((e) => e.value.isMainLine || (e.key < 3 && e.value.strengthScore >= 5.0)).map((e) => e.value).toList();
+    final mainLines = analyses.asMap().entries.where((e) => e.value.isMainLine || (e.key < 3 && e.value.strengthScore >= 4.5)).map((e) => e.value).toList();
     return SectorRotationResult(topSectors: topSectors, mainLines: mainLines, updateTime: DateTime.now());
   }
 

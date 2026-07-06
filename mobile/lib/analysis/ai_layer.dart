@@ -127,7 +127,7 @@ class AIChatResult {
 
 enum AIProvider {
   zhipu('智谱AI', 'glm-4.7-flash', 'https://open.bigmodel.cn/api/paas/v4/chat/completions'),
-  openrouter('OpenRouter', 'anthropic/claude-sonnet-4', 'https://openrouter.ai/api/v1/chat/completions'),
+  openrouter('OpenRouter', 'openrouter/free', 'https://openrouter.ai/api/v1/chat/completions'),
   cliproxyapi('CliProxyAPI', 'gpt-5.4', 'http://10.210.2.201:8319/v1/chat/completions');
 
   final String label;
@@ -179,6 +179,13 @@ abstract class AILayer {
     required String stockName,
     required Map<String, dynamic> technicalData,
     required List<String> newsTitles,
+  });
+
+  Future<AIChatResult> analyzePortfolio({
+    required List<Map<String, dynamic>> positions,
+    required double totalCost,
+    required double totalMarketValue,
+    required double totalPnlPct,
   });
 
   bool get isAvailable;
@@ -239,6 +246,16 @@ class NullAILayer implements AILayer {
     required List<String> newsTitles,
   }) async {
     return AIChatResult.withError(question, 'AI层未启用');
+  }
+
+  @override
+  Future<AIChatResult> analyzePortfolio({
+    required List<Map<String, dynamic>> positions,
+    required double totalCost,
+    required double totalMarketValue,
+    required double totalPnlPct,
+  }) async {
+    return AIChatResult.withError('持仓分析', 'AI层未启用');
   }
 
   @override
@@ -502,6 +519,66 @@ $newsSection
     }
   }
 
+  @override
+  Future<AIChatResult> analyzePortfolio({
+    required List<Map<String, dynamic>> positions,
+    required double totalCost,
+    required double totalMarketValue,
+    required double totalPnlPct,
+  }) async {
+    if (positions.isEmpty) {
+      return AIChatResult.withError('持仓分析', '暂无持仓数据');
+    }
+
+    final positionLines = positions.map((p) {
+      final code = p['code'] ?? '';
+      final name = p['name'] ?? '';
+      final quantity = p['quantity'] ?? 0;
+      final avgPrice = (p['avgPrice'] ?? 0).toStringAsFixed(2);
+      final currentPrice = (p['currentPrice'] ?? 0).toStringAsFixed(2);
+      final pnlPct = (p['pnlPct'] ?? 0).toStringAsFixed(2);
+      final cost = (quantity * (p['avgPrice'] ?? 0)).toStringAsFixed(2);
+      return '- $name($code): 持仓${quantity}股, 均价$avgPrice, 现价$currentPrice, 成本$cost, 盈亏${pnlPct}%';
+    }).join('\n');
+
+    final prompt = '''你是一位专业的A股投资组合顾问。请基于以下持仓数据，进行全面的持仓分析并给出操作建议。
+
+持仓概览：
+- 总成本: ${totalCost.toStringAsFixed(2)}元
+- 总市值: ${totalMarketValue.toStringAsFixed(2)}元
+- 总盈亏: ${totalPnlPct.toStringAsFixed(2)}%
+
+持仓明细：
+$positionLines
+
+请从以下维度进行分析（400-600字）：
+
+1. 持仓合理性评估：
+   - 集中度分析（单只股票占比是否过高）
+   - 行业分布是否均衡
+   - 整体风险水平
+
+2. 每只股票的操作建议：
+   - 短期涨跌预测（结合当前技术面和资金流向）
+   - 具体操作：加仓/减仓/持有/止损
+   - 建议操作时间和价格区间
+
+3. 整体仓位管理建议：
+   - 当前仓位是否合理
+   - 是否需要调仓换股
+   - 风险提示和止损策略
+
+注意：请结合当前时间点（${DateTime.now().toString().substring(0, 10)}）给出具体可执行的操作方案。''';
+
+    try {
+      final answer = await _callAPI(prompt);
+      return AIChatResult(question: '持仓分析', answer: answer);
+    } catch (e) {
+      debugPrint('[$_provider] 持仓分析失败: $e');
+      return AIChatResult.withError('持仓分析', formatAIError(e));
+    }
+  }
+
   String _buildTemplatePrompt({
     required AnalysisTemplate template,
     required String stockCode,
@@ -624,12 +701,18 @@ $newsSection
     Exception? lastError;
     for (int attempt = 0; attempt < maxRetries; attempt++) {
       try {
+        final headers = <String, String>{
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_apiKey',
+        };
+        if (_provider == AIProvider.openrouter) {
+          headers['HTTP-Referer'] = 'https://stock-app.com';
+          headers['X-Title'] = 'Stock Analysis App';
+        }
+
         final response = await _client.post(
           Uri.parse(_endpoint),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $_apiKey',
-          },
+          headers: headers,
           body: jsonEncode(request),
         ).timeout(timeout);
 

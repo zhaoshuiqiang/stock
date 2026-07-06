@@ -7,35 +7,20 @@ class AIConfig {
   static const String cloudFunctionProxy = '';
   static const int maxDebateRounds = 2;
   static const double aiConfidenceWeight = 0.3;
-  static const String _defaultApiKey = '';
 
-  static String get apiKey {
-    final envKey = Platform.environment['GLM_API_KEY'];
-    if (envKey != null && envKey.isNotEmpty) {
-      return envKey;
-    }
-    final anthropicKey = Platform.environment['ANTHROPIC_AUTH_TOKEN'];
-    if (anthropicKey != null && anthropicKey.isNotEmpty) {
-      return anthropicKey;
-    }
-    final cliproxyKey = Platform.environment['CLIPROXY_API_KEY'];
-    if (cliproxyKey != null && cliproxyKey.isNotEmpty) {
-      return cliproxyKey;
-    }
-    return _defaultApiKey;
-  }
+  static const String _zhipuApiKey = 'REDACTED';
+  static const String _openrouterApiKey = 'REDACTED';
+  static const String _cliproxyApiKey = 'REDACTED';
 
-  static void setApiKey(String key) {
-    _customApiKey = key;
-  }
-
-  static String? _customApiKey;
-
-  static String get effectiveApiKey {
-    if (_customApiKey != null && _customApiKey!.isNotEmpty) {
-      return _customApiKey!;
+  static String getApiKeyForProvider(AIProvider provider) {
+    switch (provider) {
+      case AIProvider.zhipu:
+        return Platform.environment['GLM_API_KEY'] ?? _zhipuApiKey;
+      case AIProvider.openrouter:
+        return Platform.environment['ANTHROPIC_AUTH_TOKEN'] ?? _openrouterApiKey;
+      case AIProvider.cliproxyapi:
+        return Platform.environment['CLIPROXY_API_KEY'] ?? _cliproxyApiKey;
     }
-    return apiKey;
   }
 
   static bool get useCloudProxy => cloudFunctionProxy.isNotEmpty;

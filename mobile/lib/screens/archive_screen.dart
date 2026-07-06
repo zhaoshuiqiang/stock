@@ -85,13 +85,10 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
 
   /// 判断留档推荐的可靠性等级（4级）
   /// 
-  /// 基于 priceChangePct 与阈值的比值判定：
-  /// - veryReasonable（非常合理）：方向对且幅度超过2倍阈值
-  /// - reasonable（合理）：方向对但幅度不够2倍阈值
-  /// - deviation（偏差）：方向反但幅度小于2倍阈值
-  /// - veryDeviation（非常偏差）：方向反且幅度超过2倍阈值
-  /// 
-  /// 观望类特殊处理：价格变动极小(绝对值<0.5×阈值)才算非常合理
+  /// v2.59.0优化：非对称阈值，买入/卖出推荐要求方向正确才算合理
+  /// - 买入推荐：正收益才算"非常合理"，小跌(-1%以内)算"合理"，大跌算偏差
+  /// - 卖出推荐：负收益才算"非常合理"，小涨(+1%以内)算"合理"，大涨算偏差
+  /// - 观望推荐：价格波动小才算合理（保持不变）
   static ReliabilityLevel _getReliabilityLevel(ArchiveRecord record, double currentPrice) {
     if (currentPrice <= 0 || record.price <= 0) return ReliabilityLevel.reasonable;
 
@@ -103,26 +100,29 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
     final wasNeutral = record.recommendation.contains('观望');
 
     if (wasBuy) {
-      if (priceChangePct >= 2 * threshold) {
-        return ReliabilityLevel.veryReasonable;
+      // 买入推荐：要求正收益才算非常合理
+      if (priceChangePct >= threshold) {
+        return ReliabilityLevel.veryReasonable; // +2%以上
+      } else if (priceChangePct >= -1.0) {
+        return ReliabilityLevel.reasonable; // -1%~+2%
       } else if (priceChangePct >= -threshold) {
-        return ReliabilityLevel.reasonable;
-      } else if (priceChangePct >= -2 * threshold) {
-        return ReliabilityLevel.deviation;
+        return ReliabilityLevel.deviation; // -2%~-1%
       } else {
-        return ReliabilityLevel.veryDeviation;
+        return ReliabilityLevel.veryDeviation; // <-2%
       }
     } else if (wasSell) {
-      if (priceChangePct <= -2 * threshold) {
-        return ReliabilityLevel.veryReasonable;
+      // 卖出推荐：要求负收益才算非常合理（对称逻辑）
+      if (priceChangePct <= -threshold) {
+        return ReliabilityLevel.veryReasonable; // -2%以下
+      } else if (priceChangePct <= 1.0) {
+        return ReliabilityLevel.reasonable; // +1%~-2%
       } else if (priceChangePct <= threshold) {
-        return ReliabilityLevel.reasonable;
-      } else if (priceChangePct <= 2 * threshold) {
-        return ReliabilityLevel.deviation;
+        return ReliabilityLevel.deviation; // +2%~+1%
       } else {
-        return ReliabilityLevel.veryDeviation;
+        return ReliabilityLevel.veryDeviation; // >+2%
       }
     } else if (wasNeutral) {
+      // 观望推荐：波动小才算合理（保持不变）
       if (priceChangePct.abs() < 0.5 * neutralThreshold) {
         return ReliabilityLevel.veryReasonable;
       } else if (priceChangePct.abs() <= neutralThreshold) {

@@ -112,6 +112,13 @@ class DiscoverScreenState extends State<DiscoverScreen>
     _loadWatchlistCodes();
     _loadSectorPicks();
 
+    // 如果DB无板块精选数据，自动触发一次分析
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (_sectorPickResults.isEmpty && !SectorPickEngine.instance.isRunning) {
+        await _autoTriggerSectorPicks();
+      }
+    });
+
     // 订阅智能探索进度
     _exploreSub = _exploreEngine.progressStream.listen(_onExploreProgress);
     if (_exploreEngine.latestProgress != null) {
@@ -407,6 +414,23 @@ class DiscoverScreenState extends State<DiscoverScreen>
           SnackBar(content: Text('刷新失败: $e')),
         );
       }
+    }
+  }
+
+  /// 自动触发板块精选（DB无数据时静默执行，不弹错误提示）
+  Future<void> _autoTriggerSectorPicks() async {
+    if (_isPickingSectors || SectorPickEngine.instance.isRunning) return;
+    setState(() => _isPickingSectors = true);
+    try {
+      final sectors = await _apiClient.getHotSectors();
+      if (sectors.isEmpty) {
+        if (mounted) setState(() => _isPickingSectors = false);
+        return;
+      }
+      SectorPickEngine.instance.pick(sectors);
+    } catch (e) {
+      debugPrint('_autoTriggerSectorPicks failed: $e');
+      if (mounted) setState(() => _isPickingSectors = false);
     }
   }
 

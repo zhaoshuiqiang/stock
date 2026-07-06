@@ -57,20 +57,24 @@ void main() async {
   await ConceptTagProvider.instance.load();
 
   // v2.54: 初始化AI层
-  AIConfig.setApiKey(Platform.environment['GLM_API_KEY'] ?? '6d967e3ee89f4521ae8ab01bf988f839.ssMxPWrBzDvKYFVT');
-
-  if (AIConfig.enableAIEnhancement && AIConfig.effectiveApiKey.isNotEmpty) {
+  if (AIConfig.enableAIEnhancement) {
     final prefs = await SharedPreferences.getInstance();
     final providerName = prefs.getString('ai_provider');
     final provider = providerName != null ? AIProvider.fromString(providerName) : AIProvider.zhipu;
     
-    final aiLayer = ChatCompletionLayer(
-      apiKey: AIConfig.effectiveApiKey,
-      provider: provider,
-    );
-    AILayerProvider.set(aiLayer);
-    NewsSentimentAnalyzer.setAILayer(aiLayer);
-    debugPrint('[AI] ${provider.label} AI层已初始化');
+    final apiKey = AIConfig.getApiKeyForProvider(provider);
+    
+    if (apiKey.isNotEmpty) {
+      final aiLayer = ChatCompletionLayer(
+        apiKey: apiKey,
+        provider: provider,
+      );
+      AILayerProvider.set(aiLayer);
+      NewsSentimentAnalyzer.setAILayer(aiLayer);
+      debugPrint('[AI] ${provider.label} AI层已初始化');
+    } else {
+      debugPrint('[AI] ${provider.label} API Key为空，AI层未初始化');
+    }
   }
 
   // 如果用户已开启推送，启动轮询

@@ -1,8 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_client.dart';
 import '../models/stock_models.dart';
 import '../analysis/indicators.dart';
@@ -18,6 +22,7 @@ import '../core/trading_session.dart';
 import '../analysis/intraday_level_analyzer.dart';
 import '../analysis/sector_rotation.dart';
 import '../analysis/ai_layer.dart';
+import '../core/ai_config.dart';
 
 const _kChartLeftReservedSize = 42.0;
 
@@ -651,6 +656,8 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
             controller: _tabController,
             isScrollable: false,
             tabAlignment: TabAlignment.fill,
+            labelStyle: const TextStyle(fontSize: 12),
+            unselectedLabelStyle: const TextStyle(fontSize: 11),
             tabs: const [
               Tab(text: '实时'),
               Tab(text: 'K线'),
@@ -2196,6 +2203,12 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
                       ),
                     ),
                     const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.settings_outlined, size: 18, color: Color(0xFF8B949E)),
+                      onPressed: _showAPIProviderDialog,
+                      padding: const EdgeInsets.all(4),
+                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    ),
                     if (!aiAvailable)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -2854,6 +2867,160 @@ class QuoteScreenState extends State<QuoteScreen> with SingleTickerProviderState
           _startRetryCountdown(int.parse(match.group(1)!));
         }
       }
+    }
+  }
+
+  Future<void> _showAPIProviderDialog() async {
+    final prefs = await SharedPreferences.getInstance();
+    final currentProviderName = prefs.getString('ai_provider') ?? 'zhipu';
+    final currentProvider = AIProvider.fromString(currentProviderName);
+    AIProvider? selectedProvider = currentProvider;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        String? testResult;
+        bool isTesting = false;
+
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF161B22),
+              title: const Text(
+                '选择AI分析引擎',
+                style: TextStyle(color: Color(0xFFF0F6FC), fontSize: 16),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ...AIProvider.values.map((provider) {
+                    return RadioListTile<AIProvider>(
+                      title: Text(provider.label, style: const TextStyle(color: Color(0xFFF0F6FC))),
+                      subtitle: Text(provider.defaultModel, style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12)),
+                      value: provider,
+                      groupValue: selectedProvider,
+                      onChanged: (value) {
+                        setState(() {
+                          selectedProvider = value;
+                          testResult = null;
+                        });
+                      },
+                      activeColor: const Color(0xFF58A6FF),
+                    );
+                  }).toList(),
+                  if (testResult != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        testResult!,
+                        style: TextStyle(
+                          color: testResult!.contains('成功') ? const Color(0xFF2ECC71) : const Color(0xFFE74C3C),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isTesting
+                      ? null
+                      : () async {
+                          if (selectedProvider == null) return;
+                          setState(() {
+                            isTesting = true;
+                            testResult = '正在测试${selectedProvider!.label}...';
+                          });
+                          final result = await _testAPIConnection(selectedProvider!);
+                          setState(() {
+                            isTesting = false;
+                            testResult = result;
+                          });
+                        },
+                  child: isTesting
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('测试连接', style: TextStyle(color: Color(0xFF8B949E))),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('取消', style: TextStyle(color: Color(0xFF8B949E))),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    if (selectedProvider != null) {
+                      await prefs.setString('ai_provider', selectedProvider!.name);
+                    }
+                    Navigator.pop(context);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('已保存设置，重启应用生效')),
+                      );
+                    }
+                  },
+                  child: const Text('确定', style: TextStyle(color: Color(0xFF58A6FF))),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<String> _testAPIConnection(AIProvider provider) async {
+    final apiKey = AIConfig.getApiKeyForProvider(provider);
+
+    if (apiKey.isEmpty) {
+      return 'API Key为空，请配置环境变量';
+    }
+
+    final client = http.Client();
+    try {
+      final request = {
+        'model': provider.defaultModel,
+        'messages': [{'role': 'user', 'content': 'test'}],
+        'max_tokens': 10,
+      };
+
+      if (provider == AIProvider.zhipu) {
+        request['thinking'] = {'type': 'disabled'};
+      }
+
+      final response = await client.post(
+        Uri.parse(provider.endpoint),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $apiKey',
+        },
+        body: jsonEncode(request),
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        final choices = json['choices'] as List?;
+        if (choices != null && choices.isNotEmpty) {
+          final message = (choices.first as Map<String, dynamic>)['message'] as Map<String, dynamic>?;
+          final content = message?['content'];
+          if (content != null && content is String && content.isNotEmpty) {
+            return '${provider.label}连接成功！';
+          }
+        }
+        return '${provider.label}返回空结果，请检查配置';
+      } else if (response.statusCode == 429) {
+        return '${provider.label}请求过于频繁（429）';
+      } else if (response.statusCode == 401) {
+        return '${provider.label}API Key无效（401）';
+      } else if (response.statusCode == 403) {
+        return '${provider.label}权限不足（403）';
+      } else if (response.statusCode >= 500) {
+        return '${provider.label}服务器错误（${response.statusCode}）';
+      } else {
+        return '${provider.label}连接失败: ${response.statusCode}';
+      }
+    } on TimeoutException {
+      return '${provider.label}连接超时，可能网络不可达';
+    } catch (e) {
+      return '${provider.label}连接异常: $e';
     }
   }
 
