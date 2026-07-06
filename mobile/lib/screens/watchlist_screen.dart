@@ -3,10 +3,15 @@ import 'dart:io';
 import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_client.dart';
+import '../api/websocket_client.dart';
 import '../analysis/opportunity_engine.dart';
 import '../analysis/ai_layer.dart';
 import '../analysis/backtest_engine.dart';
+import '../analysis/portfolio_snapshot_service.dart';
+import '../core/ai_config.dart';
+import '../core/trading_session.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
 import '../analysis/sector_pick_engine.dart';
@@ -14,6 +19,7 @@ import '../widgets/stock_card.dart';
 import '../widgets/alert_dialog.dart';
 import 'quote_screen.dart';
 import 'alerts_screen.dart';
+import 'portfolio_chart_screen.dart';
 
 class WatchlistScreen extends StatefulWidget {
   const WatchlistScreen({super.key});
@@ -63,6 +69,12 @@ class WatchlistScreenState extends State<WatchlistScreen>
   AIChatResult? _portfolioAnalysisResult;
   DateTime? _lastPortfolioAnalysisTime;
 
+  // ─── 持仓3秒轮询状态 (v3.1) ──────────────────────────────────
+  final QuotePollingClient _pollingClient = QuotePollingClient();
+  bool _isPositionPolling = false;
+  Timer? _sessionCheckTimer;
+  final PortfolioSnapshotService _snapshotService = PortfolioSnapshotService();
+
   // ─── 颜色常量 ──────────────────────────────────────────────────
   static const Color _bgColor = Color(0xFF0D1117);
   static const Color _cardColor = Color(0xFF161B22);
@@ -78,12 +90,16 @@ class WatchlistScreenState extends State<WatchlistScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(_onTabChanged);
     WidgetsBinding.instance.addObserver(this);
     _loadWatchlist();
     _startRefreshTimer();
     _loadOppFromDb();
     _loadAlerts();
     _loadPositions();
+
+    // v3.1: 启动交易时段检查（30秒一次，控制3秒轮询启停 + 收盘快照）
+    _startSessionCheck();
 
     // 订阅自选分析进度
     _oppSub = _oppEngine.progressStream.listen(_onOppProgress);
@@ -97,9 +113,12 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
+    _sessionCheckTimer?.cancel();
+    _stopPositionPolling();
     _searchController.dispose();
     _oppSub?.cancel();
     _sectorSub?.cancel();
@@ -111,11 +130,92 @@ class WatchlistScreenState extends State<WatchlistScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
       _refreshTimer?.cancel();
+      _stopPositionPolling(); // v3.1: 暂停持仓3秒轮询
     } else if (state == AppLifecycleState.resumed) {
       _startRefreshTimer();
       _loadWatchlist();
       _loadPositions();
+      _maybeStartPositionPolling(); // v3.1: 恢复持仓3秒轮询
+      _recordSnapshotIfNeeded(); // v3.1: 收盘后补录快照
     }
+  }
+
+  // ─── 持仓3秒轮询 (v3.1) ─────────────────────────────────────────
+
+  void _onTabChanged() {
+    if (_tabController.indexIsChanging) return;
+    _maybeStartPositionPolling();
+  }
+
+  void _startSessionCheck() {
+    _sessionCheckTimer?.cancel();
+    _sessionCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _maybeStartPositionPolling();
+      // 收盘后自动停止轮询并记录快照
+      if (!TradingSession.isInTradingSession() && _isPositionPolling) {
+        _stopPositionPolling();
+      }
+      _recordSnapshotIfNeeded();
+    });
+  }
+
+  /// 启动持仓3秒轮询（仅交易时段 + 持仓Tab可见 + 有持仓）
+  void _maybeStartPositionPolling() {
+    final shouldPoll = _positionMap.isNotEmpty &&
+        _tabController.index == 1 &&
+        TradingSession.isInTradingSession();
+
+    if (shouldPoll && !_isPositionPolling) {
+      _startPositionPolling();
+    } else if (!shouldPoll && _isPositionPolling) {
+      _stopPositionPolling();
+    }
+  }
+
+  void _startPositionPolling() {
+    _isPositionPolling = true;
+    final codes = _positionMap.values
+        .map((p) => _apiClient.addMarketPrefix(p.code))
+        .toSet();
+    _pollingClient.subscribeAll(codes);
+    _pollingClient.setInterval(const Duration(seconds: 3));
+    _pollingClient.onQuoteUpdate = _onQuoteUpdate;
+    _pollingClient.connect();
+  }
+
+  void _stopPositionPolling() {
+    if (!_isPositionPolling) return;
+    _isPositionPolling = false;
+    _pollingClient.disconnect();
+    _pollingClient.onQuoteUpdate = null;
+  }
+
+  /// 行情更新回调 —— 合并到 _quotes 并刷新UI
+  void _onQuoteUpdate(QuoteData quote) {
+    if (!mounted) return;
+
+    final idx = _quotes.indexWhere((q) => q.code == quote.code);
+    if (idx >= 0) {
+      _quotes[idx] = quote;
+    } else {
+      _quotes.add(quote);
+    }
+
+    // 仅持仓Tab可见时才刷新
+    if (_tabController.index == 1) {
+      setState(() {});
+    }
+  }
+
+  /// 收盘后自动记录持仓快照
+  void _recordSnapshotIfNeeded() {
+    if (_positionMap.isEmpty) return;
+    if (TradingSession.isInTradingSession()) return;
+    _snapshotService.recordIfNeeded(
+      positionMap: _positionMap,
+      totalAssets: _totalAssets,
+      availableCash: _availableCash,
+    );
   }
 
   // ─── 自选列表：数据加载 ────────────────────────────────────────
@@ -482,6 +582,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
         setState(() => _positionMap = map);
         // 持仓变化后刷新行情，确保持仓股票有最新价格
         _refreshQuotes();
+        // v3.1: 持仓加载后尝试启动3秒轮询 + 收盘快照
+        _maybeStartPositionPolling();
+        _recordSnapshotIfNeeded();
       }
     } catch (_) {}
   }
@@ -763,10 +866,58 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   Widget _buildPositionHeader() {
+    // 计算汇总数据
+    double totalCost = 0;
+    double totalMarketValue = 0;
+    double totalPnl = 0;
+    double totalTodayPnl = 0;
+    double totalYesterdayMarketValue = 0;
+    int holdingDays = 0;
+
+    for (final pos in _positionMap.values) {
+      final quote = _quotes.firstWhere(
+        (q) => q.code.endsWith(pos.code),
+        orElse: () => QuoteData.empty(),
+      );
+      final currentPrice = quote.price > 0 ? quote.price : (pos.latestPrice > 0 ? pos.latestPrice : pos.avgPrice);
+      final cost = pos.quantity * pos.avgPrice;
+      final marketValue = pos.marketValue > 0 ? pos.marketValue : (pos.quantity * currentPrice);
+
+      final pnl = pos.floatPnl != 0 ? pos.floatPnl : (marketValue - cost);
+      final todayPnl = pos.todayPnl != 0 ? pos.todayPnl : (quote.preClose > 0
+          ? pos.quantity * (currentPrice - quote.preClose)
+          : 0.0);
+
+      totalCost += cost;
+      totalMarketValue += marketValue;
+      totalPnl += pnl;
+      totalTodayPnl += todayPnl;
+
+      if (pos.todayPnl != 0) {
+        totalYesterdayMarketValue += (marketValue - todayPnl);
+      } else if (quote.preClose > 0) {
+        totalYesterdayMarketValue += pos.quantity * quote.preClose;
+      } else {
+        totalYesterdayMarketValue += (marketValue - todayPnl);
+      }
+
+      // 持仓天数（取最早买入日期）
+      if (pos.buyDate != null) {
+        final days = DateTime.now().difference(pos.buyDate!).inDays;
+        if (days > holdingDays) holdingDays = days;
+      }
+    }
+
+    final totalPnlPct = totalCost > 0 ? totalPnl / totalCost * 100 : 0.0;
+    final totalTodayPnlPct = totalYesterdayMarketValue > 0
+        ? totalTodayPnl / totalYesterdayMarketValue * 100
+        : 0.0;
+
     return Column(
       children: [
+        // 标题栏
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: _cardColor,
             border: Border(bottom: BorderSide(color: _borderColor)),
@@ -784,6 +935,25 @@ class WatchlistScreenState extends State<WatchlistScreen>
               ),
               Row(
                 children: [
+                  IconButton(
+                    icon: const Icon(Icons.show_chart, color: _accentColor, size: 20),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => PortfolioChartScreen(
+                            positionMap: _positionMap,
+                          ),
+                        ),
+                      );
+                    },
+                    tooltip: '收益率趋势',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.settings, color: _textSecondary, size: 20),
+                    onPressed: _showAIProviderDialog,
+                    tooltip: 'AI模型设置',
+                  ),
                   IconButton(
                     icon: const Icon(Icons.auto_awesome, color: _accentColor, size: 20),
                     onPressed: _analyzePortfolio,
@@ -809,22 +979,163 @@ class WatchlistScreenState extends State<WatchlistScreen>
             ],
           ),
         ),
-        if (_totalAssets > 0 || _totalMarketValue > 0)
+        // 盈亏汇总卡片（v3.1 重设计：累计盈亏 vs 当日盈亏 卡片化）
+        if (_positionMap.isNotEmpty)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
             decoration: BoxDecoration(
               color: _cardColor,
               border: Border(bottom: BorderSide(color: _borderColor)),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+            child: Column(
               children: [
-                _buildAssetStat('总资产', _totalAssets),
-                _buildAssetStat('总市值', _totalMarketValue),
-                _buildAssetStat('可用资金', _availableCash),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildPnlCard(
+                        '累计盈亏', totalPnl, totalPnlPct,
+                        icon: Icons.trending_up,
+                        subtitle: '自持仓起累计',
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildPnlCard(
+                        '当日盈亏', totalTodayPnl, totalTodayPnlPct,
+                        icon: Icons.today,
+                        subtitle: '今日浮动收益',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                // 辅助信息行（合并去重）
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _buildAuxStat('持仓成本', '¥${totalCost.toStringAsFixed(0)}'),
+                      _buildAuxStat('持仓市值', '¥${totalMarketValue.toStringAsFixed(0)}'),
+                      if (_totalAssets > 0)
+                        _buildAuxStat('总资产', '¥${_totalAssets.toStringAsFixed(0)}'),
+                      if (_availableCash > 0)
+                        _buildAuxStat('可用资金', '¥${_availableCash.toStringAsFixed(0)}'),
+                      if (holdingDays > 0)
+                        _buildAuxStat('持仓天数', '$holdingDays天'),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
+      ],
+    );
+  }
+
+  /// 盈亏主卡片 —— 背景色强化区分累计 vs 当日
+  Widget _buildPnlCard(String label, double pnl, double pnlPct,
+      {required IconData icon, required String subtitle}) {
+    final color = pnl >= 0 ? _upColor : _downColor;
+    final bgColor = pnl >= 0
+        ? const Color(0xFF2A1010)
+        : const Color(0xFF0F2A18);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color, size: 13),
+              const SizedBox(width: 4),
+              Text(label, style: const TextStyle(color: _textSecondary, fontSize: 12)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '${pnl >= 0 ? '+' : ''}¥${pnl.toStringAsFixed(2)}',
+              style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${pnlPct >= 0 ? '+' : ''}${pnlPct.toStringAsFixed(2)}%',
+            style: TextStyle(color: color, fontSize: 13),
+          ),
+          const SizedBox(height: 2),
+          Text(subtitle, style: const TextStyle(color: _textSecondary, fontSize: 10)),
+        ],
+      ),
+    );
+  }
+
+  /// 辅助信息项
+  Widget _buildAuxStat(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: _textSecondary, fontSize: 10)),
+          const SizedBox(height: 2),
+          Text(value, style: const TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPnlStat(String label, double pnl, double pnlPct, Color color, {bool isLarge = false}) {
+    final fontSize = isLarge ? 18.0 : 14.0;
+    final labelSize = isLarge ? 12.0 : 11.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(color: _textSecondary, fontSize: labelSize),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '${pnl >= 0 ? '+' : ''}¥${pnl.toStringAsFixed(2)}',
+          style: TextStyle(
+            color: color,
+            fontSize: fontSize,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          '${pnlPct >= 0 ? '+' : ''}${pnlPct.toStringAsFixed(2)}%',
+          style: TextStyle(
+            color: color,
+            fontSize: labelSize,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSmallStat(String label, double value) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: _textSecondary, fontSize: 11),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '¥${value.toStringAsFixed(0)}',
+          style: const TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+        ),
       ],
     );
   }
@@ -918,14 +1229,26 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   Widget _buildPositionCard(Position pos, QuoteData quote, OpportunityResult? opp) {
-    final currentPrice = quote.price > 0 ? quote.price : pos.avgPrice;
-    
-    // 优先使用Excel中的浮动盈亏和盈亏比例，没有则计算
+    final currentPrice = quote.price > 0 ? quote.price : (pos.latestPrice > 0 ? pos.latestPrice : pos.avgPrice);
+
     final pnl = pos.floatPnl != 0 ? pos.floatPnl : (currentPrice - pos.avgPrice) * pos.quantity;
     final pnlPct = pos.pnlPct != 0 ? pos.pnlPct : (pos.avgPrice > 0
         ? ((currentPrice - pos.avgPrice) / pos.avgPrice * 100)
         : 0.0);
     final pnlColor = pnl >= 0 ? _upColor : _downColor;
+
+    final todayPnl = pos.todayPnl != 0 ? pos.todayPnl : (quote.preClose > 0
+        ? pos.quantity * (currentPrice - quote.preClose)
+        : 0.0);
+    final todayPnlPct = pos.todayPnlPct != 0 ? pos.todayPnlPct : (quote.preClose > 0 && quote.price > 0
+        ? (currentPrice - quote.preClose) / quote.preClose * 100
+        : 0.0);
+    final todayPnlColor = todayPnl >= 0 ? _upColor : _downColor;
+
+    final holdingDays = pos.buyDate != null
+        ? DateTime.now().difference(pos.buyDate!).inDays
+        : 0;
+    final marketValue = pos.quantity * currentPrice;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -948,10 +1271,11 @@ class WatchlistScreenState extends State<WatchlistScreen>
           );
         },
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 行1：名称 + 现价涨跌幅（突出）
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -967,13 +1291,24 @@ class WatchlistScreenState extends State<WatchlistScreen>
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          pos.code,
-                          style: const TextStyle(
-                            color: _textSecondary,
-                            fontSize: 12,
-                          ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Text(
+                              pos.code,
+                              style: const TextStyle(color: _textSecondary, fontSize: 11),
+                            ),
+                            if (holdingDays > 0) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                '持仓$holdingDays天',
+                                style: TextStyle(
+                                  color: _textSecondary.withOpacity(0.7),
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ],
                     ),
@@ -981,8 +1316,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   Row(
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.edit, size: 18, color: Colors.white54),
+                        icon: const Icon(Icons.edit, size: 16, color: Colors.white54),
                         onPressed: () => _showEditPositionDialog(pos),
+                        visualDensity: VisualDensity.compact,
                       ),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
@@ -995,12 +1331,11 @@ class WatchlistScreenState extends State<WatchlistScreen>
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          const SizedBox(height: 4),
                           Text(
                             '${quote.changePct >= 0 ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
                             style: TextStyle(
                               color: quote.changePct >= 0 ? _upColor : _downColor,
-                              fontSize: 14,
+                              fontSize: 13,
                             ),
                           ),
                         ],
@@ -1009,24 +1344,33 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              const Divider(color: _borderColor, height: 1),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
+              // 盈亏区（分组强化，浅色背景条）
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _darkSurface,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _buildPnlDetail('浮动盈亏', pnl, pnlPct, pnlColor),
+                    ),
+                    Container(width: 1, height: 32, color: _borderColor),
+                    Expanded(
+                      child: _buildPnlDetail('当日盈亏', todayPnl, todayPnlPct, todayPnlColor),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              // 辅助信息行（降级显示）
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _buildPositionDetail('持仓数量', '${pos.quantity}股'),
-                  _buildPositionDetail('成本价', '¥${pos.avgPrice.toStringAsFixed(3)}'),
-                  _buildPositionDetail(
-                    '盈亏',
-                    '${pnl >= 0 ? '+' : ''}¥${pnl.toStringAsFixed(2)}',
-                    color: pnlColor,
-                  ),
-                  _buildPositionDetail(
-                    '收益率',
-                    '${pnlPct >= 0 ? '+' : ''}${pnlPct.toStringAsFixed(2)}%',
-                    color: pnlColor,
-                  ),
+                  _buildPositionDetail('持仓', '${pos.quantity}股'),
+                  _buildPositionDetail('成本', '¥${pos.avgPrice.toStringAsFixed(3)}'),
+                  _buildPositionDetail('市值', '¥${marketValue.toStringAsFixed(0)}'),
                 ],
               ),
               if (opp != null) ...[
@@ -1123,6 +1467,25 @@ class WatchlistScreenState extends State<WatchlistScreen>
     if (recommendation.contains('卖出')) return _downColor;
     if (recommendation.contains('强烈卖出')) return const Color(0xFF8B0000);
     return _textSecondary;
+  }
+
+  /// 盈亏详情（卡片内紧凑展示：金额+百分比）
+  Widget _buildPnlDetail(String label, double pnl, double pnlPct, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(color: _textSecondary, fontSize: 10)),
+        const SizedBox(height: 2),
+        Text(
+          '${pnl >= 0 ? '+' : ''}¥${pnl.toStringAsFixed(2)}',
+          style: TextStyle(color: color, fontSize: 15, fontWeight: FontWeight.bold),
+        ),
+        Text(
+          '${pnlPct >= 0 ? '+' : ''}${pnlPct.toStringAsFixed(2)}%',
+          style: TextStyle(color: color, fontSize: 12),
+        ),
+      ],
+    );
   }
 
   Widget _buildPositionDetail(String label, String value, {Color? color}) {
@@ -1257,30 +1620,38 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
       debugPrint('Excel导入: 表头行索引=$headerRowIndex');
 
-      // 解析表头，动态查找列位置
+      // 解析表头，动态查找列位置（从最精确到最宽泛匹配，避免误匹配）
       final headerRow = rows[headerRowIndex];
       int codeCol = -1, nameCol = -1, quantityCol = -1, balanceCol = -1;
       int avgPriceCol = -1, latestPriceCol = -1, floatPnlCol = -1;
-      int pnlPctCol = -1, marketValueCol = -1;
+      int pnlPctCol = -1, marketValueCol = -1, todayPnlCol = -1;
+      int todayPnlPctCol = -1;
       for (var i = 0; i < headerRow.length; i++) {
         final header = _parseCellValue(headerRow[i]);
-        if (header.contains('证券代码') || header.contains('代码')) {
+        if (header.isEmpty) continue;
+        
+        // 精确匹配优先
+        if (header == '证券代码' || header == '代码') {
           codeCol = i;
-        } else if (header.contains('证券名称') || header.contains('名称')) {
+        } else if (header == '证券名称' || header == '名称') {
           nameCol = i;
-        } else if (header.contains('拥股数量') || header.contains('数量')) {
+        } else if (header == '拥股数量' || header == '持仓数量') {
           quantityCol = i;
-        } else if (header.contains('股票余额') || header.contains('余额')) {
+        } else if (header == '股票余额' || header == '持仓余额') {
           balanceCol = i;
-        } else if (header.contains('盈亏成本') || header.contains('成本')) {
+        } else if (header == '盈亏成本' || header == '成本价' || header == '持仓成本') {
           avgPriceCol = i;
-        } else if (header.contains('最新价') || header.contains('现价')) {
+        } else if (header == '最新价' || header == '现价' || header == '当前价') {
           latestPriceCol = i;
-        } else if (header.contains('浮动盈亏') || header.contains('盈亏')) {
+        } else if (header == '浮动盈亏') {
           floatPnlCol = i;
-        } else if (header.contains('盈亏比例') || header.contains('盈亏比')) {
+        } else if (header == '盈亏比例' || header == '盈亏比') {
           pnlPctCol = i;
-        } else if (header.contains('市值') || header.contains('证券市值')) {
+        } else if (header == '当日盈亏') {
+          todayPnlCol = i;
+        } else if (header == '当日盈亏比例' || header == '当日盈亏比') {
+          todayPnlPctCol = i;
+        } else if (header == '证券市值' || header == '市值' || header == '持仓市值') {
           marketValueCol = i;
         }
       }
@@ -1294,7 +1665,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
         return;
       }
 
-      debugPrint('Excel导入: codeCol=$codeCol nameCol=$nameCol quantityCol=$quantityCol balanceCol=$balanceCol avgPriceCol=$avgPriceCol latestPriceCol=$latestPriceCol floatPnlCol=$floatPnlCol pnlPctCol=$pnlPctCol marketValueCol=$marketValueCol');
+      debugPrint('Excel导入: codeCol=$codeCol nameCol=$nameCol quantityCol=$quantityCol balanceCol=$balanceCol avgPriceCol=$avgPriceCol latestPriceCol=$latestPriceCol floatPnlCol=$floatPnlCol pnlPctCol=$pnlPctCol todayPnlCol=$todayPnlCol todayPnlPctCol=$todayPnlPctCol marketValueCol=$marketValueCol');
 
       // 从表头下一行开始读取数据
       for (var rowIndex = headerRowIndex + 1; rowIndex < rows.length; rowIndex++) {
@@ -1310,6 +1681,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
         final latestPriceCell = latestPriceCol >= 0 && latestPriceCol < row.length ? row[latestPriceCol] : null;
         final floatPnlCell = floatPnlCol >= 0 && floatPnlCol < row.length ? row[floatPnlCol] : null;
         final pnlPctCell = pnlPctCol >= 0 && pnlPctCol < row.length ? row[pnlPctCol] : null;
+        final todayPnlCell = todayPnlCol >= 0 && todayPnlCol < row.length ? row[todayPnlCol] : null;
+        final todayPnlPctCell = todayPnlPctCol >= 0 && todayPnlPctCol < row.length ? row[todayPnlPctCol] : null;
         final marketValueCell = marketValueCol >= 0 && marketValueCol < row.length ? row[marketValueCol] : null;
 
         final code = _parseCellValue(codeCell);
@@ -1320,11 +1693,16 @@ class WatchlistScreenState extends State<WatchlistScreen>
         final latestPriceStr = _parseCellValue(latestPriceCell);
         final floatPnlStr = _parseCellValue(floatPnlCell);
         final pnlPctStr = _parseCellValue(pnlPctCell);
+        final todayPnlStr = _parseCellValue(todayPnlCell);
+        final todayPnlPctStr = _parseCellValue(todayPnlPctCell);
         final marketValueStr = _parseCellValue(marketValueCell);
 
-        debugPrint('Excel导入: 行$rowIndex code=$code name=$name balance=$balanceStr quantity=$quantityStr avgPrice=$avgPriceStr latestPrice=$latestPriceStr floatPnl=$floatPnlStr pnlPct=$pnlPctStr marketValue=$marketValueStr');
+        debugPrint('Excel导入: 行$rowIndex code=$code name=$name balance=$balanceStr quantity=$quantityStr avgPrice=$avgPriceStr latestPrice=$latestPriceStr floatPnl=$floatPnlStr pnlPct=$pnlPctStr todayPnl=$todayPnlStr todayPnlPct=$todayPnlPctStr marketValue=$marketValueStr');
 
         if (code.isEmpty || name.isEmpty) continue;
+        
+        // 跳过合计行
+        if (code.contains('合计') || name.contains('合计')) continue;
 
         // 优先使用股票余额，没有则使用拥股数量
         int quantity = 0;
@@ -1337,21 +1715,32 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
         // 获取盈亏成本
         double avgPrice = double.tryParse(avgPriceStr) ?? 0.0;
+        final latestPrice = double.tryParse(latestPriceStr) ?? 0.0;
 
         // 如果盈亏成本为0，尝试从最新价和浮动盈亏反推成本价
         // 公式: avgPrice = (latestPrice * quantity - floatPnl) / quantity
-        if (avgPrice <= 0 && quantity > 0) {
-          final latestPrice = double.tryParse(latestPriceStr) ?? 0.0;
-          final floatPnl = double.tryParse(floatPnlStr) ?? 0.0;
-          if (latestPrice > 0) {
-            avgPrice = (latestPrice * quantity - floatPnl) / quantity;
-            debugPrint('Excel导入: 行$rowIndex 反推成本价=$avgPrice (latestPrice=$latestPrice quantity=$quantity floatPnl=$floatPnl)');
-          }
+        final floatPnlRaw = double.tryParse(floatPnlStr) ?? 0.0;
+        if (avgPrice <= 0 && quantity > 0 && latestPrice > 0) {
+          avgPrice = (latestPrice * quantity - floatPnlRaw) / quantity;
+          debugPrint('Excel导入: 行$rowIndex 反推成本价=$avgPrice (latestPrice=$latestPrice quantity=$quantity floatPnl=$floatPnlRaw)');
         }
 
-        // 获取浮动盈亏、盈亏比例、市值
-        final floatPnl = double.tryParse(floatPnlStr) ?? 0.0;
-        final pnlPct = double.tryParse(pnlPctStr) ?? 0.0;
+        // 解析盈亏比例（去掉%号）
+        double pnlPct = 0.0;
+        if (pnlPctStr.isNotEmpty && pnlPctStr != '--') {
+          pnlPct = double.tryParse(pnlPctStr.replaceAll('%', '')) ?? 0.0;
+        }
+        
+        // 解析当日盈亏
+        double todayPnl = double.tryParse(todayPnlStr) ?? 0.0;
+        
+        // 解析当日盈亏比例（去掉%号）
+        double todayPnlPct = 0.0;
+        if (todayPnlPctStr.isNotEmpty && todayPnlPctStr != '--') {
+          todayPnlPct = double.tryParse(todayPnlPctStr.replaceAll('%', '')) ?? 0.0;
+        }
+        
+        // 解析市值
         final marketValue = double.tryParse(marketValueStr) ?? 0.0;
 
         if (code.isNotEmpty && name.isNotEmpty) {
@@ -1360,9 +1749,12 @@ class WatchlistScreenState extends State<WatchlistScreen>
             name: name,
             quantity: quantity,
             avgPrice: avgPrice,
-            floatPnl: floatPnl,
+            floatPnl: floatPnlRaw,
             pnlPct: pnlPct,
             marketValue: marketValue,
+            todayPnl: todayPnl,
+            todayPnlPct: todayPnlPct,
+            latestPrice: latestPrice,
           ));
         }
       }
@@ -1375,25 +1767,70 @@ class WatchlistScreenState extends State<WatchlistScreen>
         }
         return;
       }
+      
+      // 数据验证：检查关键字段
+      final warnings = <String>[];
+      int validCount = 0;
+      int zeroQuantityCount = 0;
+      int zeroCostCount = 0;
+      for (final pos in positions) {
+        if (pos.quantity > 0) {
+          validCount++;
+          if (pos.avgPrice <= 0) {
+            zeroCostCount++;
+          }
+        } else {
+          zeroQuantityCount++;
+        }
+      }
+      if (zeroQuantityCount > 0) {
+        warnings.add('$zeroQuantityCount 只股票持仓数量为0（已清仓）');
+      }
+      if (zeroCostCount > 0) {
+        warnings.add('$zeroCostCount 只股票成本价为0（已从盈亏反推）');
+      }
 
-      // 导入前确认
+      // 导入前确认（显示详细信息）
       final confirm = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           backgroundColor: _cardColor,
-          title: const Text('确认导入', style: TextStyle(color: Colors.white)),
-          content: Text(
-            '导入将清除现有持仓数据并替换为新数据，确定继续吗？\n\n将导入 ${positions.length} 只股票',
-            style: const TextStyle(color: Colors.white70),
+          title: const Text('确认导入', style: TextStyle(color: _textPrimary)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '将导入 ${positions.length} 只股票（其中有效持仓 $validCount 只）',
+                style: const TextStyle(color: _textPrimary, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '导入将清除现有持仓数据并替换为新数据。',
+                style: TextStyle(color: _textSecondary, fontSize: 12),
+              ),
+              if (warnings.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  '⚠️ 注意事项：',
+                  style: TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                ...warnings.map((w) => Padding(
+                  padding: const EdgeInsets.only(left: 8, top: 2),
+                  child: Text('• $w', style: const TextStyle(color: Colors.orange, fontSize: 11)),
+                )),
+              ],
+            ],
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
+              child: const Text('取消', style: TextStyle(color: _textSecondary)),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('确认'),
+              child: const Text('确认导入', style: TextStyle(color: _accentColor)),
             ),
           ],
         ),
@@ -1897,6 +2334,140 @@ class WatchlistScreenState extends State<WatchlistScreen>
         ],
       ),
     );
+  }
+
+  Future<void> _showAIProviderDialog() async {
+    final prefs = await SharedPreferences.getInstance();
+    final currentProviderName = prefs.getString('ai_provider') ?? 'zhipu';
+    final currentProvider = AIProvider.fromString(currentProviderName);
+    AIProvider? selectedProvider = currentProvider;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        String? testResult;
+        bool isTesting = false;
+
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: _cardColor,
+              title: const Text(
+                '选择AI分析引擎',
+                style: TextStyle(color: _textPrimary, fontSize: 16),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ...AIProvider.values.map((provider) {
+                    return RadioListTile<AIProvider>(
+                      title: Text(provider.label, style: const TextStyle(color: _textPrimary)),
+                      subtitle: Text(provider.defaultModel, style: TextStyle(color: _textSecondary, fontSize: 12)),
+                      value: provider,
+                      groupValue: selectedProvider,
+                      onChanged: (value) {
+                        setState(() {
+                          selectedProvider = value;
+                          testResult = null;
+                        });
+                      },
+                      activeColor: _accentColor,
+                    );
+                  }).toList(),
+                  if (testResult != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        testResult!,
+                        style: TextStyle(
+                          color: testResult!.contains('成功') ? Colors.green : Colors.red,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isTesting
+                      ? null
+                      : () async {
+                          if (selectedProvider == null) return;
+                          setState(() {
+                            isTesting = true;
+                            testResult = '正在测试${selectedProvider!.label}...';
+                          });
+                          final result = await _testAPIConnection(selectedProvider!);
+                          setState(() {
+                            isTesting = false;
+                            testResult = result;
+                          });
+                        },
+                  child: isTesting
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : Text('测试连接', style: TextStyle(color: _textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('取消', style: TextStyle(color: _textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    if (selectedProvider == null) return;
+                    await prefs.setString('ai_provider', selectedProvider!.name);
+                    // 重新初始化AILayerProvider
+                    final apiKey = AIConfig.getApiKeyForProvider(selectedProvider!);
+                    if (apiKey.isNotEmpty) {
+                      AILayerProvider.set(
+                        ChatCompletionLayer(
+                          apiKey: apiKey,
+                          provider: selectedProvider!,
+                        ),
+                      );
+                    }
+                    if (mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('已切换到${selectedProvider!.label}')),
+                      );
+                    }
+                  },
+                  child: const Text('确定', style: TextStyle(color: _accentColor)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<String> _testAPIConnection(AIProvider provider) async {
+    final apiKey = AIConfig.getApiKeyForProvider(provider);
+    if (apiKey.isEmpty) return 'API Key为空，请检查配置';
+
+    try {
+      final response = await HttpClient().postUrl(Uri.parse(provider.endpoint))
+        ..headers.set('Content-Type', 'application/json')
+        ..headers.set('Authorization', 'Bearer $apiKey');
+      final request = await response;
+      final body = '{"model": "${provider.defaultModel}", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5}';
+      request.write(body);
+      final responseBody = await request.close();
+      if (responseBody.statusCode == 200) {
+        return '${provider.label}连接成功！';
+      } else if (responseBody.statusCode == 429) {
+        return '${provider.label}请求过于频繁（429）';
+      } else if (responseBody.statusCode == 401) {
+        return '${provider.label}API Key无效（401）';
+      } else if (responseBody.statusCode == 403) {
+        return '${provider.label}权限不足（403）';
+      } else {
+        return '${provider.label}连接失败: ${responseBody.statusCode}';
+      }
+    } catch (e) {
+      return '${provider.label}连接异常: $e';
+    }
   }
 
   Future<void> _showAddPositionDialog() async {
@@ -2562,7 +3133,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
         child: StockCard(
           name: item.isPinned
               ? '📌 ${item.name}'
-              : (hasPosition ? '💼 ${item.name}' : item.name),
+              : item.name,
           code: codeWithPrefix,
           price: quote.price,
           changePct: quote.changePct,
@@ -2574,11 +3145,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
           riskLevel: opp?.riskLevel,
           tags: tags.isNotEmpty ? tags : null,
           actions: actions.isNotEmpty ? actions : null,
-          positionInfo: hasPosition && quote.price > 0
+          positionInfo: hasPosition
               ? PositionInfo(
                   quantity: position.quantity,
                   avgPrice: position.avgPrice,
-                  currentPrice: quote.price,
+                  currentPrice: quote.price > 0 ? quote.price : position.latestPrice,
+                  floatPnl: position.floatPnl != 0 ? position.floatPnl : null,
+                  pnlPct: position.pnlPct != 0 ? position.pnlPct : null,
                 )
               : null,
           onTap: () => _onStockTap(codeWithPrefix, item.name),

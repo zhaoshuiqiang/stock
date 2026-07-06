@@ -20,6 +20,7 @@ class QuotePollingClient {
   bool _shouldPoll = false;
   bool _isPolling = false;
   http.Client? _httpClient;
+  Duration _interval = const Duration(seconds: 5);
 
   /// 兼容旧名称的引用
   @Deprecated('Use QuotePollingClient instead')
@@ -35,9 +36,17 @@ class QuotePollingClient {
     _startPolling();
   }
 
+  /// 设置轮询间隔（持仓页盘中用3秒，其他场景用5秒）
+  void setInterval(Duration interval) {
+    if (_interval != interval) {
+      _interval = interval;
+      if (_shouldPoll) _startPolling();
+    }
+  }
+
   void _startPolling() {
     _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _pollingTimer = Timer.periodic(_interval, (_) {
       _pollQuotes();
     });
   }
@@ -148,6 +157,21 @@ class QuotePollingClient {
   void unsubscribe(String code) {
     _subscriptions.remove(code);
   }
+
+  /// 批量订阅
+  void subscribeAll(Iterable<String> codes) {
+    _subscriptions.addAll(codes);
+  }
+
+  /// 批量退订
+  void unsubscribeAll(Iterable<String> codes) {
+    for (final c in codes) {
+      _subscriptions.remove(c);
+    }
+  }
+
+  /// 当前订阅代码（不可变视图）
+  Set<String> get subscriptions => Set.unmodifiable(_subscriptions);
 
   void disconnect() {
     _shouldPoll = false;

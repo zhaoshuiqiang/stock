@@ -37,7 +37,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 15,
+      version: 16,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -295,7 +295,39 @@ class DatabaseService {
             await txn.execute('''
               ALTER TABLE positions ADD COLUMN market_value REAL NOT NULL DEFAULT 0
             ''');
-            debugPrint('[DB] v14→v15: added float_pnl/pnl_pct/market_value columns to positions');
+            await txn.execute('''
+              ALTER TABLE positions ADD COLUMN today_pnl REAL NOT NULL DEFAULT 0
+            ''');
+            await txn.execute('''
+              ALTER TABLE positions ADD COLUMN today_pnl_pct REAL NOT NULL DEFAULT 0
+            ''');
+            await txn.execute('''
+              ALTER TABLE positions ADD COLUMN latest_price REAL NOT NULL DEFAULT 0
+            ''');
+            debugPrint('[DB] v14→v15: added float_pnl/pnl_pct/market_value/today_pnl columns to positions');
+          }
+          if (oldVersion < 16) {
+            // v3.1: 持仓每日快照表（收益率趋势图数据源）
+            await txn.execute('''
+              CREATE TABLE position_daily_snapshot (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_date       TEXT    NOT NULL UNIQUE,
+                total_cost          REAL    NOT NULL DEFAULT 0,
+                total_market_value  REAL    NOT NULL DEFAULT 0,
+                total_pnl           REAL    NOT NULL DEFAULT 0,
+                total_pnl_pct       REAL    NOT NULL DEFAULT 0,
+                today_pnl           REAL    NOT NULL DEFAULT 0,
+                today_pnl_pct       REAL    NOT NULL DEFAULT 0,
+                available_cash      REAL    NOT NULL DEFAULT 0,
+                total_assets        REAL    NOT NULL DEFAULT 0,
+                positions_json      TEXT    DEFAULT '',
+                created_at          INTEGER NOT NULL
+              )
+            ''');
+            await txn.execute(
+              'CREATE INDEX idx_snapshot_date ON position_daily_snapshot(snapshot_date)'
+            );
+            debugPrint('[DB] v15→v16: created position_daily_snapshot table');
           }
           // 索引补建（幂等，保证升级路径和新装路径都有）
           await txn.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
@@ -445,12 +477,35 @@ class DatabaseService {
         name TEXT NOT NULL,
         quantity INTEGER NOT NULL DEFAULT 0,
         avg_price REAL NOT NULL DEFAULT 0,
+        float_pnl REAL NOT NULL DEFAULT 0,
+        pnl_pct REAL NOT NULL DEFAULT 0,
+        market_value REAL NOT NULL DEFAULT 0,
+        today_pnl REAL NOT NULL DEFAULT 0,
+        today_pnl_pct REAL NOT NULL DEFAULT 0,
+        latest_price REAL NOT NULL DEFAULT 0,
         buy_date INTEGER,
         notes TEXT DEFAULT '',
         created_at INTEGER NOT NULL
       )
     ''');
     await db.execute('CREATE INDEX idx_positions_code ON positions(code)');
+    await db.execute('''
+      CREATE TABLE position_daily_snapshot (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        snapshot_date       TEXT    NOT NULL UNIQUE,
+        total_cost          REAL    NOT NULL DEFAULT 0,
+        total_market_value  REAL    NOT NULL DEFAULT 0,
+        total_pnl           REAL    NOT NULL DEFAULT 0,
+        total_pnl_pct       REAL    NOT NULL DEFAULT 0,
+        today_pnl           REAL    NOT NULL DEFAULT 0,
+        today_pnl_pct       REAL    NOT NULL DEFAULT 0,
+        available_cash      REAL    NOT NULL DEFAULT 0,
+        total_assets        REAL    NOT NULL DEFAULT 0,
+        positions_json      TEXT    DEFAULT '',
+        created_at          INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX idx_snapshot_date ON position_daily_snapshot(snapshot_date)');
     await db.execute('''
       CREATE TABLE limit_up_pool (
         code              TEXT    NOT NULL,
@@ -995,6 +1050,12 @@ class DatabaseService {
       {
         'quantity': position.quantity,
         'avg_price': position.avgPrice,
+        'float_pnl': position.floatPnl,
+        'pnl_pct': position.pnlPct,
+        'market_value': position.marketValue,
+        'today_pnl': position.todayPnl,
+        'today_pnl_pct': position.todayPnlPct,
+        'latest_price': position.latestPrice,
         'buy_date': position.buyDate?.millisecondsSinceEpoch,
         'notes': position.notes,
       },
@@ -1024,4 +1085,71 @@ class DatabaseService {
     final positions = await getPositions();
     return {for (final p in positions) p.code: p};
   }
+
+  // ========== 持仓快照 CRUD (v3.1) ==========
+
+  /// 保存每日快照（按日期去重，INSERT OR REPLACE）
+  Future<int> saveDailySnapshot(PortfolioSnapshot snapshot) async {
+    final db = await database;
+    return await db.insert(
+      'position_daily_snapshot',
+      snapshot.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// 查询指定日期范围的快照
+  Future<List<PortfolioSnapshot>> getSnapshots({
+    DateTime? startDate,
+    DateTime? endDate,
+    int? limit,
+  }) async {
+    final db = await database;
+    final where = <String>[];
+    final args = <dynamic>[];
+    if (startDate != null) {
+      where.add('snapshot_date >= ?');
+      args.add(_formatSnapshotDate(startDate));
+    }
+    if (endDate != null) {
+      where.add('snapshot_date <= ?');
+      args.add(_formatSnapshotDate(endDate));
+    }
+    final result = await db.query(
+      'position_daily_snapshot',
+      where: where.isNotEmpty ? where.join(' AND ') : null,
+      whereArgs: args.isNotEmpty ? args : null,
+      orderBy: 'snapshot_date ASC',
+      limit: limit,
+    );
+    return result.map((row) => PortfolioSnapshot.fromMap(row)).toList();
+  }
+
+  /// 检查指定日期的快照是否已存在
+  Future<bool> hasSnapshotForDate(DateTime date) async {
+    final db = await database;
+    final result = await db.query(
+      'position_daily_snapshot',
+      where: 'snapshot_date = ?',
+      whereArgs: [_formatSnapshotDate(date)],
+      limit: 1,
+    );
+    return result.isNotEmpty;
+  }
+
+  /// 获取所有快照日期
+  Future<List<DateTime>> getSnapshotDates() async {
+    final db = await database;
+    final result = await db.query(
+      'position_daily_snapshot',
+      columns: ['snapshot_date'],
+      orderBy: 'snapshot_date ASC',
+    );
+    return result
+        .map((row) => DateTime.parse(row['snapshot_date'] as String))
+        .toList();
+  }
+
+  static String _formatSnapshotDate(DateTime date) =>
+      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 }

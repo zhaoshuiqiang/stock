@@ -1137,15 +1137,18 @@ class WatchlistItem {
 /// 持仓记录（v2.33: 短线持仓管理）
 class Position {
   final int? id;
-  final String code;       // 不带前缀的6位代码
+  final String code;
   final String name;
-  final int quantity;       // 持仓股数
-  final double avgPrice;   // 持仓均价
-  final double floatPnl;   // 浮动盈亏（来自Excel）
-  final double pnlPct;     // 盈亏比例（来自Excel）
-  final double marketValue; // 市值（来自Excel）
-  final DateTime? buyDate; // 买入日期
-  final String notes;       // 备注
+  final int quantity;
+  final double avgPrice;
+  final double floatPnl;
+  final double pnlPct;
+  final double marketValue;
+  final double todayPnl;
+  final double todayPnlPct;
+  final double latestPrice;
+  final DateTime? buyDate;
+  final String notes;
   final DateTime createdAt;
 
   Position({
@@ -1157,6 +1160,9 @@ class Position {
     this.floatPnl = 0.0,
     this.pnlPct = 0.0,
     this.marketValue = 0.0,
+    this.todayPnl = 0.0,
+    this.todayPnlPct = 0.0,
+    this.latestPrice = 0.0,
     this.buyDate,
     this.notes = '',
     DateTime? createdAt,
@@ -1183,6 +1189,9 @@ class Position {
       floatPnl: (map['float_pnl'] as num?)?.toDouble() ?? 0.0,
       pnlPct: (map['pnl_pct'] as num?)?.toDouble() ?? 0.0,
       marketValue: (map['market_value'] as num?)?.toDouble() ?? 0.0,
+      todayPnl: (map['today_pnl'] as num?)?.toDouble() ?? 0.0,
+      todayPnlPct: (map['today_pnl_pct'] as num?)?.toDouble() ?? 0.0,
+      latestPrice: (map['latest_price'] as num?)?.toDouble() ?? 0.0,
       buyDate: map['buy_date'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['buy_date'] as int)
           : null,
@@ -1203,8 +1212,82 @@ class Position {
       'float_pnl': floatPnl,
       'pnl_pct': pnlPct,
       'market_value': marketValue,
+      'today_pnl': todayPnl,
+      'today_pnl_pct': todayPnlPct,
+      'latest_price': latestPrice,
       'buy_date': buyDate?.millisecondsSinceEpoch,
       'notes': notes,
+      'created_at': createdAt.millisecondsSinceEpoch,
+    };
+  }
+}
+
+/// 持仓每日快照（v3.1）—— 收益率趋势图数据源
+class PortfolioSnapshot {
+  final int? id;
+  final DateTime date;
+  final double totalCost;
+  final double totalMarketValue;
+  final double totalPnl;
+  final double totalPnlPct;
+  final double todayPnl;
+  final double todayPnlPct;
+  final double availableCash;
+  final double totalAssets;
+  final String positionsJson;
+  final DateTime createdAt;
+
+  PortfolioSnapshot({
+    this.id,
+    required this.date,
+    this.totalCost = 0,
+    this.totalMarketValue = 0,
+    this.totalPnl = 0,
+    this.totalPnlPct = 0,
+    this.todayPnl = 0,
+    this.todayPnlPct = 0,
+    this.availableCash = 0,
+    this.totalAssets = 0,
+    this.positionsJson = '',
+    DateTime? createdAt,
+  }) : createdAt = createdAt ?? DateTime.now();
+
+  factory PortfolioSnapshot.fromMap(Map<String, dynamic> map) {
+    return PortfolioSnapshot(
+      id: map['id'] as int?,
+      date: map['snapshot_date'] != null
+          ? DateTime.parse(map['snapshot_date'] as String)
+          : DateTime.now(),
+      totalCost: (map['total_cost'] as num?)?.toDouble() ?? 0,
+      totalMarketValue: (map['total_market_value'] as num?)?.toDouble() ?? 0,
+      totalPnl: (map['total_pnl'] as num?)?.toDouble() ?? 0,
+      totalPnlPct: (map['total_pnl_pct'] as num?)?.toDouble() ?? 0,
+      todayPnl: (map['today_pnl'] as num?)?.toDouble() ?? 0,
+      todayPnlPct: (map['today_pnl_pct'] as num?)?.toDouble() ?? 0,
+      availableCash: (map['available_cash'] as num?)?.toDouble() ?? 0,
+      totalAssets: (map['total_assets'] as num?)?.toDouble() ?? 0,
+      positionsJson: map['positions_json'] as String? ?? '',
+      createdAt: map['created_at'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int)
+          : DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    final dateStr =
+        '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    return {
+      if (id != null) 'id': id,
+      'snapshot_date': dateStr,
+      'total_cost': totalCost,
+      'total_market_value': totalMarketValue,
+      'total_pnl': totalPnl,
+      'total_pnl_pct': totalPnlPct,
+      'today_pnl': todayPnl,
+      'today_pnl_pct': todayPnlPct,
+      'available_cash': availableCash,
+      'total_assets': totalAssets,
+      'positions_json': positionsJson,
       'created_at': createdAt.millisecondsSinceEpoch,
     };
   }

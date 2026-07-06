@@ -99,7 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.brain_outlined, size: 20, color: Colors.purple),
+                        const Icon(Icons.psychology, size: 20, color: Colors.purple),
                         const SizedBox(width: 8),
                         Text(
                           'AI分析引擎',

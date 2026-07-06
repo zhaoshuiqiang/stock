@@ -60,6 +60,7 @@ class StockCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasPosition = positionInfo != null;
     return GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
@@ -70,9 +71,12 @@ class StockCard extends StatelessWidget {
           color: const Color(0xFF161B22),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: recommendation != null
-                ? _recColor.withOpacity(0.3)
-                : const Color(0xFF30363D),
+            color: hasPosition
+                ? const Color(0xFF58A6FF).withOpacity(0.5)
+                : (recommendation != null
+                    ? _recColor.withOpacity(0.3)
+                    : const Color(0xFF30363D)),
+            width: hasPosition ? 1.5 : 1.0,
           ),
         ),
         child: Column(
@@ -106,13 +110,38 @@ class StockCard extends StatelessWidget {
                   const SizedBox(width: 10),
                 ],
                 Expanded(
-                  child: Text(
-                    name,
-                    style: const TextStyle(
-                      color: Color(0xFFF0F6FC),
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  child: Row(
+                    children: [
+                      if (hasPosition) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF58A6FF).withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            '持仓',
+                            style: TextStyle(
+                              color: Color(0xFF58A6FF),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                      Expanded(
+                        child: Text(
+                          name,
+                          style: const TextStyle(
+                            color: Color(0xFFF0F6FC),
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 if (recommendation != null)
@@ -267,17 +296,21 @@ class PositionInfo {
   final int quantity;
   final double avgPrice;
   final double currentPrice;
+  final double? floatPnl;
+  final double? pnlPct;
 
   const PositionInfo({
     required this.quantity,
     required this.avgPrice,
     required this.currentPrice,
+    this.floatPnl,
+    this.pnlPct,
   });
 
   double get cost => quantity * avgPrice;
   double get marketValue => quantity * currentPrice;
-  double get pnl => marketValue - cost;
-  double get pnlPct => cost > 0 ? pnl / cost * 100 : 0.0;
+  double get pnl => floatPnl ?? (marketValue - cost);
+  double get pnlPctValue => pnlPct ?? (cost > 0 ? pnl / cost * 100 : 0.0);
 }
 
 /// 持仓行：高亮显示持仓股数、成本价、浮盈/浮亏
@@ -310,7 +343,7 @@ class _PositionRow extends StatelessWidget {
           Text('$pnlSign${info.pnl.toStringAsFixed(0)}',
               style: TextStyle(color: pnlColor, fontSize: 13, fontWeight: FontWeight.bold)),
           const SizedBox(width: 6),
-          Text('$pnlSign${info.pnlPct.toStringAsFixed(2)}%',
+          Text('$pnlSign${info.pnlPctValue.toStringAsFixed(2)}%',
               style: TextStyle(color: pnlColor, fontSize: 12, fontWeight: FontWeight.w600)),
         ],
       ),
