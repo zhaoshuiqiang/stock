@@ -1382,13 +1382,19 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
       if (confirm != true) return;
 
+      debugPrint('Excel导入: 确认导入，开始清空现有数据');
+      
       // 批量添加到数据库（先清除现有数据）
       await _dbService.deleteAllPositions();
+      debugPrint('Excel导入: 已清空现有数据');
+      
       for (final pos in positions) {
         await _dbService.addPosition(pos);
+        debugPrint('Excel导入: 添加持仓 ${pos.code} ${pos.name} 数量=${pos.quantity} 成本=${pos.avgPrice}');
       }
 
       await _loadPositions();
+      debugPrint('Excel导入: 重新加载持仓，当前持仓数=${_positionMap.length}');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1659,13 +1665,19 @@ class WatchlistScreenState extends State<WatchlistScreen>
       final klineData = <String, List<HistoryKline>>{};
 
       for (final pos in _positionMap.values) {
-        if (pos.quantity <= 0) continue;
+        debugPrint('回测: 持仓 ${pos.code} ${pos.name} 数量=${pos.quantity}');
+        if (pos.quantity <= 0) {
+          debugPrint('回测: 持仓 ${pos.code} 数量为0，跳过');
+          continue;
+        }
 
         final prefixedCode = _apiClient.addMarketPrefix(pos.code);
+        debugPrint('回测: 获取 ${prefixedCode} 历史K线');
         final klines = await _apiClient.getStockHistory(
           prefixedCode,
           days: 180,
         );
+        debugPrint('回测: ${prefixedCode} 获取到 ${klines.length} 条K线数据');
 
         if (klines.length >= 60) {
           klineData[pos.code] = klines;
@@ -1673,6 +1685,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
       }
 
       if (klineData.isEmpty) {
+        debugPrint('回测: 无足够的历史数据进行回测');
         if (mounted) {
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
