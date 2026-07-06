@@ -85,10 +85,14 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
 
   /// 判断留档推荐的可靠性等级（4级）
   /// 
-  /// v2.59.0优化：非对称阈值，买入/卖出推荐要求方向正确才算合理
-  /// - 买入推荐：正收益才算"非常合理"，小跌(-1%以内)算"合理"，大跌算偏差
-  /// - 卖出推荐：负收益才算"非常合理"，小涨(+1%以内)算"合理"，大涨算偏差
-  /// - 观望推荐：价格波动小才算合理（保持不变）
+  /// v2.59.0优化：非对称阈值，严格要求方向正确才算合理
+  /// - 买入推荐：涨才算合理，跌就是偏差
+  ///   * 非常合理：涨幅 >= 阈值(如2%) - 方向正确且收益达标
+  ///   * 合理：涨幅 0% ~ 阈值 - 方向正确但收益未达标
+  ///   * 偏差：跌幅 0% ~ 阈值 - 方向错误但跌幅不大
+  ///   * 非常偏差：跌幅 > 阈值 - 方向错误且跌幅较大
+  /// - 卖出推荐：跌才算合理，涨就是偏差（对称反向）
+  /// - 观望推荐：价格波动小才算合理
   static ReliabilityLevel _getReliabilityLevel(ArchiveRecord record, double currentPrice) {
     if (currentPrice <= 0 || record.price <= 0) return ReliabilityLevel.reasonable;
 
@@ -100,29 +104,29 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
     final wasNeutral = record.recommendation.contains('观望');
 
     if (wasBuy) {
-      // 买入推荐：要求正收益才算非常合理
+      // 买入推荐：方向正确（涨）才算合理
       if (priceChangePct >= threshold) {
-        return ReliabilityLevel.veryReasonable; // +2%以上
-      } else if (priceChangePct >= -1.0) {
-        return ReliabilityLevel.reasonable; // -1%~+2%
+        return ReliabilityLevel.veryReasonable; // >= +2%：推荐正确且收益达标
+      } else if (priceChangePct >= 0) {
+        return ReliabilityLevel.reasonable; // 0% ~ +2%：推荐方向正确但收益不足
       } else if (priceChangePct >= -threshold) {
-        return ReliabilityLevel.deviation; // -2%~-1%
+        return ReliabilityLevel.deviation; // -2% ~ 0%：推荐方向错误，小幅亏损
       } else {
-        return ReliabilityLevel.veryDeviation; // <-2%
+        return ReliabilityLevel.veryDeviation; // < -2%：推荐方向错误，大幅亏损
       }
     } else if (wasSell) {
-      // 卖出推荐：要求负收益才算非常合理（对称逻辑）
+      // 卖出推荐：方向正确（跌）才算合理
       if (priceChangePct <= -threshold) {
-        return ReliabilityLevel.veryReasonable; // -2%以下
-      } else if (priceChangePct <= 1.0) {
-        return ReliabilityLevel.reasonable; // +1%~-2%
+        return ReliabilityLevel.veryReasonable; // <= -2%：推荐正确且跌幅达标
+      } else if (priceChangePct <= 0) {
+        return ReliabilityLevel.reasonable; // -2% ~ 0%：推荐方向正确但跌幅不足
       } else if (priceChangePct <= threshold) {
-        return ReliabilityLevel.deviation; // +2%~+1%
+        return ReliabilityLevel.deviation; // 0% ~ +2%：推荐方向错误，小幅上涨
       } else {
-        return ReliabilityLevel.veryDeviation; // >+2%
+        return ReliabilityLevel.veryDeviation; // > +2%：推荐方向错误，大幅上涨
       }
     } else if (wasNeutral) {
-      // 观望推荐：波动小才算合理（保持不变）
+      // 观望推荐：波动小才算合理
       if (priceChangePct.abs() < 0.5 * neutralThreshold) {
         return ReliabilityLevel.veryReasonable;
       } else if (priceChangePct.abs() <= neutralThreshold) {

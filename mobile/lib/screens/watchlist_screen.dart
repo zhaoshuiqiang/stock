@@ -1181,35 +1181,79 @@ class WatchlistScreenState extends State<WatchlistScreen>
       final excel = Excel.decodeBytes(bytes);
 
       final positions = <Position>[];
-      final sheet = excel.tables[excel.tables.keys.first];
+      final tableKeys = excel.tables.keys.toList();
+      if (tableKeys.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Excel文件中未找到工作表')),
+          );
+        }
+        return;
+      }
+
+      final sheet = excel.tables[tableKeys.first];
       if (sheet == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Excel文件解析失败')),
+            const SnackBar(content: Text('Excel工作表解析失败')),
           );
         }
         return;
       }
 
       final rows = sheet.rows;
-      if (rows == null || rows.length < 8) {
+      if (rows == null || rows.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Excel文件格式不正确或数据为空')),
+            const SnackBar(content: Text('Excel文件为空')),
           );
         }
         return;
       }
 
-      // 跳过前6行元信息，第7行是表头，第8行开始是数据
-      for (var rowIndex = 7; rowIndex < rows.length; rowIndex++) {
-        final row = rows[rowIndex];
-        if (row.length < 5) continue;
+      debugPrint('Excel导入: 总行数=${rows.length}');
 
-        final code = row[0]?.value?.toString() ?? '';
-        final name = row[1]?.value?.toString() ?? '';
-        final quantityStr = row[2]?.value?.toString() ?? '0';
-        final avgPriceStr = row[5]?.value?.toString() ?? '0';
+      // 查找表头行（包含"证券代码"的行）
+      int headerRowIndex = -1;
+      for (var i = 0; i < rows.length; i++) {
+        final row = rows[i];
+        if (row.isNotEmpty) {
+          final firstCell = row[0]?.value?.toString() ?? '';
+          if (firstCell.contains('证券代码') || firstCell.contains('代码')) {
+            headerRowIndex = i;
+            break;
+          }
+        }
+      }
+
+      if (headerRowIndex == -1) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('未找到表头行（证券代码）')),
+          );
+        }
+        return;
+      }
+
+      debugPrint('Excel导入: 表头行索引=$headerRowIndex');
+
+      // 从表头下一行开始读取数据
+      for (var rowIndex = headerRowIndex + 1; rowIndex < rows.length; rowIndex++) {
+        final row = rows[rowIndex];
+        if (row == null || row.isEmpty) continue;
+
+        // 获取单元格值，处理不同类型
+        final codeCell = row.length > 0 ? row[0] : null;
+        final nameCell = row.length > 1 ? row[1] : null;
+        final quantityCell = row.length > 2 ? row[2] : null;
+        final avgPriceCell = row.length > 5 ? row[5] : null;
+
+        final code = _parseCellValue(codeCell);
+        final name = _parseCellValue(nameCell);
+        final quantityStr = _parseCellValue(quantityCell);
+        final avgPriceStr = _parseCellValue(avgPriceCell);
+
+        debugPrint('Excel导入: 行$rowIndex code=$code name=$name qty=$quantityStr price=$avgPriceStr');
 
         if (code.isEmpty || name.isEmpty) continue;
 
@@ -1229,15 +1273,28 @@ class WatchlistScreenState extends State<WatchlistScreen>
       if (positions.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('未找到有效的持仓数据')),
+            const SnackBar(content: Text('未找到有效的持仓数据（数量>0且成本价>0）')),
           );
         }
         return;
       }
 
-      // 批量添加到数据库
+      // 批量添加到数据库（存在则更新）
       for (final pos in positions) {
-        await _dbService.addPosition(pos);
+        final existing = _positionMap[pos.code];
+        if (existing != null) {
+          await _dbService.updatePosition(Position(
+            id: existing.id,
+            code: pos.code,
+            name: pos.name,
+            quantity: pos.quantity,
+            avgPrice: pos.avgPrice,
+            notes: existing.notes,
+            createdAt: existing.createdAt,
+          ));
+        } else {
+          await _dbService.addPosition(pos);
+        }
       }
 
       await _loadPositions();
@@ -1248,12 +1305,24 @@ class WatchlistScreenState extends State<WatchlistScreen>
         );
       }
     } catch (e) {
+      debugPrint('Excel导入失败: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('导入失败: $e')),
         );
       }
     }
+  }
+
+  String _parseCellValue(dynamic cell) {
+    if (cell == null) return '';
+    if (cell is String) return cell.trim();
+    if (cell is num) return cell.toString();
+    final value = cell.value;
+    if (value == null) return '';
+    if (value is String) return value.trim();
+    if (value is num) return value.toString();
+    return value.toString().trim();
   }
 
   Future<void> _analyzePortfolio() async {
