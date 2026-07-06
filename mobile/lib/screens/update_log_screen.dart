@@ -10,7 +10,7 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
-        'version': 'v2.60.0',
+        'version': 'v3.0.20260706',
         'date': '2026-07-06',
         'changes': [
           '修复持仓Excel导入解析问题，支持动态表头识别',
