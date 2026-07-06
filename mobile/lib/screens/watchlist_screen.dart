@@ -870,7 +870,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
             context,
             MaterialPageRoute(
               builder: (context) => QuoteScreen(
-                code: pos.code,
+                code: _apiClient.addMarketPrefix(pos.code),
                 name: pos.name,
               ),
             ),
@@ -1882,7 +1882,20 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   avgPrice: avgPrice,
                 );
 
-                await _dbService.addPosition(position);
+                final existing = _positionMap[code];
+                if (existing != null) {
+                  await _dbService.updatePosition(Position(
+                    id: existing.id,
+                    code: position.code,
+                    name: position.name,
+                    quantity: position.quantity,
+                    avgPrice: position.avgPrice,
+                    notes: existing.notes,
+                    createdAt: existing.createdAt,
+                  ));
+                } else {
+                  await _dbService.addPosition(position);
+                }
                 await _loadPositions();
 
                 if (mounted) {
