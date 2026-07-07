@@ -141,13 +141,14 @@ class ComprehensiveScorer {
 
     // v2.48.0: 近期价格趋势一致性校验 — 技术面看多但近期价格下跌时降低评分
     // 防止均线多头但近期持续下跌的股票获得虚高评分
+    // v3.2: 加强惩罚力度 0.85→0.70 / 0.92→0.82（留档数据分析：-5%以上下跌时原惩罚不够）
     double trendConsistencyFactor = 1.0;
     if (data != null && data.length >= 3 && adjustedScore >= 5.5) {
       final recentChange = (data.last.close - data[data.length - 3].close) / data[data.length - 3].close * 100;
       if (recentChange < -5) {
-        trendConsistencyFactor = 0.85;
+        trendConsistencyFactor = 0.70;
       } else if (recentChange < -3) {
-        trendConsistencyFactor = 0.92;
+        trendConsistencyFactor = 0.82;
       }
     }
 
@@ -162,6 +163,17 @@ class ComprehensiveScorer {
       if (heatDiscount < 1.0) {
         temperedScore *= heatDiscount;
       }
+    }
+
+    // v3.2: 大盘下跌联动折扣 — 指数跌>1%时整体-1分，降低熊市日的虚假买入信号
+    if (marketContext != null && marketContext.avgChangePct < -1.0 &&
+        quote != null && !isSTStock(quote.name)) {
+      temperedScore = (temperedScore - 1.0).clamp(1.0, 10.0);
+    }
+
+    // v3.2: 金融板块Beta折扣 — 券商/银行/保险股评分×0.88（高Beta行业大盘联动风险大）
+    if (quote != null && _isHighBetaFinance(quote.name)) {
+      temperedScore *= 0.88;
     }
 
     // ST股票封顶：最高"偏多观望"，防止推荐高风险标的
@@ -231,5 +243,12 @@ class ComprehensiveScorer {
       }
     }
     return count;
+  }
+
+  /// v3.2: 高Beta金融板块检测 — 券商/银行/保险股与大盘高度联动
+  static bool _isHighBetaFinance(String name) {
+    return name.contains('证券') ||
+           name.contains('银行') ||
+           name.contains('保险');
   }
 }
