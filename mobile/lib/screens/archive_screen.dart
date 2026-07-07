@@ -67,9 +67,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
 
   void _startAutoRefresh() {
     _refreshTimer = Timer.periodic(const Duration(seconds: 60), (_) {
-      if (TradingSession.isInTradingSession()) {
-        _refreshCurrentPrices();
-      }
+      _refreshCurrentPrices();
     });
   }
 
@@ -77,9 +75,12 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
     final archives = await _dbService.getArchives();
     setState(() {
       _archives = archives;
-      _isLoading = false;
     });
-    _refreshCurrentPrices();
+    // v3.2: 等待行情数据加载完毕再渲染，避免初始状态全部显示"合理"
+    await _refreshCurrentPrices();
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
   }
 
   /// 计算时间自适应阈值
