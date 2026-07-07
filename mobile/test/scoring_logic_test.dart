@@ -547,11 +547,11 @@ void main() {
       expect(r.recommendation, equals('强烈卖出'));
     });
 
-    test('adjustedScore=2.5 maps to totalScore=2 (卖出)', () {
-      // v2.38: 加回 0.97 系数后，2.5×0.97=2.425→round=2（卖出）
-      final r = _scoreAll(2.5); // round=2
-      expect(r.totalScore, equals(2));
-      expect(r.recommendation, equals('卖出'));
+    test('adjustedScore=2.5 maps to totalScore=3 (谨慎卖出)', () {
+      // v3.2: 移除0.97温和系数后，2.5→round=3（谨慎卖出），评分更直接透明
+      final r = _scoreAll(2.5); // round=3
+      expect(r.totalScore, equals(3));
+      expect(r.recommendation, equals('谨慎卖出'));
     });
 
     test('ST stock adjustedScore=4.73 maps to totalScore<=5 (偏多观望 or 谨慎卖出)', () {

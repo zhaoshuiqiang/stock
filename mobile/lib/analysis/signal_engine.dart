@@ -450,6 +450,18 @@ AnalysisResult generateAnalysis(
   );
 
   // 13. 详细推荐理由（增强版：含市场结构/策略/回测/置信度上下文）
+  // v3.2: 提前计算维度评分用于评分贡献明细展示
+  final dimensionScores = <String, double>{
+    '技术面': techResult.totalScore,
+    '资金面': capitalFlowScore ?? 5.0,
+    '实时行情': realtimeScore,
+    '共振': confluenceResult.score,
+    '情绪': compResult.newsSentiment != null
+        ? (compResult.newsSentiment!.score + 10) / 2
+        : 5.0,
+    '基本面': compResult.fundamentalScore?.totalScore ?? 5.0,
+    '结构': marketStructure.structureScore,
+  };
   final reasons = _generateReasons(
     buySignals, sellSignals, last, quote,
     totalScore: totalScore,
@@ -460,6 +472,7 @@ AnalysisResult generateAnalysis(
       ...longTermStrategies,
     ],
     confidenceScore: confidenceScore,
+    dimensionScores: dimensionScores,
   );
 
   // 13a. 历史决策反思注入（v2.53: 决策反馈闭环）
@@ -599,6 +612,7 @@ AnalysisResult generateAnalysis(
     marketStructure: marketStructure,
     percentile: percentile,
     limitUpAnalysis: limitUpAnalysis,
+    dimensionScores: dimensionScores,
   );
 }
 
@@ -614,6 +628,7 @@ List<String> _generateReasons(
   List<TradingStrategy>? activeStrategies,
   double confidenceScore = 0.5,
   List<Map<String, dynamic>> historicalReflections = const [],
+  Map<String, double>? dimensionScores,
 }) {
   final reasons = <String>[];
   final buyCount = buySignals.length;
@@ -684,6 +699,22 @@ List<String> _generateReasons(
       reasons.add('多维度确认信号可靠性较高(置信度${(confidenceScore * 100).toStringAsFixed(0)}%)');
     } else if (confidenceScore < 0.5) {
       reasons.add('综合置信度偏低(${(confidenceScore * 100).toStringAsFixed(0)}%)，建议轻仓或观望');
+    }
+  }
+
+  // --- v3.2: 评分贡献明细 ---
+  if (dimensionScores != null && dimensionScores.isNotEmpty) {
+    final entries = dimensionScores.entries
+        .where((e) => (e.value - 5.0).abs() > 0.01) // 容差过滤中性值
+        .toList()
+      ..sort((a, b) => (a.value - 5).abs().compareTo((b.value - 5).abs())); // 按偏离度排序（影响大的排前面）
+    if (entries.isNotEmpty) {
+      final parts = entries.map((e) {
+        final diff = e.value - 5;
+        final arrow = diff > 0 ? '↑' : '↓';
+        return '${e.key}$arrow${diff.abs().toStringAsFixed(1)}';
+      }).join(' | ');
+      reasons.add('评分贡献: $parts');
     }
   }
 

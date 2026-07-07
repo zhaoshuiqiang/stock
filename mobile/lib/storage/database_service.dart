@@ -37,7 +37,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 16,
+      version: 18,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -329,10 +329,28 @@ class DatabaseService {
             );
             debugPrint('[DB] v15→v16: created position_daily_snapshot table');
           }
+          if (oldVersion < 17) {
+            // v3.2: 推荐追踪表增加维度评分JSON字段（用于动态权重优化）
+            await txn.execute(
+              "ALTER TABLE recommendation_tracking ADD COLUMN dimension_scores_json TEXT DEFAULT ''"
+            );
+            debugPrint('[DB] v16→v17: added dimension_scores_json column to recommendation_tracking');
+          }
+          if (oldVersion < 18) {
+            // v3.2: 推荐反馈机制 — 用户可对推荐结果给出好评/差评
+            await txn.execute(
+              "ALTER TABLE recommendation_tracking ADD COLUMN feedback TEXT DEFAULT ''"
+            );
+          }
           // 索引补建（幂等，保证升级路径和新装路径都有）
           await txn.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
           await txn.execute('CREATE INDEX IF NOT EXISTS idx_alerts_code ON alerts(code)');
           await txn.execute('CREATE INDEX IF NOT EXISTS idx_limit_up_pool_code ON limit_up_pool(code)');
+          // v3.2: 性能优化 — 为高频查询列添加索引
+          await txn.execute('CREATE INDEX IF NOT EXISTS idx_archive_records_code ON archive_records(code)');
+          await txn.execute('CREATE INDEX IF NOT EXISTS idx_archive_records_archived_at ON archive_records(archived_at)');
+          await txn.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_date ON recommendation_tracking(signal_date)');
+          await txn.execute('CREATE INDEX IF NOT EXISTS idx_explore_results_score ON explore_results(score)');
         });
       },
     );
@@ -466,7 +484,9 @@ class DatabaseService {
         is_closed INTEGER DEFAULT 0,
         reflection TEXT DEFAULT '',
         alpha_vs_market REAL,
-        confidence_adjustment TEXT DEFAULT ''
+        confidence_adjustment TEXT DEFAULT '',
+        dimension_scores_json TEXT DEFAULT '',
+        feedback TEXT DEFAULT ''
       )
     ''');
 
@@ -539,6 +559,11 @@ class DatabaseService {
     await db.execute('CREATE INDEX IF NOT EXISTS idx_limit_up_pool_code ON limit_up_pool(code)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_alerts_code ON alerts(code)');
+    // v3.2: 性能优化 — 为高频查询列添加索引
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_archive_records_code ON archive_records(code)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_archive_records_archived_at ON archive_records(archived_at)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_date ON recommendation_tracking(signal_date)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_explore_results_score ON explore_results(score)');
   }
 
   Future<void> addToWatchlist(String code, String name) async {
@@ -1026,6 +1051,29 @@ class DatabaseService {
     await db.update('recommendation_tracking',
       {'is_closed': 1},
       where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// v3.2: 用户反馈 — 更新推荐的可信度评价
+  /// [feedback] 值为 'helpful' / 'not_helpful' / '' (清除)
+  Future<void> updateRecommendationFeedback(int id, String feedback) async {
+    final db = await database;
+    await db.update('recommendation_tracking',
+      {'feedback': feedback},
+      where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// v3.2: 获取推荐反馈统计（用于权重优化）
+  Future<Map<String, int>> getFeedbackStats() async {
+    final db = await database;
+    final helpful = Sqflite.firstIntValue(await db.rawQuery(
+      "SELECT COUNT(*) FROM recommendation_tracking WHERE feedback = 'helpful'"));
+    final notHelpful = Sqflite.firstIntValue(await db.rawQuery(
+      "SELECT COUNT(*) FROM recommendation_tracking WHERE feedback = 'not_helpful'"));
+    return {
+      'helpful': helpful ?? 0,
+      'not_helpful': notHelpful ?? 0,
+      'total': (helpful ?? 0) + (notHelpful ?? 0),
+    };
   }
 
   Future<void> clearOldRecommendations({int days = 90}) async {

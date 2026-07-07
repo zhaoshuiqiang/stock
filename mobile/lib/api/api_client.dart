@@ -12,10 +12,24 @@ import '../validators/data_validator.dart';
 class ApiClient {
   http.Client _client = http.Client();
   HttpClient? _fallbackClient;
-  final Map<String, dynamic> _cache = {};
-  final Duration _cacheDuration = const Duration(minutes: 5);
-  final Map<String, Future> _inFlightRequests = {};
-  static const int _maxCacheSize = 100;
+  // v3.2: 改为静态缓存以跨ApiClient实例共享（每个Screen独立新建ApiClient）
+  // Key prefix → stored type mapping:
+  //   search_*           → List<StockInfo>
+  //   quote_*            → QuoteData
+  //   history_*          → List<HistoryKline>
+  //   flow_*             → (deprecated)
+  //   sector_stocks_*    → List<QuoteData>
+  //   batch_quotes_*     → List<QuoteData>
+  //   hot_sectors        → List<SectorInfo>
+  //   market_sentiment   → MarketSentiment
+  //   global_indices     → List<GlobalIndex>
+  //   market_news        → List<dynamic>
+  //   stock_news_*       → List<dynamic>
+  static final Map<String, dynamic> _cache = {};
+  static final Duration _cacheDuration = const Duration(minutes: 5);
+  // v3.2: 静态in-flight追踪防止重复并发请求
+  static final Map<String, Future> _inFlightRequests = {};
+  static const int _maxCacheSize = 200;
   bool _disposed = false;
 
   /// 重建HTTP客户端（连接池失效时调用）
@@ -635,7 +649,7 @@ class ApiClient {
     try {
       final tdxResult = await _fetchStockHistoryFromTDX(code, days);
       if (tdxResult.isNotEmpty) {
-        _setCached(cacheKey, tdxResult, duration: const Duration(seconds: 60));
+        _setCached(cacheKey, tdxResult, duration: _klineCacheDuration());
         return tdxResult;
       }
     } catch (e) {
@@ -1946,7 +1960,19 @@ class ApiClient {
     _disposed = true;
     _client.close();
     _fallbackClient?.close();
-    _cache.clear();
-    _inFlightRequests.clear();
+    // v3.2: 不清理静态缓存，所有ApiClient实例共享
+  }
+
+  /// v3.2: K线缓存TTL策略 — 交易时段短(2min)，非交易时段长(10min)
+  static Duration _klineCacheDuration() {
+    final now = DateTime.now();
+    final isWeekday = now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
+    if (!isWeekday) return const Duration(minutes: 10);
+    final totalMinutes = now.hour * 60 + now.minute;
+    // A股交易时段: 9:30-15:00, 盘前9:15-9:30
+    if (totalMinutes >= 9 * 60 + 15 && totalMinutes <= 15 * 60 + 5) {
+      return const Duration(minutes: 2); // 盘中：今日K线持续更新
+    }
+    return const Duration(minutes: 10); // 盘后/盘前：当日数据已冻结
   }
 }

@@ -18,6 +18,17 @@ class ComprehensiveScoreResult {
 }
 
 class ComprehensiveScorer {
+  /// 7维权重常量（v2.37 评审微调）
+  /// 技术面33% + 资金面18% + 实时16% + 共振12% + 情绪10% + 基本面7% + 结构4%
+  /// 评分解释页和 combine() 共用，确保展示与实际计算一致
+  static const double techWeight = 0.33;
+  static const double capWeight = 0.18;
+  static const double realWeight = 0.16;
+  static const double confWeight = 0.12;
+  static const double sentWeight = 0.10;
+  static const double fundWeight = 0.07;
+  static const double structWeight = 0.04;
+
   /// 精确ST检测（避免EAST/WEST等误判）
   static bool isSTStock(String name) => name.startsWith('ST') || name.startsWith('*ST');
 
@@ -41,6 +52,7 @@ class ComprehensiveScorer {
     FundamentalScore? fundamentalScore;
     double fundamentalScoreValue = 5.0;
     if (quote != null && quote.price > 0) {
+      // TODO: Pass ROE from QuoteData once EastMoney ROE data source is integrated
       fundamentalScore = FundamentalAnalyzer.analyze(quote);
       fundamentalScoreValue = fundamentalScore.totalScore;
     }
@@ -60,7 +72,7 @@ class ComprehensiveScorer {
     //        降低基本面/结构权重，提升技术/资金/实时/情绪权重，使评分与留档胜率评估周期匹配
     // v2.37: 评分评审后微调 — 结构2%→4%(ADX/MA布局对短线择时影响显著)，
     //        基本面5%→7%(避免极端高估低估个股被短线信号掩盖)，技术35%→33%、实时18%→16%(等比例让出)
-    double techW=0.33, capW=0.18, realW=0.16, confW=0.12, sentW=0.10, fundW=0.07, structW=0.04;
+    double techW=techWeight, capW=capWeight, realW=realWeight, confW=confWeight, sentW=sentWeight, fundW=fundWeight, structW=structWeight;
     final hasFund = fundamentalScore != null, hasSent = newsSentiment != null, hasCapital = capitalFlowScore != null;
     if (!hasFund && !hasSent && !hasCapital) { techW=0.50; realW=0.25; confW=0.18; structW=0.07; capW=sentW=fundW=0; }
     else if (!hasFund && !hasSent) { techW=0.40; capW=0.22; realW=0.19; confW=0.14; structW=0.05; sentW=fundW=0; }
@@ -139,10 +151,10 @@ class ComprehensiveScorer {
       }
     }
 
-    // v2.38.0: 加回温和系数0.97，减少borderline评分过度集中在6分（谨慎买入）
-    //          之前移除0.95后，5.5→6、6.5→7，导致6分股票过多（89只/204只）
-    //          使用0.97而非0.95，平衡评分分布和真实度：5.5→5.335→5，6.5→6.305→6
-    var temperedScore = adjustedScore * trendConsistencyFactor * 0.97;
+    // v3.2: 移除温和系数0.97 — 评分应当直接反映真实计算结果
+    //          之前温和系数导致评分偏移（6.5→6.3→6），降低了评分透明度
+    //          如果要控制评分分布，应在权重层面调整而非后处理压缩
+    var temperedScore = adjustedScore * trendConsistencyFactor;
 
     // v2.38.0: 板块情绪过热检测 — 过热板块个股评分乘以0.85折扣
     if (sectorName != null && sectorAnalysis != null && sectorAnalysis.isNotEmpty) {

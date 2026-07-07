@@ -2,9 +2,11 @@ import '../models/stock_models.dart';
 
 /// 基本面分析器 - 参考 TradingAgents Fundamental Analyst
 /// 利用 QuoteData 中的 PE/PB/主力资金/市值/换手率构建基本面评分
+/// v3.2: 新增 ROE 因子，提升基本面分析覆盖度
 class FundamentalAnalyzer {
   /// 分析基本面评分
-  static FundamentalScore analyze(QuoteData quote) {
+  /// [roe] 净资产收益率(%)，可选参数，有值则纳入评分
+  static FundamentalScore analyze(QuoteData quote, {double? roe}) {
     final factors = <String>[];
 
     // 1. 估值评分 (0-10): PE + PB
@@ -23,7 +25,19 @@ class FundamentalAnalyzer {
       factors.add('PB=${quote.pb.toStringAsFixed(2)}偏高，溢价较大');
     }
 
-    // 2. 资金评分 (0-10): 主力净流入率
+    // 2. 盈利能力评分 (0-10): ROE（新增v3.2）
+    final roeScore = _scoreROE(roe);
+    if (roe != null) {
+      if (roe > 20) {
+        factors.add('ROE=${roe.toStringAsFixed(1)}%，盈利能力优异');
+      } else if (roe > 10) {
+        factors.add('ROE=${roe.toStringAsFixed(1)}%，盈利能力良好');
+      } else if (roe < 5) {
+        factors.add('ROE=${roe.toStringAsFixed(1)}%，盈利能力偏弱');
+      }
+    }
+
+    // 3. 资金评分 (0-10): 主力净流入率
     final capitalFlowScore = _scoreCapitalFlow(quote.mainNetFlowRate);
 
     if (quote.mainNetFlowRate > 5) {
@@ -32,7 +46,7 @@ class FundamentalAnalyzer {
       factors.add('主力净流入率${quote.mainNetFlowRate.toStringAsFixed(1)}%，资金持续流出');
     }
 
-    // 3. 流动性评分 (0-10): 换手率
+    // 4. 流动性评分 (0-10): 换手率
     final liquidityScore = _scoreLiquidity(quote.turnover);
 
     if (quote.turnover >= 1 && quote.turnover <= 5) {
@@ -43,10 +57,18 @@ class FundamentalAnalyzer {
       factors.add('换手率${quote.turnover.toStringAsFixed(1)}%，流动性不足');
     }
 
-    // 总分: 估值40% + 资金35% + 流动性25%
-    final totalScore = (valuationScore * 0.40 +
-        capitalFlowScore * 0.35 +
-        liquidityScore * 0.25).clamp(0.0, 10.0);
+    // 总分: 有ROE时 估值35%+盈利15%+资金30%+流动性20%，无ROE时估值40%+资金35%+流动性25%
+    double totalScore;
+    if (roe != null) {
+      totalScore = (valuationScore * 0.35 +
+          roeScore * 0.15 +
+          capitalFlowScore * 0.30 +
+          liquidityScore * 0.20).clamp(0.0, 10.0);
+    } else {
+      totalScore = (valuationScore * 0.40 +
+          capitalFlowScore * 0.35 +
+          liquidityScore * 0.25).clamp(0.0, 10.0);
+    }
 
     return FundamentalScore(
       valuationScore: valuationScore,
@@ -55,6 +77,19 @@ class FundamentalAnalyzer {
       totalScore: totalScore,
       factors: factors,
     );
+  }
+
+  /// ROE 盈利能力评分（新增v3.2）
+  static double _scoreROE(double? roe) {
+    if (roe == null) return 5.0;
+    if (roe < 0) return 1.0;       // 亏损
+    if (roe < 3) return 2.5;       // 极低盈利
+    if (roe < 5) return 3.5;       // 低盈利
+    if (roe < 8) return 5.0;       // 一般
+    if (roe < 12) return 6.0;      // 良好
+    if (roe < 20) return 7.5;      // 优秀
+    if (roe < 30) return 8.5;      // 卓越
+    return 9.5;                     // 顶级盈利（巴菲特标准：连续>20%）
   }
 
   /// PE评分

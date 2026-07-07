@@ -8,6 +8,7 @@ import 'ai_layer.dart';
 
 /// 推荐快照 - 用于追踪推荐信号的实际表现
 /// v2.53: 增加反思存储和Alpha计算字段（决策反馈闭环）
+/// v3.2: 增加用户反馈字段（推荐反馈闭环）
 class RecommendationSnapshot {
   final int? id;
   final String code;
@@ -25,6 +26,7 @@ class RecommendationSnapshot {
   final String? reflection;
   final double? alphaVsMarket;
   final String? confidenceAdjustment;
+  final String? feedback;
 
   RecommendationSnapshot({
     this.id,
@@ -43,6 +45,7 @@ class RecommendationSnapshot {
     this.reflection,
     this.alphaVsMarket,
     this.confidenceAdjustment,
+    this.feedback,
   });
 
   factory RecommendationSnapshot.fromMap(Map<String, dynamic> map) {
@@ -63,6 +66,7 @@ class RecommendationSnapshot {
       reflection: map['reflection'] as String? ?? '',
       alphaVsMarket: (map['alpha_vs_market'] as num?)?.toDouble(),
       confidenceAdjustment: map['confidence_adjustment'] as String? ?? '',
+      feedback: map['feedback'] as String? ?? '',
     );
   }
 
@@ -87,6 +91,7 @@ class RecommendationSnapshot {
       'reflection': reflection ?? '',
       'alpha_vs_market': alphaVsMarket,
       'confidence_adjustment': confidenceAdjustment ?? '',
+      'feedback': feedback ?? '',
     };
   }
 }
@@ -359,6 +364,19 @@ class RecommendationTracker {
       where: 'id = ?',
       whereArgs: [snapshotId],
     );
+  }
+
+  /// v3.2: 用户反馈 — 用户对推荐结果的评价
+  /// [feedback] 值为 'helpful' / 'not_helpful'
+  Future<void> submitFeedback(int snapshotId, String feedback) async {
+    if (!_initialized) await init();
+    await _dbService.updateRecommendationFeedback(snapshotId, feedback);
+  }
+
+  /// v3.2: 获取反馈统计
+  Future<Map<String, int>> getFeedbackStats() async {
+    if (!_initialized) await init();
+    return _dbService.getFeedbackStats();
   }
 
   /// 计算相对大盘Alpha
