@@ -868,6 +868,9 @@ class AnalysisResult {
   // 打板分析 (Phase 激活孤儿模块)
   final LimitUpAnalysis? limitUpAnalysis;             // 涨停/连板分析结果
 
+  /// 7维评分明细（雷达图数据）：技术/资金/实时/共振/情绪/基本面/结构，各0-10分
+  final Map<String, double>? dimensionScores;
+
   AnalysisResult({
     this.quote,
     this.indicators = const {},
@@ -897,6 +900,7 @@ class AnalysisResult {
     this.conceptTags,
     this.percentile,
     this.limitUpAnalysis,
+    this.dimensionScores,
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {
