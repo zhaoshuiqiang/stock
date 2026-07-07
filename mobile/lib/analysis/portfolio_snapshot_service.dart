@@ -67,12 +67,11 @@ class PortfolioSnapshotService {
 
         final cost = pos.quantity * pos.avgPrice;
         final marketValue = pos.quantity * currentPrice;
-        final pnl = pos.floatPnl != 0 ? pos.floatPnl : (marketValue - cost);
-        final dayPnl = pos.todayPnl != 0
-            ? pos.todayPnl
-            : (quote.preClose > 0
-                ? pos.quantity * (currentPrice - quote.preClose)
-                : 0.0);
+        // v3.2: 始终从实时行情计算盈亏，不使用DB中可能过期的存储值
+        final pnl = marketValue - cost;
+        final dayPnl = quote.preClose > 0
+            ? pos.quantity * (currentPrice - quote.preClose)
+            : 0.0;
 
         totalCost += cost;
         totalMarketValue += marketValue;

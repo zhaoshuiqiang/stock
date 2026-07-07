@@ -908,23 +908,22 @@ class WatchlistScreenState extends State<WatchlistScreen>
         (q) => q.code.endsWith(pos.code),
         orElse: () => QuoteData.empty(),
       );
+      // v3.2: 始终从实时行情计算盈亏，不使用DB中可能过期的存储值
       final currentPrice = quote.price > 0 ? quote.price : (pos.latestPrice > 0 ? pos.latestPrice : pos.avgPrice);
       final cost = pos.quantity * pos.avgPrice;
-      final marketValue = pos.marketValue > 0 ? pos.marketValue : (pos.quantity * currentPrice);
-
-      final pnl = pos.floatPnl != 0 ? pos.floatPnl : (marketValue - cost);
-      final todayPnl = pos.todayPnl != 0 ? pos.todayPnl : (quote.preClose > 0
+      final marketValue = pos.quantity * currentPrice;
+      final pnl = marketValue - cost;
+      final todayPnl = quote.preClose > 0
           ? pos.quantity * (currentPrice - quote.preClose)
-          : 0.0);
+          : 0.0;
 
       totalCost += cost;
       totalMarketValue += marketValue;
       totalPnl += pnl;
       totalTodayPnl += todayPnl;
 
-      if (pos.todayPnl != 0) {
-        totalYesterdayMarketValue += (marketValue - todayPnl);
-      } else if (quote.preClose > 0) {
+      // v3.2: 始终用实时行情计算昨日市值（todayPnl 为实时计算值）
+      if (quote.preClose > 0) {
         totalYesterdayMarketValue += pos.quantity * quote.preClose;
       } else {
         totalYesterdayMarketValue += (marketValue - todayPnl);
@@ -1206,18 +1205,19 @@ class WatchlistScreenState extends State<WatchlistScreen>
   Widget _buildPositionCard(Position pos, QuoteData quote, OpportunityResult? opp) {
     final currentPrice = quote.price > 0 ? quote.price : (pos.latestPrice > 0 ? pos.latestPrice : pos.avgPrice);
 
-    final pnl = pos.floatPnl != 0 ? pos.floatPnl : (currentPrice - pos.avgPrice) * pos.quantity;
-    final pnlPct = pos.pnlPct != 0 ? pos.pnlPct : (pos.avgPrice > 0
+    // v3.2: 始终从实时行情计算盈亏，不使用DB中可能过期的存储值
+    final pnl = (currentPrice - pos.avgPrice) * pos.quantity;
+    final pnlPct = pos.avgPrice > 0
         ? ((currentPrice - pos.avgPrice) / pos.avgPrice * 100)
-        : 0.0);
+        : 0.0;
     final pnlColor = pnl >= 0 ? _upColor : _downColor;
 
-    final todayPnl = pos.todayPnl != 0 ? pos.todayPnl : (quote.preClose > 0
+    final todayPnl = quote.preClose > 0
         ? pos.quantity * (currentPrice - quote.preClose)
-        : 0.0);
-    final todayPnlPct = pos.todayPnlPct != 0 ? pos.todayPnlPct : (quote.preClose > 0 && quote.price > 0
+        : 0.0;
+    final todayPnlPct = quote.preClose > 0 && quote.price > 0
         ? (currentPrice - quote.preClose) / quote.preClose * 100
-        : 0.0);
+        : 0.0;
     final todayPnlColor = todayPnl >= 0 ? _upColor : _downColor;
 
     final holdingDays = pos.buyDate != null
