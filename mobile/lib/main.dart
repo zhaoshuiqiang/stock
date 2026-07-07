@@ -100,6 +100,7 @@ class _MyAppState extends State<MyApp> {
   int _currentIndex = 0;
   final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
   final GlobalKey<DiscoverScreenState> _discoverKey = GlobalKey<DiscoverScreenState>();
+  final GlobalKey<ArchiveScreenState> _archiveKey = GlobalKey<ArchiveScreenState>();
   late final List<Widget> _pages;
 
   @override
@@ -110,7 +111,7 @@ class _MyAppState extends State<MyApp> {
       const WatchlistScreen(),
       DiscoverScreen(key: _discoverKey),
       const NewsScreen(),
-      const ArchiveScreen(),
+      ArchiveScreen(key: _archiveKey),
     ];
   }
 
@@ -125,6 +126,10 @@ class _MyAppState extends State<MyApp> {
     // 切回发现时刷新自选状态
     if (index == 2) {
       _discoverKey.currentState?.onTabVisible();
+    }
+    // 切回留档时刷新数据
+    if (index == 4) {
+      _archiveKey.currentState?.onTabVisible();
     }
   }
 
