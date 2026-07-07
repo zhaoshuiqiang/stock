@@ -519,30 +519,56 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
       // 添加 BOM 防止 Excel 打开 CSV 时中文乱码
       final csvContent = '\uFEFF${lines.join('\n')}';
 
-      final dir = await getTemporaryDirectory();
       final stamp = DateFormat('yyyyMMdd_HHmmss').format(now);
-      final file = File('${dir.path}/archive_export_$stamp.csv');
-      await file.writeAsString(csvContent);
+      final fileName = 'archive_export_$stamp.csv';
+
+      // 保存到临时目录（供分享使用）
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File('${tempDir.path}/$fileName');
+      await tempFile.writeAsString(csvContent);
+
+      // v3.2: 同时保存到应用文档目录，确保即使分享失败也能找到文件
+      final docDir = await getApplicationDocumentsDirectory();
+      final docFile = File('${docDir.path}/$fileName');
+      await docFile.writeAsString(csvContent);
 
       if (!mounted) return;
       Navigator.pop(context); // 关闭 loading
 
       // 使用 share_plus 分享文件
-      final shareResult = await Share.shareXFiles(
-        [XFile(file.path)],
-        subject: '留档数据导出 ($stamp)',
-      );
+      try {
+        await Share.shareXFiles(
+          [XFile(tempFile.path)],
+          subject: '留档数据导出 ($stamp)',
+        );
+      } catch (_) {
+        // 分享失败：文件已保存在文档目录，提示用户手动取用
+      }
 
-      if (mounted && shareResult.status == ShareResultStatus.unavailable) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('分享功能不可用，请检查系统分享组件')),
+          SnackBar(
+            content: Text('已导出 $fileName (${_archives.length}条)'),
+            action: SnackBarAction(
+              label: '查看路径',
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(docFile.path, style: const TextStyle(fontSize: 12)),
+                    duration: const Duration(seconds: 8),
+                  ),
+                );
+              },
+            ),
+            duration: const Duration(seconds: 5),
+          ),
         );
       }
     } catch (e) {
       if (!mounted) return;
       Navigator.pop(context); // 关闭 loading
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导出失败: $e')),
+        SnackBar(content: Text('导出失败: ${e.toString().length > 50 ? '${e.toString().substring(0, 50)}...' : e}')),
       );
     }
   }
