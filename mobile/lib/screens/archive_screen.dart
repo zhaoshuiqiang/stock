@@ -98,24 +98,25 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
   /// 判断留档推荐的可靠性等级（4级）
   /// 
   /// 全新设计（v3.0）：更加直观的评价体系
+  /// v3.2: 阈调整 — ±3%→±2%，使四类评级在正常行情日都能出现
   /// 
   /// 买入推荐：
-  ///   * 非常合理（绿）：涨幅 ≥ +3% → 推荐正确且收益显著
-  ///   * 合理（橙）：涨幅 +0.5% ~ +3% → 方向正确，小幅盈利
-  ///   * 偏差（青）：跌幅 -0.5% ~ -3% → 方向错误，小幅亏损
-  ///   * 非常偏差（红）：跌幅 ≤ -3% → 方向错误，大幅亏损
+  ///   * 非常合理（绿）：涨幅 ≥ +2% → 推荐正确且收益显著
+  ///   * 合理（橙）：涨幅 +0.5% ~ +2% → 方向正确，小幅盈利
+  ///   * 偏差（青）：跌幅 -0.5% ~ -2% → 方向错误，小幅亏损
+  ///   * 非常偏差（红）：跌幅 ≤ -2% → 方向错误，大幅亏损
   /// 
   /// 卖出推荐（反向）：
-  ///   * 非常合理（绿）：跌幅 ≤ -3% → 推荐正确且跌幅显著
-  ///   * 合理（橙）：跌幅 -3% ~ -0.5% → 方向正确，小幅下跌
-  ///   * 偏差（青）：涨幅 +0.5% ~ +3% → 方向错误，小幅上涨
-  ///   * 非常偏差（红）：涨幅 ≥ +3% → 方向错误，大幅上涨
+  ///   * 非常合理（绿）：跌幅 ≤ -2% → 推荐正确且跌幅显著
+  ///   * 合理（橙）：跌幅 -2% ~ -0.5% → 方向正确，小幅下跌
+  ///   * 偏差（青）：涨幅 +0.5% ~ +2% → 方向错误，小幅上涨
+  ///   * 非常偏差（红）：涨幅 ≥ +2% → 方向错误，大幅上涨
   /// 
   /// 观望推荐：
-  ///   * 非常合理（绿）：波动 < 2% → 预测正确，无明显趋势
-  ///   * 合理（橙）：波动 2% ~ 5% → 基本正确，小幅波动
-  ///   * 偏差（青）：波动 5% ~ 10% → 预测偏差，明显趋势
-  ///   * 非常偏差（红）：波动 ≥ 10% → 预测错误，大幅波动
+  ///   * 非常合理（绿）：波动 < 3% → 预测正确，无明显趋势
+  ///   * 合理（橙）：波动 3% ~ 6% → 基本正确，小幅波动
+  ///   * 偏差（青）：波动 6% ~ 12% → 预测偏差，明显趋势
+  ///   * 非常偏差（红）：波动 ≥ 12% → 预测错误，大幅波动
   /// 
   /// 手续费缓冲区：±0.5%（买入后小跌在手续费范围内算合理）
   static ReliabilityLevel _getReliabilityLevel(ArchiveRecord record, double currentPrice) {
@@ -130,36 +131,36 @@ class _ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserv
 
     if (wasBuy) {
       // 买入推荐：涨=正确，跌=错误
-      if (priceChangePct >= 3.0) {
-        return ReliabilityLevel.veryReasonable; // ≥ +3%：方向正确且收益显著
+      if (priceChangePct >= 2.0) {
+        return ReliabilityLevel.veryReasonable; // ≥ +2%：方向正确且收益显著
       } else if (priceChangePct >= 0.5) {
-        return ReliabilityLevel.reasonable; // +0.5% ~ +3%：方向正确，小幅盈利
-      } else if (priceChangePct >= -3.0) {
-        return ReliabilityLevel.deviation; // -3% ~ -0.5%：方向错误，小幅亏损
+        return ReliabilityLevel.reasonable; // +0.5% ~ +2%：方向正确，小幅盈利
+      } else if (priceChangePct >= -2.0) {
+        return ReliabilityLevel.deviation; // -2% ~ -0.5%：方向错误，小幅亏损
       } else {
-        return ReliabilityLevel.veryDeviation; // < -3%：方向错误，大幅亏损
+        return ReliabilityLevel.veryDeviation; // < -2%：方向错误，大幅亏损
       }
     } else if (wasSell) {
       // 卖出推荐：跌=正确，涨=错误（完全反向）
-      if (priceChangePct <= -3.0) {
-        return ReliabilityLevel.veryReasonable; // ≤ -3%：方向正确且跌幅显著
+      if (priceChangePct <= -2.0) {
+        return ReliabilityLevel.veryReasonable; // ≤ -2%：方向正确且跌幅显著
       } else if (priceChangePct <= -0.5) {
-        return ReliabilityLevel.reasonable; // -3% ~ -0.5%：方向正确，小幅下跌
-      } else if (priceChangePct <= 3.0) {
-        return ReliabilityLevel.deviation; // +0.5% ~ +3%：方向错误，小幅上涨
+        return ReliabilityLevel.reasonable; // -2% ~ -0.5%：方向正确，小幅下跌
+      } else if (priceChangePct <= 2.0) {
+        return ReliabilityLevel.deviation; // +0.5% ~ +2%：方向错误，小幅上涨
       } else {
-        return ReliabilityLevel.veryDeviation; // > +3%：方向错误，大幅上涨
+        return ReliabilityLevel.veryDeviation; // > +2%：方向错误，大幅上涨
       }
     } else if (wasNeutral) {
       // 观望推荐：波动小=正确，波动大=错误
-      if (absChange < 2.0) {
-        return ReliabilityLevel.veryReasonable; // < 2%：预测正确，无明显趋势
-      } else if (absChange <= 5.0) {
-        return ReliabilityLevel.reasonable; // 2% ~ 5%：基本正确，小幅波动
-      } else if (absChange <= 10.0) {
-        return ReliabilityLevel.deviation; // 5% ~ 10%：预测偏差，明显趋势
+      if (absChange < 3.0) {
+        return ReliabilityLevel.veryReasonable; // < 3%：预测正确，无明显趋势
+      } else if (absChange <= 6.0) {
+        return ReliabilityLevel.reasonable; // 3% ~ 6%：基本正确，小幅波动
+      } else if (absChange <= 12.0) {
+        return ReliabilityLevel.deviation; // 6% ~ 12%：预测偏差，明显趋势
       } else {
-        return ReliabilityLevel.veryDeviation; // ≥ 10%：预测错误，大幅波动
+        return ReliabilityLevel.veryDeviation; // ≥ 12%：预测错误，大幅波动
       }
     }
     return ReliabilityLevel.reasonable;
