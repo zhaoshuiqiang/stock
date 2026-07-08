@@ -28,7 +28,9 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
 
   /// 执行探索分析（异步，通过 progressStream 广播进度）
   Future<void> explore() async {
-    if (!tryStart(ExploreProgress(status: ExploreStatus.alreadyRunning))) return;
+    if (!tryStart(ExploreProgress(status: ExploreStatus.alreadyRunning))) {
+      return;
+    }
 
     final startTime = DateTime.now();
 
@@ -49,7 +51,8 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       }
 
       // 2. 并发获取板块成分股
-      emit(ExploreProgress(status: ExploreStatus.fetchingStocks, totalStocks: 0));
+      emit(ExploreProgress(
+          status: ExploreStatus.fetchingStocks, totalStocks: 0));
 
       final allStocks = <QuoteData>[];
       final seenCodes = <String>{};
@@ -58,19 +61,27 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       for (int i = 0; i < topSectors.length; i += sectorBatchSize) {
         final batch = topSectors.sublist(
           i,
-          i + sectorBatchSize > topSectors.length ? topSectors.length : i + sectorBatchSize,
+          i + sectorBatchSize > topSectors.length
+              ? topSectors.length
+              : i + sectorBatchSize,
         );
 
         final sectorStocksList = await Future.wait(
-          batch.map((sector) =>
-              _apiClient.getSectorStocks(sector.code).catchError((_) => <QuoteData>[])),
+          batch.map((sector) => _apiClient
+              .getSectorStocks(sector.code)
+              .catchError((_) => <QuoteData>[])),
         );
 
         for (int j = 0; j < batch.length; j++) {
           for (final stock in sectorStocksList[j]) {
             if (seenCodes.contains(stock.code)) continue;
             if (!_apiClient.isMainBoardStock(stock.code)) continue;
-            if (stock.price <= 0 || stock.name.isEmpty || stock.name.startsWith('ST') || stock.name.startsWith('*ST')) continue;
+            if (stock.price <= 0 ||
+                stock.name.isEmpty ||
+                stock.name.startsWith('ST') ||
+                stock.name.startsWith('*ST')) {
+              continue;
+            }
             seenCodes.add(stock.code);
             allStocks.add(stock);
           }
@@ -83,12 +94,14 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       }
 
       if (allStocks.isEmpty) {
-        emit(ExploreProgress(status: ExploreStatus.error, message: '未获取到有效股票数据'));
+        emit(ExploreProgress(
+            status: ExploreStatus.error, message: '未获取到有效股票数据'));
         return;
       }
 
       // 3. 批量预取K线数据（内存缓存，单次探索内复用）
-      emit(ExploreProgress(status: ExploreStatus.fetchingKlines, totalStocks: allStocks.length));
+      emit(ExploreProgress(
+          status: ExploreStatus.fetchingKlines, totalStocks: allStocks.length));
 
       final klineCache = <String, List<HistoryKline>>{};
       const klineBatchSize = 15;
@@ -98,8 +111,9 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         final batch = allStocks.sublist(i, end);
 
         final klineResults = await Future.wait(
-          batch.map((stock) =>
-              _apiClient.getStockHistory(stock.code).catchError((_) => <HistoryKline>[])),
+          batch.map((stock) => _apiClient
+              .getStockHistory(stock.code)
+              .catchError((_) => <HistoryKline>[])),
         );
 
         for (int j = 0; j < batch.length; j++) {
@@ -114,14 +128,16 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       }
 
       // 4. 批量获取实时行情（一次请求替代N次独立请求）
-      emit(ExploreProgress(status: ExploreStatus.fetchingQuotes, totalStocks: allStocks.length));
+      emit(ExploreProgress(
+          status: ExploreStatus.fetchingQuotes, totalStocks: allStocks.length));
 
       final quoteCache = <String, QuoteData>{};
       const quoteBatchSize = 50; // 腾讯批量接口支持多个代码
 
       for (int i = 0; i < allStocks.length; i += quoteBatchSize) {
         final end = min(i + quoteBatchSize, allStocks.length);
-        final batchCodes = allStocks.sublist(i, end).map((s) => s.code).toList();
+        final batchCodes =
+            allStocks.sublist(i, end).map((s) => s.code).toList();
 
         List<QuoteData> batchQuotes;
         try {
@@ -188,7 +204,9 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       // Phase 3: 批量记录推荐快照（事务内一次性写入，避免逐只 track 的并发开销）
       try {
         await RecommendationTracker().trackBatch(analysisList);
-      } catch (e) { debugPrint('trackBatch失败: $e'); }
+      } catch (e) {
+        debugPrint('trackBatch失败: $e');
+      }
 
       // Phase 3: 更新历史推荐收益率
       try {
@@ -197,10 +215,13 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
           pricesByCode[q.code] = q.price;
         }
         await RecommendationTracker().updateReturns(pricesByCode);
-      } catch (e) { debugPrint('ExploreEngine.updateReturns: $e'); }
+      } catch (e) {
+        debugPrint('ExploreEngine.updateReturns: $e');
+      }
 
       final elapsed = DateTime.now().difference(startTime);
-      debugPrint('Explore completed: ${results.length} stocks in ${elapsed.inSeconds}s (optimized)');
+      debugPrint(
+          'Explore completed: ${results.length} stocks in ${elapsed.inSeconds}s (optimized)');
 
       emit(ExploreProgress(
         status: ExploreStatus.complete,
@@ -230,7 +251,7 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
 
       final indicators = calcAllIndicators(klineData);
 
-      if (!_passValuationFilter(quote)) {
+      if (!_passValuationFilter(quote, shortTermMode: true)) {
         return null;
       }
 
@@ -243,15 +264,19 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       // Phase 2: 概念标签
       String? conceptSummary;
       try {
-        conceptSummary = ConceptTagProvider.instance.getConceptSummary(stock.code);
-      } catch (e) { debugPrint('ExploreEngine.conceptTags: $e'); }
+        conceptSummary =
+            ConceptTagProvider.instance.getConceptSummary(stock.code);
+      } catch (e) {
+        debugPrint('ExploreEngine.conceptTags: $e');
+      }
 
       // Phase 3: 推荐追踪（收集到列表，循环结束后批量写入）
       analysisList.add(analysis);
 
       // Phase 1: 市场结构
       final structureLabel = analysis.marketStructure != null
-          ? MarketStructureAnalyzer.getLabel(analysis.marketStructure!.structure)
+          ? MarketStructureAnalyzer.getLabel(
+              analysis.marketStructure!.structure)
           : '';
 
       return ExploreResult(
@@ -265,7 +290,9 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         recommendation: analysis.recommendation,
         confluenceScore: analysis.confluenceScore,
         analyzedAt: DateTime.now(),
-        conceptSummary: (conceptSummary != null && conceptSummary.isNotEmpty) ? conceptSummary : null,
+        conceptSummary: (conceptSummary != null && conceptSummary.isNotEmpty)
+            ? conceptSummary
+            : null,
         marketStructure: structureLabel.isNotEmpty ? structureLabel : null,
       );
     } catch (e) {
@@ -274,12 +301,27 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
     }
   }
 
-  static bool _passValuationFilter(QuoteData quote) {
+  @visibleForTesting
+  static bool passesValuationFilter(
+    QuoteData quote, {
+    bool shortTermMode = false,
+  }) {
+    if (shortTermMode) {
+      return quote.price > 0;
+    }
+
     // PE <= 0 表示亏损，过滤（探索引擎优先找有盈利能力的标的）
     if (quote.pe <= 0) return false;
     // PE >= 80 估值过高，过滤
     if (quote.pe < 80 && quote.pb > 0) return true;
     return false;
+  }
+
+  static bool _passValuationFilter(
+    QuoteData quote, {
+    bool shortTermMode = false,
+  }) {
+    return passesValuationFilter(quote, shortTermMode: shortTermMode);
   }
 
   static bool _isBuyRecommendation(String recommendation) {

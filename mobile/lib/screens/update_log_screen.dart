@@ -10,6 +10,18 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.3.20260709',
+        'date': '2026-07-09',
+        'changes': [
+          '新增短线交易分：独立评估1-10个交易日操作价值，重点关注短线信号、量价配合、资金流、实时涨跌幅和波动率',
+          '强化追高风控：涨停、当日大涨、近5日涨幅过大、主力流出等场景会限制推荐等级，避免综合分高但短线不可追',
+          '优化推荐解释：分析理由和操作建议新增短线交易分、短线风控触发原因和等待回踩/分时低吸提示',
+          '修复策略分层：短线策略和长线策略现在按周期真实过滤，避免短线操作页面混入中长线策略',
+          '优化探索候选池：短线模式下不再用PE/PB硬过滤亏损或高估值标的，改为风险标签和推荐上限处理',
+          '新增回归测试：覆盖短线评分、追高封顶、策略周期过滤和探索估值策略',
+        ],
+      },
+      {
         'version': 'v3.2.20260707',
         'date': '2026-07-07',
         'changes': [
@@ -105,7 +117,8 @@ class UpdateLogScreen extends StatelessWidget {
                       const SizedBox(width: 12),
                       Text(
                         update['date'] as String,
-                        style: textTheme.bodySmall?.copyWith(color: Colors.grey),
+                        style:
+                            textTheme.bodySmall?.copyWith(color: Colors.grey),
                       ),
                     ],
                   ),
@@ -127,7 +140,8 @@ class UpdateLogScreen extends StatelessWidget {
                                   Expanded(
                                     child: Text(
                                       change,
-                                      style: textTheme.bodyMedium?.copyWith(color: Colors.grey[300]),
+                                      style: textTheme.bodyMedium
+                                          ?.copyWith(color: Colors.grey[300]),
                                     ),
                                   ),
                                 ],

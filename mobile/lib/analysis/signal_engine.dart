@@ -5,6 +5,7 @@ import 'indicators.dart';
 import 'signal_layer.dart';
 import 'technical_scorer.dart';
 import 'realtime_scorer.dart';
+import 'short_term_scorer.dart';
 import 'confluence_scorer.dart';
 import 'comprehensive_scorer.dart';
 import 'risk_analyzer.dart';
@@ -262,6 +263,7 @@ AnalysisResult generateAnalysis(
   void Function(List<String> aiReasons)? onAIUpdate,
   void Function(String status, int progress)? onAIProgress,
   bool autoTriggerAI = false,
+  bool enableAsyncSideEffects = true,
 }) {
   if (data.isEmpty) {
     return AnalysisResult(
@@ -363,8 +365,21 @@ AnalysisResult generateAnalysis(
     sectorAnalysis: sectorAnalysis,
   );
 
-  final totalScore = compResult.totalScore;
-  final recommendation = compResult.recommendation;
+  final shortTermResult = ShortTermScorer.score(
+    data: data,
+    buySignals: buySignals,
+    sellSignals: sellSignals,
+    quote: quote,
+  );
+
+  var totalScore = compResult.totalScore;
+  var recommendation = compResult.recommendation;
+  final cappedScore =
+      ShortTermScorer.capRecommendationScore(totalScore, shortTermResult);
+  if (cappedScore < totalScore) {
+    totalScore = cappedScore;
+    recommendation = _recommendationFromScore(totalScore, quote);
+  }
 
   // 6. 推荐理由（见下方步骤13，全部上下文就绪后生成）
 
@@ -488,6 +503,7 @@ AnalysisResult generateAnalysis(
         : 5.0,
     '基本面': compResult.fundamentalScore?.totalScore ?? 5.0,
     '结构': marketStructure.structureScore,
+    '短线交易': shortTermResult.score,
   };
   final reasons = _generateReasons(
     buySignals,
@@ -505,11 +521,16 @@ AnalysisResult generateAnalysis(
     recommendation: recommendation,
     dimensionScores: dimensionScores,
   );
+  reasons.add(
+      '短线交易分：${shortTermResult.score.toStringAsFixed(1)}，${shortTermResult.actionLabel}');
+  if (shortTermResult.riskCaps.isNotEmpty) {
+    reasons.add('短线风控：${shortTermResult.riskCaps.take(3).join('；')}');
+  }
 
   // 13a. 历史决策反思注入（v2.53: 决策反馈闭环）
   // 异步获取历史反思，不阻塞主分析流程
   List<Map<String, dynamic>> historicalReflections = [];
-  if (quote != null) {
+  if (enableAsyncSideEffects && quote != null) {
     RecommendationTracker()
         .getHistoricalReflections(quote.code)
         .then((reflections) {
@@ -586,6 +607,13 @@ AnalysisResult generateAnalysis(
     confidenceScore: confidenceScore,
     marketStructure: marketStructure,
   );
+  if (shortTermResult.maxRecommendationScore < compResult.totalScore) {
+    suggestions.insert(0,
+        '短线风控触发：${shortTermResult.riskCaps.take(2).join('；')}，不建议追高，等待回踩或分时低吸确认');
+  } else if (shortTermResult.score >= 7) {
+    suggestions.insert(
+        0, '短线交易分${shortTermResult.score.toStringAsFixed(1)}，可在分时承接确认后小仓位参与');
+  }
 
   final detailedReasons = <RecommendationReason>[];
   for (final signal in signals.take(5)) {
@@ -615,7 +643,7 @@ AnalysisResult generateAnalysis(
   final tradeLevels = calcTradeLevels(data);
 
   // v2.30: 推荐追踪 — 覆盖率扩大到个股分析流（原仅在ExploreEngine调用）
-  if (totalScore >= 6 && quote != null) {
+  if (enableAsyncSideEffects && totalScore >= 6 && quote != null) {
     final trackResult = AnalysisResult(
       quote: quote,
       signals: signals,
@@ -667,6 +695,23 @@ AnalysisResult generateAnalysis(
 }
 
 /// 生成推荐理由
+String _recommendationFromScore(int score, QuoteData? quote) {
+  final isST = quote != null && ComprehensiveScorer.isSTStock(quote.name);
+  if (isST) {
+    if (score >= 5) return '偏多观望';
+    if (score >= 3) return '谨慎卖出';
+    return '卖出';
+  }
+  if (score >= 8) return '强烈买入';
+  if (score >= 7) return '买入';
+  if (score >= 6) return '谨慎买入';
+  if (score >= 5) return '偏多观望';
+  if (score >= 4) return '偏空观望';
+  if (score >= 3) return '谨慎卖出';
+  if (score >= 2) return '卖出';
+  return '强烈卖出';
+}
+
 List<String> _generateReasons(
   List<SignalItem> buySignals,
   List<SignalItem> sellSignals,
