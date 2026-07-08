@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
@@ -27,6 +29,7 @@ class RecommendationSnapshot {
   final double? alphaVsMarket;
   final String? confidenceAdjustment;
   final String? feedback;
+  final Map<String, double>? dimensionScores;
 
   RecommendationSnapshot({
     this.id,
@@ -46,6 +49,7 @@ class RecommendationSnapshot {
     this.alphaVsMarket,
     this.confidenceAdjustment,
     this.feedback,
+    this.dimensionScores,
   });
 
   factory RecommendationSnapshot.fromMap(Map<String, dynamic> map) {
@@ -54,7 +58,8 @@ class RecommendationSnapshot {
       code: map['code'] as String,
       name: map['name'] as String? ?? '',
       signalPrice: (map['signal_price'] as num).toDouble(),
-      signalDate: DateTime.fromMillisecondsSinceEpoch(map['signal_date'] as int),
+      signalDate:
+          DateTime.fromMillisecondsSinceEpoch(map['signal_date'] as int),
       marketStructure: map['market_structure'] as String? ?? '',
       strategy: map['strategy'] as String? ?? '',
       conceptTags: map['concept_tags'] as String? ?? '',
@@ -67,6 +72,8 @@ class RecommendationSnapshot {
       alphaVsMarket: (map['alpha_vs_market'] as num?)?.toDouble(),
       confidenceAdjustment: map['confidence_adjustment'] as String? ?? '',
       feedback: map['feedback'] as String? ?? '',
+      dimensionScores:
+          _decodeDimensionScores(map['dimension_scores_json'] as String?),
     );
   }
 
@@ -92,8 +99,29 @@ class RecommendationSnapshot {
       'alpha_vs_market': alphaVsMarket,
       'confidence_adjustment': confidenceAdjustment ?? '',
       'feedback': feedback ?? '',
+      'dimension_scores_json': _encodeDimensionScores(dimensionScores),
     };
   }
+}
+
+Map<String, double>? _decodeDimensionScores(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return null;
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) return null;
+    return decoded.map((key, value) {
+      if (value is num) return MapEntry(key.toString(), value.toDouble());
+      return MapEntry(key.toString(), double.tryParse(value.toString()) ?? 0.0);
+    });
+  } catch (e) {
+    debugPrint('RecommendationSnapshot.dimensionScores decode failed: $e');
+    return null;
+  }
+}
+
+String _encodeDimensionScores(Map<String, double>? scores) {
+  if (scores == null || scores.isEmpty) return '';
+  return jsonEncode(scores);
 }
 
 /// 推荐收益追踪器
@@ -131,13 +159,19 @@ class RecommendationTracker {
     String conceptTags = '';
     try {
       conceptTags = ConceptTagProvider.instance.getConceptSummary(quote.code);
-    } catch (e) { debugPrint('RecommendationTracker.track: $e'); }
+    } catch (e) {
+      debugPrint('RecommendationTracker.track: $e');
+    }
 
     // 获取主力策略名称
     String strategy = '';
     final activeStrategies = [
-      ...analysis.shortTermStrategies.where((s) => s.isActive).map((s) => s.name),
-      ...analysis.longTermStrategies.where((s) => s.isActive).map((s) => s.name),
+      ...analysis.shortTermStrategies
+          .where((s) => s.isActive)
+          .map((s) => s.name),
+      ...analysis.longTermStrategies
+          .where((s) => s.isActive)
+          .map((s) => s.name),
     ];
     if (activeStrategies.isNotEmpty) {
       strategy = activeStrategies.take(3).join(',');
@@ -149,10 +183,12 @@ class RecommendationTracker {
       signalPrice: quote.price,
       signalDate: DateTime.now(),
       marketStructure: analysis.marketStructure != null
-          ? MarketStructureAnalyzer.getLabel(analysis.marketStructure!.structure)
+          ? MarketStructureAnalyzer.getLabel(
+              analysis.marketStructure!.structure)
           : '',
       strategy: strategy,
       conceptTags: conceptTags,
+      dimensionScores: analysis.dimensionScores,
     );
 
     await _dbService.insertRecommendationSnapshot(snapshot.toMap());
@@ -161,7 +197,8 @@ class RecommendationTracker {
 
   /// 批量记录推荐快照（用于探索引擎批量写入）
   /// 一次性获取所有活跃推荐 code 集合，过滤已存在的，事务内批量插入
-  Future<List<RecommendationSnapshot>> trackBatch(List<AnalysisResult> analyses) async {
+  Future<List<RecommendationSnapshot>> trackBatch(
+      List<AnalysisResult> analyses) async {
     if (!_initialized) await init();
 
     // 一次性获取所有活跃推荐 code 集合
@@ -178,13 +215,19 @@ class RecommendationTracker {
       String conceptTags = '';
       try {
         conceptTags = ConceptTagProvider.instance.getConceptSummary(quote.code);
-      } catch (e) { debugPrint('RecommendationTracker.trackBatch: $e'); }
+      } catch (e) {
+        debugPrint('RecommendationTracker.trackBatch: $e');
+      }
 
       // 获取主力策略名称
       String strategy = '';
       final activeStrategies = [
-        ...analysis.shortTermStrategies.where((s) => s.isActive).map((s) => s.name),
-        ...analysis.longTermStrategies.where((s) => s.isActive).map((s) => s.name),
+        ...analysis.shortTermStrategies
+            .where((s) => s.isActive)
+            .map((s) => s.name),
+        ...analysis.longTermStrategies
+            .where((s) => s.isActive)
+            .map((s) => s.name),
       ];
       if (activeStrategies.isNotEmpty) {
         strategy = activeStrategies.take(3).join(',');
@@ -196,10 +239,12 @@ class RecommendationTracker {
         signalPrice: quote.price,
         signalDate: DateTime.now(),
         marketStructure: analysis.marketStructure != null
-            ? MarketStructureAnalyzer.getLabel(analysis.marketStructure!.structure)
+            ? MarketStructureAnalyzer.getLabel(
+                analysis.marketStructure!.structure)
             : '',
         strategy: strategy,
         conceptTags: conceptTags,
+        dimensionScores: analysis.dimensionScores,
       );
       newSnapshots.add(snapshot);
       // 标记为已存在，防止批次内重复添加
@@ -226,16 +271,17 @@ class RecommendationTracker {
 
     final db = await _dbService.database;
     final recent = await db.query('recommendation_tracking',
-      where: 'is_closed = 0 AND day20_return IS NULL',
-      orderBy: 'signal_date DESC',
-      limit: 50);
+        where: 'is_closed = 0 AND day20_return IS NULL',
+        orderBy: 'signal_date DESC',
+        limit: 50);
 
     // 整个 for 循环用事务包裹，避免每次 update 获取新连接、提升并发性能
     await db.transaction((txn) async {
       for (final row in recent) {
         final code = row['code'] as String;
         final signalPrice = (row['signal_price'] as num).toDouble();
-        final signalDate = DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int);
+        final signalDate =
+            DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int);
         final id = row['id'] as int;
         final now = DateTime.now();
         final daysSince = now.difference(signalDate).inDays;
@@ -248,22 +294,40 @@ class RecommendationTracker {
 
         // 更新对应天数的收益 (独立if确保不会漏掉前序里程碑)
         if (daysSince >= 5 && row['day5_return'] == null) {
-          await txn.update('recommendation_tracking',
-            {'day5_price': currentPrice, 'day5_return': returnPct, 'last_checked_date': nowMs},
-            where: 'id = ?', whereArgs: [id]);
+          await txn.update(
+              'recommendation_tracking',
+              {
+                'day5_price': currentPrice,
+                'day5_return': returnPct,
+                'last_checked_date': nowMs
+              },
+              where: 'id = ?',
+              whereArgs: [id]);
         }
         if (daysSince >= 10 && row['day10_return'] == null) {
-          await txn.update('recommendation_tracking',
-            {'day10_price': currentPrice, 'day10_return': returnPct, 'last_checked_date': nowMs},
-            where: 'id = ?', whereArgs: [id]);
+          await txn.update(
+              'recommendation_tracking',
+              {
+                'day10_price': currentPrice,
+                'day10_return': returnPct,
+                'last_checked_date': nowMs
+              },
+              where: 'id = ?',
+              whereArgs: [id]);
         }
         if (daysSince >= 20 && row['day20_return'] == null) {
           final name = row['name'] as String? ?? '';
           final strategy = row['strategy'] as String? ?? '';
 
-          await txn.update('recommendation_tracking',
-            {'day20_price': currentPrice, 'day20_return': returnPct, 'last_checked_date': nowMs},
-            where: 'id = ?', whereArgs: [id]);
+          await txn.update(
+              'recommendation_tracking',
+              {
+                'day20_price': currentPrice,
+                'day20_return': returnPct,
+                'last_checked_date': nowMs
+              },
+              where: 'id = ?',
+              whereArgs: [id]);
 
           _generateReflectionAsync(
             id: id,
@@ -275,9 +339,8 @@ class RecommendationTracker {
             originalRecommendation: strategy,
           );
 
-          await txn.update('recommendation_tracking',
-            {'is_closed': 1},
-            where: 'id = ?', whereArgs: [id]);
+          await txn.update('recommendation_tracking', {'is_closed': 1},
+              where: 'id = ?', whereArgs: [id]);
         }
       }
     });
@@ -297,13 +360,21 @@ class RecommendationTracker {
 
   /// 获取历史决策反思，注入下次分析
   /// 返回该股票的最近3条已关闭的推荐记录及其反思
-  Future<List<Map<String, dynamic>>> getHistoricalReflections(String code) async {
+  Future<List<Map<String, dynamic>>> getHistoricalReflections(
+      String code) async {
     if (!_initialized) await init();
 
     final db = await _dbService.database;
     final rows = await db.query(
       'recommendation_tracking',
-      columns: ['signal_date', 'signal_price', 'strategy', 'day20_return', 'alpha_vs_market', 'reflection'],
+      columns: [
+        'signal_date',
+        'signal_price',
+        'strategy',
+        'day20_return',
+        'alpha_vs_market',
+        'reflection'
+      ],
       where: 'code = ? AND is_closed = 1 AND day20_return IS NOT NULL',
       orderBy: 'signal_date DESC',
       limit: 3,
@@ -312,7 +383,8 @@ class RecommendationTracker {
     final reflections = <Map<String, dynamic>>[];
     for (final row in rows) {
       final ret = <String, dynamic>{
-        'signal_date': DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int),
+        'signal_date':
+            DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int),
         'signal_price': (row['signal_price'] as num).toDouble(),
         'strategy': row['strategy'] as String? ?? '',
         'day20_return': (row['day20_return'] as num).toDouble(),
@@ -326,13 +398,22 @@ class RecommendationTracker {
 
   /// 获取全市场历史决策统计（用于跨股票学习）
   /// 返回最近20条已关闭推荐的收益分布和反思
-  Future<List<Map<String, dynamic>>> getMarketWideReflections({int limit = 20}) async {
+  Future<List<Map<String, dynamic>>> getMarketWideReflections(
+      {int limit = 20}) async {
     if (!_initialized) await init();
 
     final db = await _dbService.database;
     final rows = await db.query(
       'recommendation_tracking',
-      columns: ['code', 'name', 'signal_date', 'strategy', 'day20_return', 'alpha_vs_market', 'reflection'],
+      columns: [
+        'code',
+        'name',
+        'signal_date',
+        'strategy',
+        'day20_return',
+        'alpha_vs_market',
+        'reflection'
+      ],
       where: 'is_closed = 1 AND day20_return IS NOT NULL',
       orderBy: 'signal_date DESC',
       limit: limit,
@@ -343,7 +424,8 @@ class RecommendationTracker {
       reflections.add({
         'code': row['code'] as String,
         'name': row['name'] as String? ?? '',
-        'signal_date': DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int),
+        'signal_date':
+            DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int),
         'strategy': row['strategy'] as String? ?? '',
         'day20_return': (row['day20_return'] as num).toDouble(),
         'alpha_vs_market': (row['alpha_vs_market'] as num?)?.toDouble() ?? 0,
@@ -381,7 +463,8 @@ class RecommendationTracker {
 
   /// 计算相对大盘Alpha
   /// marketReturn: 同期大盘收益率（如沪深300）
-  Future<void> saveAlpha(int snapshotId, double marketReturn, double stockReturn) async {
+  Future<void> saveAlpha(
+      int snapshotId, double marketReturn, double stockReturn) async {
     if (!_initialized) await init();
 
     final alpha = stockReturn - marketReturn;
@@ -406,8 +489,10 @@ class RecommendationTracker {
 
     final buf = StringBuffer();
     buf.write('【${snapshot.name}(${snapshot.code})】');
-    buf.write('信号日期: ${signalDate.year}-${signalDate.month.toString().padLeft(2, '0')}-${signalDate.day.toString().padLeft(2, '0')}');
-    buf.write(' | 策略: ${snapshot.strategy.isNotEmpty ? snapshot.strategy : '综合评分'}');
+    buf.write(
+        '信号日期: ${signalDate.year}-${signalDate.month.toString().padLeft(2, '0')}-${signalDate.day.toString().padLeft(2, '0')}');
+    buf.write(
+        ' | 策略: ${snapshot.strategy.isNotEmpty ? snapshot.strategy : '综合评分'}');
     buf.write(' | 信号价: ${snapshot.signalPrice.toStringAsFixed(2)}');
 
     if (stockReturn > 5) {
@@ -443,7 +528,8 @@ class RecommendationTracker {
     Future(() async {
       try {
         String reflection;
-        if (AIConfig.enableAIEnhancement && AILayerProvider.instance.isAvailable) {
+        if (AIConfig.enableAIEnhancement &&
+            AILayerProvider.instance.isAvailable) {
           reflection = await AILayerProvider.instance.generateReflection(
             stockCode: code,
             stockName: name,
@@ -451,7 +537,9 @@ class RecommendationTracker {
             signalDate: signalDate,
             realizedReturn: realizedReturn,
             alphaVsMarket: 0,
-            originalRecommendation: originalRecommendation.isNotEmpty ? originalRecommendation : '综合评分',
+            originalRecommendation: originalRecommendation.isNotEmpty
+                ? originalRecommendation
+                : '综合评分',
           );
         } else {
           reflection = generateRuleBasedReflection(
