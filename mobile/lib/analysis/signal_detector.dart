@@ -990,4 +990,140 @@ class SignalDetector {
 
     return signals;
   }
+
+  static List<SignalItem> detectEarlyWarningSignals(List<HistoryKline> data) {
+    if (data.isEmpty || data.length < 10) return [];
+
+    final last = data[data.length - 1];
+    final prev = data[data.length - 2];
+    final signals = <SignalItem>[];
+
+    signals.addAll(_detectMACDCrossWarning(last, prev));
+    signals.addAll(_detectKDJCrossWarning(last, prev));
+    signals.addAll(_detectMACDDivergenceWarning(data, last, prev));
+
+    return signals;
+  }
+
+  static List<SignalItem> _detectMACDCrossWarning(HistoryKline last, HistoryKline prev) {
+    final signals = <SignalItem>[];
+    if (last.macdDea == 0) return signals;
+
+    final difDistance = (last.macdDea - last.macdDif).abs() / last.macdDea.abs();
+    final difTrend = last.macdDif - prev.macdDif;
+    final deaTrend = last.macdDea - prev.macdDea;
+
+    if (difDistance < 0.08 && difTrend > 0 && deaTrend <= 0) {
+      signals.add(SignalItem(
+        type: 'buy',
+        indicator: 'MACD',
+        signal: 'MACD金叉预警',
+        description: 'DIF快速接近DEA，即将形成金叉，提前关注',
+        strength: 55,
+        timestamp: last.date,
+        duration: SignalDuration.shortTerm,
+        confidence: 0.6,
+        signalCount: 1,
+      ));
+    } else if (difDistance < 0.08 && difTrend < 0 && deaTrend >= 0) {
+      signals.add(SignalItem(
+        type: 'sell',
+        indicator: 'MACD',
+        signal: 'MACD死叉预警',
+        description: 'DIF快速接近DEA，即将形成死叉，提前警惕',
+        strength: 55,
+        timestamp: last.date,
+        duration: SignalDuration.shortTerm,
+        confidence: 0.6,
+        signalCount: 1,
+      ));
+    }
+
+    return signals;
+  }
+
+  static List<SignalItem> _detectKDJCrossWarning(HistoryKline last, HistoryKline prev) {
+    final signals = <SignalItem>[];
+
+    final kDistance = (last.d - last.k).abs() / (last.d.abs() + last.k.abs()).clamp(1.0, double.infinity);
+    final kTrend = last.k - prev.k;
+
+    if (kDistance < 0.15 && kTrend > 0 && last.k < 50) {
+      signals.add(SignalItem(
+        type: 'buy',
+        indicator: 'KDJ',
+        signal: 'KDJ金叉预警',
+        description: 'K线快速接近D线，即将形成金叉，提前关注',
+        strength: 50,
+        timestamp: last.date,
+        duration: SignalDuration.shortTerm,
+        confidence: 0.55,
+        signalCount: 1,
+      ));
+    } else if (kDistance < 0.15 && kTrend < 0 && last.k > 50) {
+      signals.add(SignalItem(
+        type: 'sell',
+        indicator: 'KDJ',
+        signal: 'KDJ死叉预警',
+        description: 'K线快速接近D线，即将形成死叉，提前警惕',
+        strength: 50,
+        timestamp: last.date,
+        duration: SignalDuration.shortTerm,
+        confidence: 0.55,
+        signalCount: 1,
+      ));
+    }
+
+    return signals;
+  }
+
+  static List<SignalItem> _detectMACDDivergenceWarning(
+      List<HistoryKline> data, HistoryKline last, HistoryKline prev) {
+    final signals = <SignalItem>[];
+    if (data.length < 20) return signals;
+
+    final searchRange = data.sublist(data.length - 20);
+    final highPeaks = _findLocalPeaks(searchRange, findHighs: true);
+    final lowPeaks = _findLocalPeaks(searchRange, findHighs: false);
+
+    if (highPeaks.length >= 1) {
+      final p1 = highPeaks[highPeaks.length - 1];
+      if (searchRange[p1].high > searchRange.last.high * 0.98 &&
+          searchRange[p1].macdDif < searchRange.last.macdDif &&
+          last.macdHist > prev.macdHist) {
+        signals.add(SignalItem(
+          type: 'sell',
+          indicator: 'MACD',
+          signal: 'MACD顶背离预警',
+          description: '价格接近前高但MACD未创新高，上涨动能减弱',
+          strength: 55,
+          timestamp: last.date,
+          duration: SignalDuration.mediumTerm,
+          confidence: 0.6,
+          signalCount: 1,
+        ));
+      }
+    }
+
+    if (lowPeaks.length >= 1) {
+      final p1 = lowPeaks[lowPeaks.length - 1];
+      if (searchRange[p1].low < searchRange.last.low * 1.02 &&
+          searchRange[p1].macdDif > searchRange.last.macdDif &&
+          last.macdHist < prev.macdHist) {
+        signals.add(SignalItem(
+          type: 'buy',
+          indicator: 'MACD',
+          signal: 'MACD底背离预警',
+          description: '价格接近前低但MACD未创新低，下跌动能减弱',
+          strength: 55,
+          timestamp: last.date,
+          duration: SignalDuration.mediumTerm,
+          confidence: 0.6,
+          signalCount: 1,
+        ));
+      }
+    }
+
+    return signals;
+  }
 }

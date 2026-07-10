@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../api/api_client.dart';
+import '../core/stock_code_utils.dart';
 import '../models/stock_models.dart';
 import 'base_analysis_engine.dart';
 import 'indicators.dart';
@@ -183,14 +184,17 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
                 '${s.type == 'buy' ? '▲' : '▼'}${s.signal}').toList();
 
             return OpportunityResult(
-              code: item.code, name: item.name,
+              code: StockCodeUtils.normalizeForArchive(item.code), name: item.name,
               price: quote?.price ?? last.close,
               changePct: quote?.changePct ?? last.changePct,
               score: analysis.score, recommendation: analysis.recommendation,
               riskLevel: analysis.riskLevel,
               buySignalCount: signals.where((s) => s.type == 'buy').length,
               sellSignalCount: signals.where((s) => s.type == 'sell').length,
-              activeStrategyCount: analysis.shortTermStrategies.length + analysis.longTermStrategies.length,
+              activeStrategyCount: [
+                ...analysis.shortTermStrategies,
+                ...analysis.longTermStrategies,
+              ].where((s) => s.isActive).length,
               confluenceScore: analysis.confluenceScore,
               tradeLevels: analysis.tradeLevels,
               topSignals: topSignals,
@@ -205,8 +209,16 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       }
 
       // 4. 排序并保存
-      final opportunities = results.whereType<OpportunityResult>().toList();
-      opportunities.sort((a, b) => b.score.compareTo(a.score));
+      final deduped = <String, OpportunityResult>{};
+      for (final item in results.whereType<OpportunityResult>()) {
+        final normalized = StockCodeUtils.normalizeForArchive(item.code);
+        final existing = deduped[normalized];
+        if (existing == null || item.score > existing.score) {
+          deduped[normalized] = item;
+        }
+      }
+      final opportunities = deduped.values.toList()
+        ..sort((a, b) => b.score.compareTo(a.score));
 
       emit(OpportunityProgress(status: OpportunityStatus.saving));
       await _dbService.replaceOpportunityResults(

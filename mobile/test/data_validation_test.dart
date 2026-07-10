@@ -7,10 +7,18 @@ QuoteData createTestQuote({
   String name = '测试股票',
   double changePct = 1.0,
   double volume = 10000,
+  double amount = 10000000,
   double high = 10.5,
   double low = 9.5,
   double open = 9.8,
   double preClose = 9.9,
+  double turnover = 1.5,
+  double pe = 20,
+  double pb = 2,
+  double totalMarketCap = 10000000000,
+  double circulatingMarketCap = 6000000000,
+  double mainNetFlow = 0,
+  double mainNetFlowRate = 0,
 }) {
   return QuoteData(
     code: 'sh600000',
@@ -21,9 +29,16 @@ QuoteData createTestQuote({
     low: low,
     preClose: preClose,
     volume: volume,
-    amount: 100000,
+    amount: amount,
     change: price - preClose,
     changePct: changePct,
+    turnover: turnover,
+    pe: pe,
+    pb: pb,
+    totalMarketCap: totalMarketCap,
+    circulatingMarketCap: circulatingMarketCap,
+    mainNetFlow: mainNetFlow,
+    mainNetFlowRate: mainNetFlowRate,
   );
 }
 
@@ -50,7 +65,11 @@ void main() {
   // ============================================================
   group('StockModels Serialization', () {
     test('StockInfo fromJson/toJson round-trip', () {
-      final json = {'code': 'sh600000', 'name': '浦发银行', 'display': '浦发银行(sh600000)'};
+      final json = {
+        'code': 'sh600000',
+        'name': '浦发银行',
+        'display': '浦发银行(sh600000)'
+      };
       final stockInfo = StockInfo.fromJson(json);
 
       expect(stockInfo.code, 'sh600000');
@@ -84,7 +103,7 @@ void main() {
       expect(quote.low, 9.5);
       expect(quote.preClose, 9.9);
       expect(quote.volume, 10000);
-      expect(quote.amount, 100000);
+      expect(quote.amount, 10000000);
       expect(quote.change, closeTo(0.1, 0.001));
       expect(quote.changePct, 1.0);
     });
@@ -249,7 +268,9 @@ void main() {
       expect(signal.strength, 4);
     });
 
-    test('AnalysisResult construction with all fields including reasons and opportunities', () {
+    test(
+        'AnalysisResult construction with all fields including reasons and opportunities',
+        () {
       final quote = createTestQuote();
       final result = AnalysisResult(
         quote: quote,
@@ -263,7 +284,9 @@ void main() {
         riskFactors: ['市场波动'],
         suggestions: ['分批建仓'],
         confluenceScore: 80,
-        confluenceDetails: [{'indicator': 'MACD', 'signal': 'buy'}],
+        confluenceDetails: [
+          {'indicator': 'MACD', 'signal': 'buy'}
+        ],
         reasons: ['MACD金叉', '成交量放大'],
         opportunities: [
           {'type': 'short', 'description': '短线机会'},
@@ -314,7 +337,78 @@ void main() {
       expect(result.signals.length, 1);
     });
 
-    test('ValidatedQuoteData construction with different confidence levels', () {
+    test('AnalysisResult round-trip preserves decision dashboard fields', () {
+      final result = AnalysisResult(
+        score: 6,
+        recommendation: '谨慎买入',
+        tradeLevels: {
+          'entry_low': 10.2,
+          'stop_loss': 9.8,
+          'risk_reward_ratio': 2.1,
+        },
+        confidenceBreakdown: {
+          'signal_consistency': 0.7,
+          'prediction_support': 0.6,
+        },
+        dimensionScores: {
+          '技术面': 7.2,
+          '资金面': 6.1,
+        },
+        momentumPersistence: {
+          'persistence_score': 0.66,
+        },
+        nextDayPrediction: {
+          'up_probability': 0.58,
+          'down_probability': 0.32,
+          'neutral_probability': 0.10,
+        },
+        earlyWarningSignals: [
+          SignalItem(
+            type: 'buy',
+            indicator: 'MACD',
+            signal: 'MACD金叉预警',
+            strength: 55,
+          ),
+        ],
+      );
+
+      final decoded = AnalysisResult.fromJson(result.toJson());
+
+      expect(decoded.tradeLevels?['entry_low'], equals(10.2));
+      expect(decoded.confidenceBreakdown?['prediction_support'], equals(0.6));
+      expect(decoded.dimensionScores?['技术面'], equals(7.2));
+      expect(decoded.momentumPersistence?['persistence_score'], equals(0.66));
+      expect(decoded.nextDayPrediction?['up_probability'], equals(0.58));
+      expect(decoded.earlyWarningSignals?.single.signal, equals('MACD金叉预警'));
+    });
+
+    test('AnalysisResult.copyWith preserves decision dashboard fields', () {
+      final result = AnalysisResult(
+        score: 6,
+        recommendation: '谨慎买入',
+        tradeLevels: {'entry_low': 10.2},
+        dimensionScores: {'技术面': 7.2},
+        momentumPersistence: {'persistence_score': 0.66},
+        nextDayPrediction: {'up_probability': 0.58},
+        earlyWarningSignals: [
+          SignalItem(type: 'buy', signal: 'MACD金叉预警', strength: 55),
+        ],
+      );
+
+      final copied = result.copyWith(
+        quote: createTestQuote(price: 10.8),
+      );
+
+      expect(copied.quote?.price, equals(10.8));
+      expect(copied.tradeLevels?['entry_low'], equals(10.2));
+      expect(copied.dimensionScores?['技术面'], equals(7.2));
+      expect(copied.momentumPersistence?['persistence_score'], equals(0.66));
+      expect(copied.nextDayPrediction?['up_probability'], equals(0.58));
+      expect(copied.earlyWarningSignals?.single.signal, equals('MACD金叉预警'));
+    });
+
+    test('ValidatedQuoteData construction with different confidence levels',
+        () {
       final quote = createTestQuote();
 
       final high = ValidatedQuoteData(
@@ -359,9 +453,11 @@ void main() {
       final result = DataValidator.validateQuote(quote);
 
       expect(result.isValid, isFalse);
-      expect(result.anomalies, anyElement(
-        predicate<DataAnomaly>((a) => a.type == DataAnomalyType.zeroPrice),
-      ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>((a) => a.type == DataAnomalyType.zeroPrice),
+          ));
     });
 
     test('detects negative price', () {
@@ -369,54 +465,70 @@ void main() {
       final result = DataValidator.validateQuote(quote);
 
       expect(result.isValid, isFalse);
-      expect(result.anomalies, anyElement(
-        predicate<DataAnomaly>((a) => a.type == DataAnomalyType.zeroPrice),
-      ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>((a) => a.type == DataAnomalyType.zeroPrice),
+          ));
     });
 
     test('detects extreme change for non-ST stocks (>20%)', () {
       final quote = createTestQuote(changePct: 25.0, name: '测试股票');
       final result = DataValidator.validateQuote(quote);
 
-      expect(result.anomalies, anyElement(
-        predicate<DataAnomaly>((a) => a.type == DataAnomalyType.extremeChange),
-      ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>(
+                (a) => a.type == DataAnomalyType.extremeChange),
+          ));
     });
 
     test('detects extreme change for ST stocks (>10%)', () {
       final quote = createTestQuote(changePct: 12.0, name: '*ST测试');
       final result = DataValidator.validateQuote(quote);
 
-      expect(result.anomalies, anyElement(
-        predicate<DataAnomaly>((a) => a.type == DataAnomalyType.extremeChange),
-      ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>(
+                (a) => a.type == DataAnomalyType.extremeChange),
+          ));
     });
 
     test('ST stock within 5% limit is not flagged as extreme change', () {
       final quote = createTestQuote(changePct: 4.0, name: '*ST测试');
       final result = DataValidator.validateQuote(quote);
 
-      expect(result.anomalies, isNot(anyElement(
-        predicate<DataAnomaly>((a) => a.type == DataAnomalyType.extremeChange),
-      )));
+      expect(
+          result.anomalies,
+          isNot(anyElement(
+            predicate<DataAnomaly>(
+                (a) => a.type == DataAnomalyType.extremeChange),
+          )));
     });
 
     test('ST stock exceeding 5% limit is flagged as extreme change', () {
       final quote = createTestQuote(changePct: 8.0, name: '*ST测试');
       final result = DataValidator.validateQuote(quote);
 
-      expect(result.anomalies, anyElement(
-        predicate<DataAnomaly>((a) => a.type == DataAnomalyType.extremeChange),
-      ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>(
+                (a) => a.type == DataAnomalyType.extremeChange),
+          ));
     });
 
     test('detects zero volume', () {
       final quote = createTestQuote(volume: 0);
       final result = DataValidator.validateQuote(quote);
 
-      expect(result.anomalies, anyElement(
-        predicate<DataAnomaly>((a) => a.type == DataAnomalyType.zeroVolume),
-      ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>((a) => a.type == DataAnomalyType.zeroVolume),
+          ));
     });
 
     test('detects high < low', () {
@@ -424,9 +536,11 @@ void main() {
       final result = DataValidator.validateQuote(quote);
 
       expect(result.isValid, isFalse);
-      expect(result.anomalies, anyElement(
-        predicate<DataAnomaly>((a) => a.description.contains('最高价低于最低价')),
-      ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>((a) => a.description.contains('最高价低于最低价')),
+          ));
     });
 
     test('valid quote data has no anomalies', () {
@@ -448,6 +562,70 @@ void main() {
       expect(types, contains(DataAnomalyType.zeroPrice));
       expect(types, contains(DataAnomalyType.zeroVolume));
     });
+
+    test('detects inconsistent amount unit against price and volume', () {
+      final quote = createTestQuote(
+        price: 10,
+        volume: 10000,
+        amount: 100000,
+      );
+      final result = DataValidator.validateQuote(quote);
+
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>((a) =>
+                a.type == DataAnomalyType.suspiciousUnit &&
+                a.field == 'amount'),
+          ));
+    });
+
+    test('detects invalid valuation and fund flow ranges', () {
+      final quote = createTestQuote(
+        turnover: 120,
+        pe: 1500,
+        pb: -1,
+        mainNetFlowRate: 150,
+      );
+      final result = DataValidator.validateQuote(quote);
+
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>((a) => a.field == 'turnover'),
+          ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>((a) => a.field == 'pe'),
+          ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>((a) => a.field == 'pb'),
+          ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>((a) => a.field == 'mainNetFlowRate'),
+          ));
+    });
+
+    test('detects circulating market cap larger than total market cap', () {
+      final quote = createTestQuote(
+        totalMarketCap: 1000000000,
+        circulatingMarketCap: 2000000000,
+      );
+      final result = DataValidator.validateQuote(quote);
+
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>((a) =>
+                a.type == DataAnomalyType.invalidRange &&
+                a.field == 'marketCap'),
+          ));
+    });
   });
 
   // ============================================================
@@ -468,9 +646,12 @@ void main() {
       final result = DataValidator.validateKlines(klines);
 
       expect(result.isValid, isFalse);
-      expect(result.anomalies, anyElement(
-        predicate<DataAnomaly>((a) => a.type == DataAnomalyType.negativeValue),
-      ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>(
+                (a) => a.type == DataAnomalyType.negativeValue),
+          ));
     });
 
     test('detects high < low in kline data', () {
@@ -487,9 +668,11 @@ void main() {
       final result = DataValidator.validateKlines(klines);
 
       expect(result.isValid, isFalse);
-      expect(result.anomalies, anyElement(
-        predicate<DataAnomaly>((a) => a.description.contains('最高价低于最低价')),
-      ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>((a) => a.description.contains('最高价低于最低价')),
+          ));
     });
 
     test('valid kline data has no anomalies', () {
@@ -576,9 +759,12 @@ void main() {
       ];
       final result = DataValidator.validateKlinePrices(klines);
 
-      expect(result.anomalies, anyElement(
-        predicate<DataAnomaly>((a) => a.type == DataAnomalyType.extremeChange),
-      ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>(
+                (a) => a.type == DataAnomalyType.extremeChange),
+          ));
     });
 
     test('detects zero volume with price change', () {
@@ -593,9 +779,11 @@ void main() {
       ];
       final result = DataValidator.validateKlinePrices(klines);
 
-      expect(result.anomalies, anyElement(
-        predicate<DataAnomaly>((a) => a.type == DataAnomalyType.zeroVolume),
-      ));
+      expect(
+          result.anomalies,
+          anyElement(
+            predicate<DataAnomaly>((a) => a.type == DataAnomalyType.zeroVolume),
+          ));
     });
 
     test('valid price data has no anomalies', () {

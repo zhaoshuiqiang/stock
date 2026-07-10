@@ -12,6 +12,7 @@ import '../analysis/ai_layer.dart';
 import '../analysis/backtest_engine.dart';
 import '../analysis/portfolio_snapshot_service.dart';
 import '../core/ai_config.dart';
+import '../core/stock_code_utils.dart';
 import '../core/trading_session.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
@@ -290,7 +291,14 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
   /// 重建分析结果索引
   void _rebuildOppMap() {
-    _oppMap = {for (final r in _oppResults) r.code: r};
+    final map = <String, OpportunityResult>{};
+    for (final r in _oppResults) {
+      final normalized = StockCodeUtils.normalizeForArchive(r.code);
+      map[r.code] = r;
+      map[normalized] = r;
+      map[StockCodeUtils.stripMarketPrefix(normalized)] = r;
+    }
+    _oppMap = map;
   }
 
   /// 判断股票的筛选分类（优先使用分析推荐，否则用涨跌幅）
@@ -310,11 +318,14 @@ class WatchlistScreenState extends State<WatchlistScreen>
     for (var i = 0; i < _watchlist.length; i++) {
       final item = _watchlist[i];
       final codeWithPrefix = _apiClient.addMarketPrefix(item.code);
+      final normalizedCode = StockCodeUtils.normalizeForArchive(item.code);
       final quote = _quotes.firstWhere(
         (q) => q.code == codeWithPrefix,
         orElse: () => QuoteData.empty(),
       );
-      final opp = _oppMap[item.code];
+      final opp = _oppMap[item.code] ??
+          _oppMap[normalizedCode] ??
+          _oppMap[StockCodeUtils.stripMarketPrefix(normalizedCode)];
       final category = _classifyStock(quote, opp);
 
       // 筛选
@@ -403,7 +414,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
   Future<void> _archiveOppItem(OpportunityResult r) async {
     final record = ArchiveRecord(
-      code: r.code,
+      code: StockCodeUtils.normalizeForArchive(r.code),
       name: r.name,
       price: r.price,
       changePct: r.changePct,
@@ -432,7 +443,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
   Future<void> _batchArchiveSelected() async {
     if (_selectedCodes.isEmpty) return;
-    final toArchive = _oppResults.where((r) => _selectedCodes.contains(r.code)).toList();
+    final selectedCodes =
+        _selectedCodes.map(StockCodeUtils.normalizeForArchive).toSet();
+    final seenCodes = <String>{};
+    final toArchive = _oppResults.where((r) {
+      final normalized = StockCodeUtils.normalizeForArchive(r.code);
+      return selectedCodes.contains(normalized) && seenCodes.add(normalized);
+    }).toList();
     if (toArchive.isEmpty) return;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -459,7 +476,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     if (confirmed != true) return;
     for (final r in toArchive) {
       final record = ArchiveRecord(
-        code: r.code,
+        code: StockCodeUtils.normalizeForArchive(r.code),
         name: r.name,
         price: r.price,
         changePct: r.changePct,
@@ -531,9 +548,12 @@ class WatchlistScreenState extends State<WatchlistScreen>
       ),
     );
     if (confirmed != true) return;
+    final seenCodes = <String>{};
     for (final r in _oppResults) {
+      final normalized = StockCodeUtils.normalizeForArchive(r.code);
+      if (!seenCodes.add(normalized)) continue;
       final record = ArchiveRecord(
-        code: r.code,
+        code: normalized,
         name: r.name,
         price: r.price,
         changePct: r.changePct,

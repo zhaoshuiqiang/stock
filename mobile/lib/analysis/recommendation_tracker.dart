@@ -514,6 +514,48 @@ class RecommendationTracker {
     return buf.toString();
   }
 
+  Future<List<Map<String, dynamic>>> getHistoricalRecommendationsWithScore(
+      String code) async {
+    if (!_initialized) await init();
+
+    final db = await _dbService.database;
+    final rows = await db.query(
+      'recommendation_tracking',
+      columns: [
+        'signal_date',
+        'signal_price',
+        'day5_return',
+        'dimension_scores_json',
+      ],
+      where: 'code = ? AND day5_return IS NOT NULL',
+      orderBy: 'signal_date DESC',
+      limit: 20,
+    );
+
+    final results = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      final dimJson = row['dimension_scores_json'] as String?;
+      int score = 0;
+      if (dimJson != null && dimJson.isNotEmpty) {
+        try {
+          final dims = jsonDecode(dimJson) as Map<String, dynamic>;
+          final total = dims.values
+              .whereType<double>()
+              .fold(0.0, (a, b) => a + b);
+          score = (total / dims.length).round().clamp(1, 10);
+        } catch (_) {
+          score = 0;
+        }
+      }
+
+      results.add({
+        'score': score,
+        'day5_return': (row['day5_return'] as num?)?.toDouble() ?? 0,
+      });
+    }
+    return results;
+  }
+
   /// 异步生成AI反思（决策反馈闭环）
   /// v2.54: 当20日追踪完成时调用，生成反思并保存到数据库
   void _generateReflectionAsync({

@@ -8,7 +8,8 @@ import 'package:stock_analyzer/analysis/strategy_engine.dart';
 // ─── Helpers ───
 
 /// Convert a list of prices into raw HistoryKline objects (no indicators).
-List<HistoryKline> _pricesToKlines(List<double> prices, {List<double>? volumes}) {
+List<HistoryKline> _pricesToKlines(List<double> prices,
+    {List<double>? volumes}) {
   return List.generate(prices.length, (i) {
     final price = prices[i];
     return HistoryKline(
@@ -17,7 +18,9 @@ List<HistoryKline> _pricesToKlines(List<double> prices, {List<double>? volumes})
       high: price * 1.02,
       low: price * 0.98,
       close: price,
-      volume: volumes != null && i < volumes.length ? volumes[i] : 10000.0 + (i % 5) * 2000,
+      volume: volumes != null && i < volumes.length
+          ? volumes[i]
+          : 10000.0 + (i % 5) * 2000,
       amount: 10000 * price,
       change: i > 0 ? price - prices[i - 1] : 0,
       changePct: i > 0 && prices[i - 1] > 0
@@ -84,8 +87,15 @@ List<HistoryKline> _sidewaysData({int count = 80}) {
 
 /// Valid recommendation values from ComprehensiveScorer
 const _validRecommendations = [
-  '强烈买入', '买入', '谨慎买入', '偏多观望',
-  '偏空观望', '谨慎卖出', '卖出', '强烈卖出', '观望',
+  '强烈买入',
+  '买入',
+  '谨慎买入',
+  '偏多观望',
+  '偏空观望',
+  '谨慎卖出',
+  '卖出',
+  '强烈卖出',
+  '观望',
 ];
 
 /// Valid risk levels
@@ -177,16 +187,19 @@ void main() {
       expect(result.confidenceScore, greaterThanOrEqualTo(0.2));
       expect(result.confidenceScore, lessThanOrEqualTo(0.95));
       expect(result.confidenceBreakdown, isNotNull);
-      expect(result.confidenceBreakdown!.length, equals(7));
-      expect(result.confidenceBreakdown!.keys, containsAll([
-        'signal_consistency',
-        'fundamental_support',
-        'sentiment_confirm',
-        'market_confirm',
-        'structure_confirm',
-        'signal_freshness',
-        'historical_winrate',
-      ]));
+      expect(result.confidenceBreakdown!.length, equals(8));
+      expect(
+          result.confidenceBreakdown!.keys,
+          containsAll([
+            'signal_consistency',
+            'fundamental_support',
+            'sentiment_confirm',
+            'market_confirm',
+            'structure_confirm',
+            'signal_freshness',
+            'historical_winrate',
+            'prediction_support',
+          ]));
       expect(result.reasons, isA<List<String>>());
       expect(result.opportunities, isA<List<Map<String, String>>>());
       expect(result.shortTermStrategies, isA<List<TradingStrategy>>());
@@ -233,7 +246,8 @@ void main() {
       expect(result.fundamentalScore!.totalScore, greaterThanOrEqualTo(0));
       expect(result.fundamentalScore!.totalScore, lessThanOrEqualTo(10));
       expect(result.fundamentalScore!.valuationScore, greaterThanOrEqualTo(0));
-      expect(result.fundamentalScore!.capitalFlowScore, greaterThanOrEqualTo(0));
+      expect(
+          result.fundamentalScore!.capitalFlowScore, greaterThanOrEqualTo(0));
       expect(result.fundamentalScore!.liquidityScore, greaterThanOrEqualTo(0));
       expect(result.fundamentalScore!.factors, isNotEmpty);
     });
@@ -263,7 +277,8 @@ void main() {
       final quote = _sampleQuote();
       final marketContext = _sampleMarketContext();
       final newsList = _sampleNewsList();
-      final result = generateAnalysis(data, quote, marketContext: marketContext, newsList: newsList);
+      final result = generateAnalysis(data, quote,
+          marketContext: marketContext, newsList: newsList);
 
       expect(result.score, greaterThanOrEqualTo(1));
       expect(result.score, lessThanOrEqualTo(10));
@@ -272,7 +287,7 @@ void main() {
       expect(result.newsSentiment, isNotNull);
       expect(result.marketContext, isNotNull);
       expect(result.confidenceBreakdown, isNotNull);
-      expect(result.confidenceBreakdown!.length, equals(7));
+      expect(result.confidenceBreakdown!.length, equals(8));
       expect(result.indicators, isNotEmpty);
     });
   });
@@ -291,7 +306,8 @@ void main() {
       expect(result.tradeLevels, containsPair('entry_high', isA<double>()));
       expect(result.tradeLevels, containsPair('target', isA<double>()));
       expect(result.tradeLevels, containsPair('stop_loss', isA<double>()));
-      expect(result.tradeLevels, containsPair('risk_reward_ratio', isA<double>()));
+      expect(
+          result.tradeLevels, containsPair('risk_reward_ratio', isA<double>()));
       expect(result.tradeLevels, containsPair('has_support', isA<bool>()));
       expect(result.tradeLevels, containsPair('has_resistance', isA<bool>()));
     });
@@ -301,9 +317,12 @@ void main() {
       final result = generateAnalysis(data, null);
       final tl = result.tradeLevels!;
 
-      expect(tl['entry_low'] as double, lessThanOrEqualTo(tl['entry_high'] as double));
-      expect(tl['target'] as double, greaterThanOrEqualTo(tl['entry_high'] as double));
-      expect(tl['stop_loss'] as double, lessThanOrEqualTo(tl['entry_low'] as double));
+      expect(tl['entry_low'] as double,
+          lessThanOrEqualTo(tl['entry_high'] as double));
+      expect(tl['target'] as double,
+          greaterThanOrEqualTo(tl['entry_high'] as double));
+      expect(tl['stop_loss'] as double,
+          lessThanOrEqualTo(tl['entry_low'] as double));
       expect(tl['risk_reward_ratio'] as double, greaterThanOrEqualTo(0));
     });
 
@@ -313,7 +332,6 @@ void main() {
       final tl = result.tradeLevels!;
 
       // 至少有部分 quality/test_count/reliability 键
-      final qualityKeys = tl.keys.where((k) => k.contains('quality') || k.contains('reliability'));
       // 可能存在也可能不存在（取决于支撑压力位计算），不应崩溃
       expect(tl, isNotNull);
     });
@@ -328,8 +346,16 @@ void main() {
       final result = generateAnalysis(data, null);
 
       // backtestResults 可能为空（如果回测引擎抛异常），但不应崩溃
-      if (result.backtestResults != null && result.backtestResults!.isNotEmpty) {
-        const expectedKeys = ['MACD交叉', 'MA金叉', 'KDJ超卖', 'RSI超卖', '布林支撑', '均线多头'];
+      if (result.backtestResults != null &&
+          result.backtestResults!.isNotEmpty) {
+        const expectedKeys = [
+          'MACD交叉',
+          'MA金叉',
+          'KDJ超卖',
+          'RSI超卖',
+          '布林支撑',
+          '均线多头'
+        ];
         for (final key in expectedKeys) {
           expect(result.backtestResults, contains(key));
         }
@@ -347,7 +373,8 @@ void main() {
       final result = generateAnalysis(data, null);
 
       // 数据不足时 backtestResults 为空 Map（非 null）
-      expect(result.backtestResults == null || result.backtestResults!.isEmpty, isTrue);
+      expect(result.backtestResults == null || result.backtestResults!.isEmpty,
+          isTrue);
     });
   });
 
@@ -367,7 +394,10 @@ void main() {
       final data = _uptrendData();
       final result = generateAnalysis(data, null);
 
-      for (final s in [...result.shortTermStrategies, ...result.longTermStrategies]) {
+      for (final s in [
+        ...result.shortTermStrategies,
+        ...result.longTermStrategies
+      ]) {
         expect(s.id, isNotEmpty);
         expect(s.name, isNotEmpty);
         expect(s.category, isNotEmpty);
@@ -424,7 +454,8 @@ void main() {
       final marketContext = _sampleMarketContext();
       final result = generateAnalysis(data, null, marketContext: marketContext);
 
-      final marketReason = result.detailedReasons.where((r) => r.title == '市场环境');
+      final marketReason =
+          result.detailedReasons.where((r) => r.title == '市场环境');
       expect(marketReason.isNotEmpty, true);
       expect(marketReason.first.confidence, equals(0.7));
       expect(marketReason.first.duration, equals('环境'));
@@ -524,8 +555,20 @@ void main() {
 
     test('极少量数据（2条）generateAnalysis 不崩溃', () {
       final raw = [
-        HistoryKline(date: DateTime(2024, 1, 1), open: 10, high: 10.5, low: 9.5, close: 10, volume: 10000),
-        HistoryKline(date: DateTime(2024, 1, 2), open: 10, high: 10.5, low: 9.5, close: 10.5, volume: 12000),
+        HistoryKline(
+            date: DateTime(2024, 1, 1),
+            open: 10,
+            high: 10.5,
+            low: 9.5,
+            close: 10,
+            volume: 10000),
+        HistoryKline(
+            date: DateTime(2024, 1, 2),
+            open: 10,
+            high: 10.5,
+            low: 9.5,
+            close: 10.5,
+            volume: 12000),
       ];
       final data = calcAllIndicators(raw);
       final result = generateAnalysis(data, null);
@@ -575,8 +618,12 @@ void main() {
       expect(ind, isNotEmpty);
       // 至少应包含部分指标摘要
       final hasAnyKey = ind.keys.any((k) =>
-        k.contains('均线') || k.contains('MACD') || k.contains('RSI') ||
-        k.contains('KDJ') || k.contains('BOLL') || k.contains('DIF'));
+          k.contains('均线') ||
+          k.contains('MACD') ||
+          k.contains('RSI') ||
+          k.contains('KDJ') ||
+          k.contains('BOLL') ||
+          k.contains('DIF'));
       expect(hasAnyKey, isTrue, reason: 'indicators 应包含至少一种技术指标摘要');
     });
   });
@@ -614,8 +661,10 @@ void main() {
       final marketContext = _sampleMarketContext();
       final newsList = _sampleNewsList();
 
-      final result1 = generateAnalysis(data, quote, marketContext: marketContext, newsList: newsList);
-      final result2 = generateAnalysis(data, quote, marketContext: marketContext, newsList: newsList);
+      final result1 = generateAnalysis(data, quote,
+          marketContext: marketContext, newsList: newsList);
+      final result2 = generateAnalysis(data, quote,
+          marketContext: marketContext, newsList: newsList);
 
       expect(result1.score, equals(result2.score));
       expect(result1.recommendation, equals(result2.recommendation));
@@ -646,7 +695,8 @@ void main() {
       expect(result1['entry_low'], equals(result2['entry_low']));
       expect(result1['target'], equals(result2['target']));
       expect(result1['stop_loss'], equals(result2['stop_loss']));
-      expect(result1['risk_reward_ratio'], equals(result2['risk_reward_ratio']));
+      expect(
+          result1['risk_reward_ratio'], equals(result2['risk_reward_ratio']));
     });
   });
 
@@ -658,7 +708,8 @@ void main() {
       final data = _uptrendData(count: 80);
       final quote = _sampleQuote(changePct: 3.0, mainNetFlowRate: 5.0);
       final marketContext = _sampleMarketContext(avgChangePct: 1.5);
-      final result = generateAnalysis(data, quote, marketContext: marketContext);
+      final result =
+          generateAnalysis(data, quote, marketContext: marketContext);
 
       expect(result.score, greaterThanOrEqualTo(6));
       expect(result.recommendation, anyOf('强烈买入', '买入', '谨慎买入', '偏多观望'));
@@ -666,9 +717,15 @@ void main() {
 
     test('强下降趋势 + 负面quote + 负面市场环境 → 偏空推荐', () {
       final data = _downtrendData(count: 80);
-      final quote = _sampleQuote(price: 10.0, changePct: -3.0, mainNetFlow: -5000000, mainNetFlowRate: -5.0);
-      final marketContext = _sampleMarketContext(avgChangePct: -1.5, shIndexPct: -1.0, szIndexPct: -1.2);
-      final result = generateAnalysis(data, quote, marketContext: marketContext);
+      final quote = _sampleQuote(
+          price: 10.0,
+          changePct: -3.0,
+          mainNetFlow: -5000000,
+          mainNetFlowRate: -5.0);
+      final marketContext = _sampleMarketContext(
+          avgChangePct: -1.5, shIndexPct: -1.0, szIndexPct: -1.2);
+      final result =
+          generateAnalysis(data, quote, marketContext: marketContext);
 
       expect(result.score, lessThanOrEqualTo(5));
       expect(result.recommendation, anyOf('偏空观望', '谨慎卖出', '卖出', '强烈卖出'));
@@ -753,12 +810,15 @@ void main() {
       final quote = _sampleQuote();
       final marketContext = _sampleMarketContext();
       final newsList = _sampleNewsList();
-      final result = generateAnalysis(data, quote, marketContext: marketContext, newsList: newsList);
+      final result = generateAnalysis(data, quote,
+          marketContext: marketContext, newsList: newsList);
 
       final bd = result.confidenceBreakdown!;
       for (final entry in bd.entries) {
-        expect(entry.value, greaterThanOrEqualTo(0), reason: '${entry.key} 应 >= 0');
-        expect(entry.value, lessThanOrEqualTo(1), reason: '${entry.key} 应 <= 1');
+        expect(entry.value, greaterThanOrEqualTo(0),
+            reason: '${entry.key} 应 >= 0');
+        expect(entry.value, lessThanOrEqualTo(1),
+            reason: '${entry.key} 应 <= 1');
       }
     });
   });
@@ -809,7 +869,8 @@ void main() {
   group('大数据量', () {
     test('200条数据 generateAnalysis 不崩溃', () {
       final data = _uptrendData(count: 200);
-      final result = generateAnalysis(data, _sampleQuote(), marketContext: _sampleMarketContext(), newsList: _sampleNewsList());
+      final result = generateAnalysis(data, _sampleQuote(),
+          marketContext: _sampleMarketContext(), newsList: _sampleNewsList());
 
       expect(result.score, greaterThanOrEqualTo(1));
       expect(result.score, lessThanOrEqualTo(10));

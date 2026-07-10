@@ -260,6 +260,11 @@ class TechnicalScorer {
     double sellStrength = 0;
     for (final s in buySignals) {
       double strength = s.strength.toDouble();
+
+      if (s.signal.contains('预警')) {
+        strength *= 0.5;
+      }
+
       if (adx > 25) {
         if (s.indicator == 'MA' ||
             s.indicator == 'MACD' ||
@@ -280,6 +285,11 @@ class TechnicalScorer {
     }
     for (final s in sellSignals) {
       double strength = s.strength.toDouble();
+
+      if (s.signal.contains('预警')) {
+        strength *= 0.5;
+      }
+
       if (adx > 25) {
         if (s.indicator == 'MA' ||
             s.indicator == 'MACD' ||

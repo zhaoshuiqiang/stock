@@ -49,8 +49,6 @@ class _SectorScreenState extends State<SectorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.sectorName),

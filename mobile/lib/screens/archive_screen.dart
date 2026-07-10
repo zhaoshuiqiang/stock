@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
@@ -10,15 +9,8 @@ import '../models/stock_models.dart';
 import '../analysis/indicators.dart';
 import '../analysis/signal_engine.dart';
 import '../storage/database_service.dart';
-import '../core/trading_session.dart';
 import '../analysis/sector_rotation.dart';
-
-enum ReliabilityLevel {
-  veryReasonable,
-  reasonable,
-  deviation,
-  veryDeviation,
-}
+import '../analysis/archive_reliability_evaluator.dart';
 
 const _kVeryReasonableColor = Color(0xFF4CAF50);
 const _kReasonableColor = Colors.orange;
@@ -37,7 +29,6 @@ class ReliabilityInfo {
   });
 }
 
-
 class ArchiveScreen extends StatefulWidget {
   const ArchiveScreen({super.key});
 
@@ -45,7 +36,8 @@ class ArchiveScreen extends StatefulWidget {
   State<ArchiveScreen> createState() => ArchiveScreenState();
 }
 
-class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserver {
+class ArchiveScreenState extends State<ArchiveScreen>
+    with WidgetsBindingObserver {
   final ApiClient _apiClient = ApiClient();
   final DatabaseService _dbService = DatabaseService();
   List<ArchiveRecord> _archives = [];
@@ -54,7 +46,7 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
   Timer? _refreshTimer;
   String _sortBy = 'time'; // 'time', 'score', 'change'
   bool _sortAscending = false;
-  String _filterType = '全部'; // '全部', '买入', '卖出', '观望'
+  String _filterType = '全部'; // '全部', '看多', '看空', '观望'
   String _filterReliability = '全部'; // '全部', '非常合理', '合理', '偏差', '非常偏差'
 
   @override
@@ -83,76 +75,25 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
     }
   }
 
-  /// 计算时间自适应阈值
-  /// 
-  /// 基准阈值 ±2%（5天），按 sqrt(天数/5) 缩放：
-  ///   1天→2.0%, 5天→2.0%, 20天→4.0%, 60天→6.9%
-  /// v2.38.0: 1天窗口最小阈值从1.0提升至2.0，与A股日常波动匹配
-  /// 观望推荐的基准阈值为 ±8%，同样按时间缩放
-  static (double threshold, double neutralThreshold) _calculateThresholds(ArchiveRecord record) {
-    final daysSince = DateTime.now().difference(record.archivedAt).inDays.clamp(0, 365);
-    final timeScale = max(daysSince, 1) / 5.0;
-    final timeFactor = sqrt(timeScale);
-    return ((2.0 * timeFactor).clamp(2.0, 12.0), (8.0 * timeFactor).clamp(4.0, 24.0));
-  }
-
   /// 判断留档推荐的可靠性等级（4级）
-  /// 
+  ///
   /// v3.2 重新设计：基于时间自适应阈值 + 方向性区分
-  /// 
+  ///
   /// 核心原则：
   /// 1. 买入/卖出（score≥6/≤3）：强方向推荐，阈值=√(天数/5)*2%，≥阈值=非常合理
   /// 2. 偏多/偏空观望（score=5/4）：弱方向推荐，阈值=基准*1.3倍，≥阈值=非常合理
   /// 3. 纯观望：非方向性，基于绝对波动大小评判
   /// 4. 时间自适：5天→阈值2%，20天→阈值4%，60天→阈值6.9%
-  /// 
+  ///
   /// 买入推荐（含谨慎买入）：
   ///   * 非常合理：涨幅 ≥ 时间阈值（方向正确且收益显著）
   ///   * 合理：     涨幅 0% ~ 阈值（方向正确）
   ///   * 偏差：     跌幅 0% ~ 阈值（方向错误，轻微亏损）
   ///   * 非常偏差：跌幅 < -阈值（方向错误，大幅亏损）
-  static ReliabilityLevel _getReliabilityLevel(ArchiveRecord record, double currentPrice) {
-    if (currentPrice <= 0 || record.price <= 0) return ReliabilityLevel.reasonable;
-
-    final priceChangePct = (currentPrice - record.price) / record.price * 100;
-    final absChange = priceChangePct.abs();
-    final (baseThreshold, neutralThreshold) = _calculateThresholds(record);
-
-    final isBuy = record.recommendation.contains('买入');
-    final isSell = record.recommendation.contains('卖出');
-    final isBullishNeutral = record.recommendation == '偏多观望';
-    final isBearishNeutral = record.recommendation == '偏空观望';
-    final isPureNeutral = isBullishNeutral || isBearishNeutral ||
-        record.recommendation.contains('观望');
-
-    if (isBuy || isBullishNeutral) {
-      // 看多方向：涨=正确，跌=错误
-      // 偏多观望信号弱，阈值扩大1.3倍
-      final threshold = isBullishNeutral ? baseThreshold * 1.3 : baseThreshold;
-      if (priceChangePct >= threshold) return ReliabilityLevel.veryReasonable;
-      if (priceChangePct >= 0) return ReliabilityLevel.reasonable;
-      if (priceChangePct >= -threshold) return ReliabilityLevel.deviation;
-      return ReliabilityLevel.veryDeviation;
-    }
-
-    if (isSell || isBearishNeutral) {
-      // 看空方向：跌=正确，涨=错误
-      final threshold = isBearishNeutral ? baseThreshold * 1.3 : baseThreshold;
-      if (priceChangePct <= -threshold) return ReliabilityLevel.veryReasonable;
-      if (priceChangePct <= 0) return ReliabilityLevel.reasonable;
-      if (priceChangePct <= threshold) return ReliabilityLevel.deviation;
-      return ReliabilityLevel.veryDeviation;
-    }
-
-    if (isPureNeutral) {
-      // 纯观望：基于绝对波动大小，阈值更宽
-      if (absChange < neutralThreshold * 0.5) return ReliabilityLevel.veryReasonable;
-      if (absChange < neutralThreshold) return ReliabilityLevel.reasonable;
-      if (absChange < neutralThreshold * 2) return ReliabilityLevel.deviation;
-      return ReliabilityLevel.veryDeviation;
-    }
-
-    return ReliabilityLevel.reasonable;
+  static ReliabilityLevel _getReliabilityLevel(
+      ArchiveRecord record, double currentPrice) {
+    return ArchiveReliabilityEvaluator.getReliabilityLevel(
+        record, currentPrice);
   }
 
   /// 获取可靠性等级对应的标签、描述和颜色
@@ -188,13 +129,12 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
   List<ArchiveRecord> _getFilteredAndSortedArchives() {
     var items = _archives.toList();
 
-    // 筛选
-    if (_filterType == '买入') {
-      items = items.where((r) => r.recommendation.contains('买入')).toList();
-    } else if (_filterType == '卖出') {
-      items = items.where((r) => r.recommendation.contains('卖出')).toList();
-    } else if (_filterType == '观望') {
-      items = items.where((r) => r.recommendation.contains('观望')).toList();
+    // 筛选：与顶部看多/看空/观望统计使用同一套方向语义。
+    if (_filterType != '全部') {
+      items = items
+          .where((r) =>
+              ArchiveReliabilityEvaluator.matchesTypeFilter(r, _filterType))
+          .toList();
     }
 
     // 可靠性筛选（4级）
@@ -242,7 +182,8 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
   Future<void> _refreshCurrentPrices() async {
     if (_archives.isEmpty) return;
     try {
-      final codes = _archives.map((r) => _apiClient.addMarketPrefix(r.code)).toList();
+      final codes =
+          _archives.map((r) => _apiClient.addMarketPrefix(r.code)).toList();
       final batchQuotes = await _apiClient.getBatchRealtimeQuotes(codes);
       final quoteMap = <String, QuoteData>{};
       for (final q in batchQuotes) {
@@ -264,7 +205,10 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
   }
 
   Future<void> _reanalyze(ArchiveRecord record) async {
-    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+    showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()));
 
     try {
       final prefixedCode = _apiClient.addMarketPrefix(record.code);
@@ -273,7 +217,9 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
 
       if (klines.isEmpty) {
         if (mounted) Navigator.pop(context);
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法获取数据')));
+        if (mounted)
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('无法获取数据')));
         return;
       }
 
@@ -281,13 +227,21 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
 
       final sectorName = await _apiClient.getStockSector(prefixedCode);
       final hotSectors = await _apiClient.getHotSectors();
-      final sectorData = hotSectors.map((s) => SectorData(
-        name: s.name, code: s.code, changePct: s.changePct,
-        limitUpCount: s.stockCount, mainNetFlow: 0,
-      )).toList();
-      final sectorRotationResult = SectorRotation.analyze(sectorList: sectorData);
+      final sectorData = hotSectors
+          .map((s) => SectorData(
+                name: s.name,
+                code: s.code,
+                changePct: s.changePct,
+                limitUpCount: s.stockCount,
+                mainNetFlow: 0,
+              ))
+          .toList();
+      final sectorRotationResult =
+          SectorRotation.analyze(sectorList: sectorData);
 
-      final analysis = generateAnalysis(calculated, quote,
+      final analysis = generateAnalysis(
+        calculated,
+        quote,
         sectorName: sectorName,
         sectorAnalysis: sectorRotationResult.topSectors,
       );
@@ -297,21 +251,26 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
       if (mounted) _showReanalysisDialog(record, analysis, quote);
     } catch (e) {
       if (mounted) Navigator.pop(context);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('分析失败: $e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('分析失败: $e')));
     }
   }
 
-  void _showReanalysisDialog(ArchiveRecord record, AnalysisResult currentAnalysis, QuoteData? currentQuote) {
+  void _showReanalysisDialog(ArchiveRecord record,
+      AnalysisResult currentAnalysis, QuoteData? currentQuote) {
     final currentPrice = currentQuote?.price ?? 0;
     final currentChangePct = currentQuote?.changePct ?? 0;
     final priceChange = currentPrice - record.price;
-    final priceChangePct = record.price > 0 ? (priceChange / record.price * 100) : 0.0;
+    final priceChangePct =
+        record.price > 0 ? (priceChange / record.price * 100) : 0.0;
 
     String reliability;
     Color reliabilityColor;
-    if (currentPrice > 0 && (record.recommendation.contains('买入') ||
-        record.recommendation.contains('卖出') ||
-        record.recommendation.contains('观望'))) {
+    if (currentPrice > 0 &&
+        (record.recommendation.contains('买入') ||
+            record.recommendation.contains('卖出') ||
+            record.recommendation.contains('观望'))) {
       final level = _getReliabilityLevel(record, currentPrice);
       final info = _getReliabilityInfo(level);
       reliability = info.label;
@@ -321,47 +280,75 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
       reliabilityColor = Colors.orange;
     }
 
-    showDialog(context: context, builder: (context) => Dialog(
-      backgroundColor: const Color(0xFF0D1117),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('${record.name} 重新分析', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            _buildCompareRow('推荐', record.recommendation, currentAnalysis.recommendation),
-            _buildCompareRow('评分', '${record.score}', '${currentAnalysis.score}'),
-            _buildCompareRow('风险', record.riskLevel, currentAnalysis.riskLevel),
-            _buildCompareRow('价格', record.price.toStringAsFixed(2), currentPrice.toStringAsFixed(2)),
-            _buildCompareRow('涨跌幅', '${record.changePct.toStringAsFixed(2)}%', '${currentChangePct.toStringAsFixed(2)}%'),
-            const Divider(color: Colors.white12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('价格变动', style: TextStyle(color: Colors.white54, fontSize: 13)),
-                Text(
-                  '${priceChange >= 0 ? '+' : ''}${priceChange.toStringAsFixed(2)} (${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toStringAsFixed(2)}%)',
-                  style: TextStyle(color: priceChange >= 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a), fontSize: 14, fontWeight: FontWeight.bold),
+    showDialog(
+        context: context,
+        builder: (context) => Dialog(
+              backgroundColor: const Color(0xFF0D1117),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('${record.name} 重新分析',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 16),
+                    _buildCompareRow('推荐', record.recommendation,
+                        currentAnalysis.recommendation),
+                    _buildCompareRow(
+                        '评分', '${record.score}', '${currentAnalysis.score}'),
+                    _buildCompareRow(
+                        '风险', record.riskLevel, currentAnalysis.riskLevel),
+                    _buildCompareRow('价格', record.price.toStringAsFixed(2),
+                        currentPrice.toStringAsFixed(2)),
+                    _buildCompareRow(
+                        '涨跌幅',
+                        '${record.changePct.toStringAsFixed(2)}%',
+                        '${currentChangePct.toStringAsFixed(2)}%'),
+                    const Divider(color: Colors.white12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('价格变动',
+                            style:
+                                TextStyle(color: Colors.white54, fontSize: 13)),
+                        Text(
+                          '${priceChange >= 0 ? '+' : ''}${priceChange.toStringAsFixed(2)} (${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toStringAsFixed(2)}%)',
+                          style: TextStyle(
+                              color: priceChange >= 0
+                                  ? const Color(0xFFef5350)
+                                  : const Color(0xFF26a69a),
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: reliabilityColor.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                            color: reliabilityColor.withOpacity(0.5)),
+                      ),
+                      child: Text(reliability,
+                          style: TextStyle(
+                              color: reliabilityColor,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('关闭')),
+                  ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: reliabilityColor.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: reliabilityColor.withOpacity(0.5)),
               ),
-              child: Text(reliability, style: TextStyle(color: reliabilityColor, fontSize: 14, fontWeight: FontWeight.bold)),
-            ),
-            const SizedBox(height: 16),
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭')),
-          ],
-        ),
-      ),
-    ));
+            ));
   }
 
   Widget _buildCompareRow(String label, String oldValue, String newValue) {
@@ -370,10 +357,16 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 13)),
-          Text(oldValue, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          Text(label,
+              style: const TextStyle(color: Colors.white54, fontSize: 13)),
+          Text(oldValue,
+              style: const TextStyle(color: Colors.white70, fontSize: 13)),
           const Icon(Icons.arrow_forward, color: Colors.white24, size: 16),
-          Text(newValue, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(newValue,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -385,10 +378,15 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF0D1117),
         title: const Text('确认删除', style: TextStyle(color: Colors.white)),
-        content: Text('确定要删除 ${record.name} 的留档记录吗？', style: const TextStyle(color: Colors.white70)),
+        content: Text('确定要删除 ${record.name} 的留档记录吗？',
+            style: const TextStyle(color: Colors.white70)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('删除', style: TextStyle(color: Colors.red))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('删除', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -404,10 +402,15 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF0D1117),
         title: const Text('一键删除', style: TextStyle(color: Colors.white)),
-        content: Text('确定要删除全部 ${_archives.length} 条留档记录吗？此操作不可恢复。', style: const TextStyle(color: Colors.white70)),
+        content: Text('确定要删除全部 ${_archives.length} 条留档记录吗？此操作不可恢复。',
+            style: const TextStyle(color: Colors.white70)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('全部删除', style: TextStyle(color: Colors.red))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('全部删除', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -453,10 +456,23 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
     try {
       // CSV 表头：留档元数据 + 推荐字段 + 实时行情 + 可靠性判定
       final headers = [
-        '代码', '名称', '留档价格', '留档涨跌幅(%)', '评分', '推荐', '风险等级',
-        '买入信号数', '卖出信号数', '活跃战法数', '共振评分',
+        '代码',
+        '名称',
+        '留档价格',
+        '留档涨跌幅(%)',
+        '评分',
+        '推荐',
+        '风险等级',
+        '买入信号数',
+        '卖出信号数',
+        '活跃战法数',
+        '共振评分',
         '留档时间',
-        '现价', '现涨跌幅(%)', '价格变动(%)', '是否偏差', '可靠性',
+        '现价',
+        '现涨跌幅(%)',
+        '价格变动(%)',
+        '是否偏差',
+        '可靠性',
         'topSignals',
       ];
 
@@ -475,12 +491,14 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
             : 0.0;
         String reliability = '未知';
         bool isDeviation = false;
-        if (currentPrice > 0 && (record.recommendation.contains('买入') ||
-            record.recommendation.contains('卖出') ||
-            record.recommendation.contains('观望'))) {
+        if (currentPrice > 0 &&
+            (record.recommendation.contains('买入') ||
+                record.recommendation.contains('卖出') ||
+                record.recommendation.contains('观望'))) {
           final level = _getReliabilityLevel(record, currentPrice);
           reliability = _getReliabilityInfo(level).label;
-          isDeviation = level == ReliabilityLevel.deviation || level == ReliabilityLevel.veryDeviation;
+          isDeviation = level == ReliabilityLevel.deviation ||
+              level == ReliabilityLevel.veryDeviation;
         }
 
         final row = [
@@ -544,7 +562,8 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
               onPressed: () {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(docFile.path, style: const TextStyle(fontSize: 12)),
+                    content: Text(docFile.path,
+                        style: const TextStyle(fontSize: 12)),
                     duration: const Duration(seconds: 8),
                   ),
                 );
@@ -558,7 +577,9 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
       if (!mounted) return;
       Navigator.pop(context); // 关闭 loading
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导出失败: ${e.toString().length > 50 ? '${e.toString().substring(0, 50)}...' : e}')),
+        SnackBar(
+            content: Text(
+                '导出失败: ${e.toString().length > 50 ? '${e.toString().substring(0, 50)}...' : e}')),
       );
     }
   }
@@ -576,9 +597,11 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
           children: [
             const Icon(Icons.bookmark_border, size: 48, color: Colors.white24),
             const SizedBox(height: 12),
-            const Text('暂无留档记录', style: TextStyle(color: Colors.white38, fontSize: 14)),
+            const Text('暂无留档记录',
+                style: TextStyle(color: Colors.white38, fontSize: 14)),
             const SizedBox(height: 4),
-            const Text('在"自选"页面中点击归档按钮保存推荐', style: TextStyle(color: Colors.white24, fontSize: 12)),
+            const Text('在"自选"页面中点击归档按钮保存推荐',
+                style: TextStyle(color: Colors.white24, fontSize: 12)),
           ],
         ),
       );
@@ -586,48 +609,29 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
 
     final filteredArchives = _getFilteredAndSortedArchives();
 
-    // 统计4级可靠性条数（基于筛选后的结果）
-    int veryReasonableCount = 0;
-    int reasonableCount = 0;
-    int deviationCount = 0;
-    int veryDeviationCount = 0;
-    for (final record in filteredArchives) {
-      final currentQuote = _currentQuotes[record.code];
-      final currentPrice = currentQuote?.price ?? 0;
-      if (currentPrice > 0 && (record.recommendation.contains('买入') ||
-          record.recommendation.contains('卖出') ||
-          record.recommendation.contains('观望'))) {
-        final level = _getReliabilityLevel(record, currentPrice);
-        switch (level) {
-          case ReliabilityLevel.veryReasonable:
-            veryReasonableCount++;
-            break;
-          case ReliabilityLevel.reasonable:
-            reasonableCount++;
-            break;
-          case ReliabilityLevel.deviation:
-            deviationCount++;
-            break;
-          case ReliabilityLevel.veryDeviation:
-            veryDeviationCount++;
-            break;
-        }
-      }
-    }
-    final total = veryReasonableCount + reasonableCount + deviationCount + veryDeviationCount;
-    final winRate = total > 0 ? ((veryReasonableCount + reasonableCount) / total * 100) : 0.0;
+    // 统计4级可靠性和方向拆分（基于筛选后的结果）
+    final reliabilityStats = ArchiveReliabilityEvaluator.calculateStats(
+      records: filteredArchives,
+      currentPriceOf: (record) => _currentQuotes[record.code]?.price ?? 0,
+    );
+    final veryReasonableCount = reliabilityStats.veryReasonableCount;
+    final reasonableCount = reliabilityStats.reasonableCount;
+    final deviationCount = reliabilityStats.deviationCount;
+    final veryDeviationCount = reliabilityStats.veryDeviationCount;
+    final total = reliabilityStats.total;
+    final directionReasonableRate = reliabilityStats.directionReasonableRate;
     final isFiltered = _filterReliability != '全部' || _filterType != '全部';
 
-    final veryReasonablePct = total > 0 ? (veryReasonableCount / total * 100) : 0.0;
-    final reasonablePct = total > 0 ? (reasonableCount / total * 100) : 0.0;
-    final deviationPct = total > 0 ? (deviationCount / total * 100) : 0.0;
-    final veryDeviationPct = total > 0 ? (veryDeviationCount / total * 100) : 0.0;
+    final veryReasonablePct = reliabilityStats.veryReasonablePct;
+    final reasonablePct = reliabilityStats.reasonablePct;
+    final deviationPct = reliabilityStats.deviationPct;
+    final veryDeviationPct = reliabilityStats.veryDeviationPct;
 
     return RefreshIndicator(
       onRefresh: _loadArchives,
       child: CustomScrollView(
         slivers: [
-          // 顶部胜率统计卡片（三行布局：胜率 + 分段比例条 + 操作按钮）
+          // 顶部方向统计卡片（方向合理率 + 拆分指标 + 分段比例条 + 操作按钮）
           SliverToBoxAdapter(
             child: Container(
               margin: const EdgeInsets.fromLTRB(8, 8, 8, 4),
@@ -639,18 +643,26 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
               ),
               child: Column(
                 children: [
-                  // 第一行：胜率 + 总计
+                  // 第一行：方向合理率 + 总计
                   Row(
                     children: [
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(isFiltered ? '筛选胜率' : '推荐胜率', style: TextStyle(color: isFiltered ? const Color(0xFF58A6FF) : Colors.white54, fontSize: 12)),
+                            Text(isFiltered ? '筛选方向合理率' : '方向合理率',
+                                style: TextStyle(
+                                    color: isFiltered
+                                        ? const Color(0xFF58A6FF)
+                                        : Colors.white54,
+                                    fontSize: 12)),
                             const SizedBox(height: 4),
                             Text(
-                              '${winRate.toStringAsFixed(1)}%',
-                              style: const TextStyle(color: Colors.orange, fontSize: 28, fontWeight: FontWeight.bold),
+                              '${directionReasonableRate.toStringAsFixed(1)}%',
+                              style: const TextStyle(
+                                  color: Colors.orange,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
@@ -659,15 +671,49 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
                       const SizedBox(width: 16),
                       Column(
                         children: [
-                          const Text('总计', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                          const Text('总计',
+                              style: TextStyle(
+                                  color: Colors.white38, fontSize: 11)),
                           const SizedBox(height: 2),
-                          Text('$total', style: const TextStyle(color: Colors.white70, fontSize: 22, fontWeight: FontWeight.bold)),
+                          Text('$total',
+                              style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold)),
                         ],
                       ),
                     ],
                   ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      _buildDirectionMetric(
+                        '看多',
+                        reliabilityStats.bullishHits,
+                        reliabilityStats.bullishTotal,
+                        reliabilityStats.bullishHitRate,
+                        _kVeryReasonableColor,
+                      ),
+                      const SizedBox(width: 6),
+                      _buildDirectionMetric(
+                        '看空',
+                        reliabilityStats.bearishHits,
+                        reliabilityStats.bearishTotal,
+                        reliabilityStats.bearishHitRate,
+                        _kDeviationColor,
+                      ),
+                      const SizedBox(width: 6),
+                      _buildDirectionMetric(
+                        '观望',
+                        reliabilityStats.neutralStable,
+                        reliabilityStats.neutralTotal,
+                        reliabilityStats.neutralStableRate,
+                        _kReasonableColor,
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 12),
-                  // 第二行：分段比例条 + 标签
+                  // 第三行：分段比例条 + 标签
                   Column(
                     children: [
                       // 分段比例条
@@ -683,7 +729,8 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
                             Container(
                               width: veryReasonablePct * 0.01 * double.infinity,
                               decoration: BoxDecoration(
-                                borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
+                                borderRadius: const BorderRadius.horizontal(
+                                    left: Radius.circular(6)),
                                 color: _kVeryReasonableColor,
                               ),
                             ),
@@ -701,7 +748,8 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
                             Container(
                               width: veryDeviationPct * 0.01 * double.infinity,
                               decoration: BoxDecoration(
-                                borderRadius: const BorderRadius.horizontal(right: Radius.circular(6)),
+                                borderRadius: const BorderRadius.horizontal(
+                                    right: Radius.circular(6)),
                                 color: _kVeryDeviationColor,
                               ),
                             ),
@@ -713,16 +761,20 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          _buildStatLabel('非常合理', veryReasonableCount, veryReasonablePct, _kVeryReasonableColor),
-                          _buildStatLabel('合理', reasonableCount, reasonablePct, _kReasonableColor),
-                          _buildStatLabel('偏差', deviationCount, deviationPct, _kDeviationColor),
-                          _buildStatLabel('非常偏差', veryDeviationCount, veryDeviationPct, _kVeryDeviationColor),
+                          _buildStatLabel('非常合理', veryReasonableCount,
+                              veryReasonablePct, _kVeryReasonableColor),
+                          _buildStatLabel('合理', reasonableCount, reasonablePct,
+                              _kReasonableColor),
+                          _buildStatLabel('偏差', deviationCount, deviationPct,
+                              _kDeviationColor),
+                          _buildStatLabel('非常偏差', veryDeviationCount,
+                              veryDeviationPct, _kVeryDeviationColor),
                         ],
                       ),
                     ],
                   ),
                   const SizedBox(height: 10),
-                  // 第三行：导出 + 删除按钮（各占一半宽度）
+                  // 第四行：导出 + 删除按钮（各占一半宽度）
                   Row(
                     children: [
                       Expanded(
@@ -733,14 +785,21 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
                             decoration: BoxDecoration(
                               color: const Color(0xFF58A6FF).withOpacity(0.15),
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: const Color(0xFF58A6FF).withOpacity(0.5)),
+                              border: Border.all(
+                                  color:
+                                      const Color(0xFF58A6FF).withOpacity(0.5)),
                             ),
                             child: const Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.ios_share, color: Color(0xFF58A6FF), size: 15),
+                                Icon(Icons.ios_share,
+                                    color: Color(0xFF58A6FF), size: 15),
                                 SizedBox(width: 4),
-                                Text('导出CSV', style: TextStyle(color: Color(0xFF58A6FF), fontSize: 12, fontWeight: FontWeight.w600)),
+                                Text('导出CSV',
+                                    style: TextStyle(
+                                        color: Color(0xFF58A6FF),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600)),
                               ],
                             ),
                           ),
@@ -755,14 +814,20 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
                             decoration: BoxDecoration(
                               color: Colors.red.withOpacity(0.15),
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.red.withOpacity(0.5)),
+                              border: Border.all(
+                                  color: Colors.red.withOpacity(0.5)),
                             ),
                             child: const Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.delete_sweep, color: Colors.red, size: 15),
+                                Icon(Icons.delete_sweep,
+                                    color: Colors.red, size: 15),
                                 SizedBox(width: 4),
-                                Text('一键删除', style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.w600)),
+                                Text('一键删除',
+                                    style: TextStyle(
+                                        color: Colors.red,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600)),
                               ],
                             ),
                           ),
@@ -783,7 +848,7 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
                   // 推荐类型下拉框
                   _buildFilterDropdown(
                     value: _filterType,
-                    items: const ['全部', '买入', '卖出', '观望'],
+                    items: const ['全部', '看多', '看空', '观望'],
                     label: '类型',
                     onChanged: (v) => setState(() => _filterType = v),
                   ),
@@ -798,20 +863,26 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
                       isDense: true,
                       iconEnabledColor: const Color(0xFF8B949E),
                       dropdownColor: const Color(0xFF21262D),
-                      style: const TextStyle(color: Color(0xFFF0F6FC), fontSize: 12),
+                      style: const TextStyle(
+                          color: Color(0xFFF0F6FC), fontSize: 12),
                       items: const [
                         DropdownMenuItem(value: 'time', child: Text('时间')),
                         DropdownMenuItem(value: 'score', child: Text('评分')),
                         DropdownMenuItem(value: 'change', child: Text('涨幅')),
                       ],
-                      onChanged: (v) { if (v != null) setState(() => _sortBy = v); },
+                      onChanged: (v) {
+                        if (v != null) setState(() => _sortBy = v);
+                      },
                     ),
                   ),
                   // 升降序切换
                   GestureDetector(
-                    onTap: () => setState(() => _sortAscending = !_sortAscending),
+                    onTap: () =>
+                        setState(() => _sortAscending = !_sortAscending),
                     child: Icon(
-                      _sortAscending ? Icons.arrow_upward : Icons.arrow_downward,
+                      _sortAscending
+                          ? Icons.arrow_upward
+                          : Icons.arrow_downward,
                       size: 18,
                       color: const Color(0xFF8B949E),
                     ),
@@ -824,150 +895,213 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
           SliverList(
             delegate: SliverChildBuilderDelegate(
               (context, index) {
-          final record = filteredArchives[index];
-          final currentQuote = _currentQuotes[record.code];
-          final currentPrice = currentQuote?.price ?? 0;
-          final currentChangePct = currentQuote?.changePct ?? 0;
-          final priceChange = currentPrice > 0 ? currentPrice - record.price : 0.0;
+                final record = filteredArchives[index];
+                final currentQuote = _currentQuotes[record.code];
+                final currentPrice = currentQuote?.price ?? 0;
+                final currentChangePct = currentQuote?.changePct ?? 0;
 
-          String reliabilityLabel = '';
-          Color reliabilityColor = Colors.transparent;
-          if (currentPrice > 0 && (record.recommendation.contains('买入') ||
-              record.recommendation.contains('卖出') ||
-              record.recommendation.contains('观望'))) {
-            final level = _getReliabilityLevel(record, currentPrice);
-            final info = _getReliabilityInfo(level);
-            reliabilityLabel = info.label;
-            reliabilityColor = info.color;
-          }
+                String reliabilityLabel = '';
+                Color reliabilityColor = Colors.transparent;
+                if (currentPrice > 0 &&
+                    (record.recommendation.contains('买入') ||
+                        record.recommendation.contains('卖出') ||
+                        record.recommendation.contains('观望'))) {
+                  final level = _getReliabilityLevel(record, currentPrice);
+                  final info = _getReliabilityInfo(level);
+                  reliabilityLabel = info.label;
+                  reliabilityColor = info.color;
+                }
 
-          final recColor = record.recommendation.contains('买入')
-              ? const Color(0xFFef5350)
-              : record.recommendation.contains('卖出')
-                  ? const Color(0xFF26a69a)
-                  : Colors.orange;
+                final recColor = record.recommendation.contains('买入')
+                    ? const Color(0xFFef5350)
+                    : record.recommendation.contains('卖出')
+                        ? const Color(0xFF26a69a)
+                        : Colors.orange;
 
-          return InkWell(
-            onLongPress: () => _deleteArchive(record),
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 6),
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: const Color(0xFF161B22),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: recColor.withOpacity(0.3)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                return InkWell(
+                  onLongPress: () => _deleteArchive(record),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF161B22),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: recColor.withOpacity(0.3)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           children: [
-                            Row(
-                              children: [
-                                Text(record.name, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
-                                const SizedBox(width: 6),
-                                Text(record.code, style: const TextStyle(color: Colors.white38, fontSize: 11)),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Text('留档: ', style: const TextStyle(color: Colors.white38, fontSize: 11)),
-                                Text(record.price.toStringAsFixed(2), style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                                const SizedBox(width: 4),
-                                Text(DateFormat('MM/dd HH:mm').format(record.archivedAt), style: const TextStyle(color: Colors.white38, fontSize: 11)),
-                              ],
-                            ),
-                            if (currentPrice > 0) ...[
-                              const SizedBox(height: 2),
-                              Row(
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('现价: ', style: const TextStyle(color: Colors.white38, fontSize: 11)),
-                                  Text(currentPrice.toStringAsFixed(2), style: TextStyle(
-                                    color: currentChangePct >= 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a),
-                                    fontSize: 12, fontWeight: FontWeight.bold,
-                                  )),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '${currentChangePct >= 0 ? "+" : ""}${currentChangePct.toStringAsFixed(2)}%',
-                                    style: TextStyle(color: currentChangePct >= 0 ? const Color(0xFFef5350) : const Color(0xFF26a69a), fontSize: 11),
+                                  Row(
+                                    children: [
+                                      Text(record.name,
+                                          style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.bold)),
+                                      const SizedBox(width: 6),
+                                      Text(record.code,
+                                          style: const TextStyle(
+                                              color: Colors.white38,
+                                              fontSize: 11)),
+                                    ],
                                   ),
-                                  if (reliabilityLabel.isNotEmpty) ...[
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                      decoration: BoxDecoration(
-                                        color: reliabilityColor.withOpacity(0.15),
-                                        borderRadius: BorderRadius.circular(3),
-                                      ),
-                                      child: Text(reliabilityLabel, style: TextStyle(color: reliabilityColor, fontSize: 10, fontWeight: FontWeight.w600)),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Text('留档: ',
+                                          style: const TextStyle(
+                                              color: Colors.white38,
+                                              fontSize: 11)),
+                                      Text(record.price.toStringAsFixed(2),
+                                          style: const TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 12)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                          DateFormat('MM/dd HH:mm')
+                                              .format(record.archivedAt),
+                                          style: const TextStyle(
+                                              color: Colors.white38,
+                                              fontSize: 11)),
+                                    ],
+                                  ),
+                                  if (currentPrice > 0) ...[
+                                    const SizedBox(height: 2),
+                                    Row(
+                                      children: [
+                                        Text('现价: ',
+                                            style: const TextStyle(
+                                                color: Colors.white38,
+                                                fontSize: 11)),
+                                        Text(currentPrice.toStringAsFixed(2),
+                                            style: TextStyle(
+                                              color: currentChangePct >= 0
+                                                  ? const Color(0xFFef5350)
+                                                  : const Color(0xFF26a69a),
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                            )),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '${currentChangePct >= 0 ? "+" : ""}${currentChangePct.toStringAsFixed(2)}%',
+                                          style: TextStyle(
+                                              color: currentChangePct >= 0
+                                                  ? const Color(0xFFef5350)
+                                                  : const Color(0xFF26a69a),
+                                              fontSize: 11),
+                                        ),
+                                        if (reliabilityLabel.isNotEmpty) ...[
+                                          const SizedBox(width: 6),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 4, vertical: 1),
+                                            decoration: BoxDecoration(
+                                              color: reliabilityColor
+                                                  .withOpacity(0.15),
+                                              borderRadius:
+                                                  BorderRadius.circular(3),
+                                            ),
+                                            child: Text(reliabilityLabel,
+                                                style: TextStyle(
+                                                    color: reliabilityColor,
+                                                    fontSize: 10,
+                                                    fontWeight:
+                                                        FontWeight.w600)),
+                                          ),
+                                        ],
+                                      ],
                                     ),
                                   ],
                                 ],
                               ),
-                            ],
+                            ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: recColor.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                        color: recColor.withOpacity(0.5)),
+                                  ),
+                                  child: Text(record.recommendation,
+                                      style: TextStyle(
+                                          color: recColor,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold)),
+                                ),
+                                const SizedBox(height: 4),
+                                Text('${record.score}分',
+                                    style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600)),
+                              ],
+                            ),
                           ],
                         ),
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: recColor.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: recColor.withOpacity(0.5)),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            _buildTag('买${record.buySignalCount}',
+                                const Color(0xFFef5350)),
+                            const SizedBox(width: 4),
+                            _buildTag('卖${record.sellSignalCount}',
+                                const Color(0xFF26a69a)),
+                            const SizedBox(width: 4),
+                            _buildTag('战法${record.activeStrategyCount}',
+                                const Color(0xFFFFC107)),
+                            const SizedBox(width: 4),
+                            _buildTag(
+                                '共振${record.confluenceScore}/10', Colors.cyan),
+                            const SizedBox(width: 4),
+                            _buildTag(
+                                '风险${record.riskLevel}',
+                                record.riskLevel == '高'
+                                    ? Colors.red
+                                    : record.riskLevel == '中高'
+                                        ? Colors.orange
+                                        : Colors.white38),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: () => _reanalyze(record),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                      color: Colors.blue.withOpacity(0.5)),
+                                ),
+                                child: const Text('重新分析',
+                                    style: TextStyle(
+                                        color: Colors.blue,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600)),
+                              ),
                             ),
-                            child: Text(record.recommendation, style: TextStyle(color: recColor, fontSize: 12, fontWeight: FontWeight.bold)),
-                          ),
-                          const SizedBox(height: 4),
-                          Text('${record.score}分', style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      _buildTag('买${record.buySignalCount}', const Color(0xFFef5350)),
-                      const SizedBox(width: 4),
-                      _buildTag('卖${record.sellSignalCount}', const Color(0xFF26a69a)),
-                      const SizedBox(width: 4),
-                      _buildTag('战法${record.activeStrategyCount}', const Color(0xFFFFC107)),
-                      const SizedBox(width: 4),
-                      _buildTag('共振${record.confluenceScore}/10', Colors.cyan),
-                      const SizedBox(width: 4),
-                      _buildTag('风险${record.riskLevel}', record.riskLevel == '高' ? Colors.red : record.riskLevel == '中高' ? Colors.orange : Colors.white38),
-                      const Spacer(),
-                      GestureDetector(
-                        onTap: () => _reanalyze(record),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: Colors.blue.withOpacity(0.5)),
-                          ),
-                          child: const Text('重新分析', style: TextStyle(color: Colors.blue, fontSize: 11, fontWeight: FontWeight.w600)),
+                          ],
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ],
-              ),
+                );
+              },
+              childCount: filteredArchives.length,
             ),
-          );
-        },
-            childCount: filteredArchives.length,
           ),
-        ),
-      ],
-    ),
+        ],
+      ),
     );
   }
 
@@ -990,12 +1124,16 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
           iconEnabledColor: const Color(0xFF8B949E),
           dropdownColor: const Color(0xFF21262D),
           style: const TextStyle(color: Color(0xFFF0F6FC), fontSize: 12),
-          items: items.map((item) => DropdownMenuItem(
-            value: item,
-            child: Text(item == '全部' && label == '类型' ? label : item,
-              style: const TextStyle(fontSize: 12)),
-          )).toList(),
-          onChanged: (v) { if (v != null) onChanged(v); },
+          items: items
+              .map((item) => DropdownMenuItem(
+                    value: item,
+                    child: Text(item == '全部' && label == '类型' ? label : item,
+                        style: const TextStyle(fontSize: 12)),
+                  ))
+              .toList(),
+          onChanged: (v) {
+            if (v != null) onChanged(v);
+          },
         ),
       ),
     );
@@ -1008,7 +1146,8 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         border: Border.all(
-          color: _filterReliability == '全部' ? const Color(0xFF30363D)
+          color: _filterReliability == '全部'
+              ? const Color(0xFF30363D)
               : chipColor.withOpacity(0.5),
         ),
         borderRadius: BorderRadius.circular(6),
@@ -1020,22 +1159,25 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
           iconEnabledColor: const Color(0xFF8B949E),
           dropdownColor: const Color(0xFF21262D),
           style: TextStyle(color: chipColor, fontSize: 12),
-          selectedItemBuilder: (context) => options.map((f) => Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (f != '全部')
-                Container(
-                  width: 6, height: 6,
-                  margin: const EdgeInsets.only(right: 4),
-                  decoration: BoxDecoration(
-                    color: _getReliabilityColor(f),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              Text(f == '全部' ? '状态' : f,
-                style: TextStyle(color: chipColor, fontSize: 12)),
-            ],
-          )).toList(),
+          selectedItemBuilder: (context) => options
+              .map((f) => Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (f != '全部')
+                        Container(
+                          width: 6,
+                          height: 6,
+                          margin: const EdgeInsets.only(right: 4),
+                          decoration: BoxDecoration(
+                            color: _getReliabilityColor(f),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      Text(f == '全部' ? '状态' : f,
+                          style: TextStyle(color: chipColor, fontSize: 12)),
+                    ],
+                  ))
+              .toList(),
           items: options.map((f) {
             final color = _getReliabilityColor(f);
             return DropdownMenuItem(
@@ -1045,17 +1187,21 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
                 children: [
                   if (f != '全部')
                     Container(
-                      width: 6, height: 6,
+                      width: 6,
+                      height: 6,
                       margin: const EdgeInsets.only(right: 6),
-                      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                      decoration:
+                          BoxDecoration(color: color, shape: BoxShape.circle),
                     ),
                   Text(f == '全部' ? '全部' : f,
-                    style: TextStyle(color: color, fontSize: 12)),
+                      style: TextStyle(color: color, fontSize: 12)),
                 ],
               ),
             );
           }).toList(),
-          onChanged: (v) { if (v != null) setState(() => _filterReliability = v); },
+          onChanged: (v) {
+            if (v != null) setState(() => _filterReliability = v);
+          },
         ),
       ),
     );
@@ -1084,7 +1230,9 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
         color: color.withOpacity(0.12),
         borderRadius: BorderRadius.circular(3),
       ),
-      child: Text(text, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+      child: Text(text,
+          style: TextStyle(
+              color: color, fontSize: 10, fontWeight: FontWeight.w600)),
     );
   }
 
@@ -1105,6 +1253,47 @@ class ArchiveScreenState extends State<ArchiveScreen> with WidgetsBindingObserve
             style: TextStyle(color: color, fontSize: 10),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDirectionMetric(
+    String label,
+    int hits,
+    int total,
+    double rate,
+    Color color,
+  ) {
+    final value = total > 0 ? '${rate.toStringAsFixed(0)}%' : '--';
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: color.withOpacity(0.25)),
+        ),
+        child: Column(
+          children: [
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '$value  $hits/$total',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70, fontSize: 11),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -12,6 +12,7 @@ import '../widgets/sentiment_thermometer_card.dart';
 import '../core/trading_session.dart';
 import 'quote_screen.dart';
 import 'sector_screen.dart';
+import 'sector_overview_screen.dart';
 import 'quant_screen.dart';
 import 'global_market_screen.dart';
 
@@ -344,6 +345,18 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text('热门板块', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                            InkWell(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => const SectorOverviewScreen()),
+                                );
+                              },
+                              child: const Text(
+                                '查看全部 >',
+                                style: TextStyle(color: Color(0xFF58A6FF), fontSize: 12),
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 16),

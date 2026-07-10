@@ -49,6 +49,18 @@ class TradingDashboard extends StatelessWidget {
             const SizedBox(height: 8),
             _buildMarketContextRow(),
           ],
+          if (analysis!.momentumPersistence != null) ...[
+            const SizedBox(height: 10),
+            _buildMomentumPersistenceCard(),
+          ],
+          if (analysis!.nextDayPrediction != null) ...[
+            const SizedBox(height: 10),
+            _buildNextDayPredictionCard(),
+          ],
+          if (analysis!.earlyWarningSignals != null && analysis!.earlyWarningSignals!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _buildEarlyWarningSignalsCard(),
+          ],
         ],
       ),
     );
@@ -636,6 +648,327 @@ class TradingDashboard extends StatelessWidget {
             Text(
               '涨${mc.upCount}跌${mc.downCount}',
               style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ─── 动量持续性分析 ───────────────────────────────────────────
+
+  Widget _buildMomentumPersistenceCard() {
+    final mp = analysis!.momentumPersistence!;
+    final persistenceScore = (mp['persistence_score'] as double?) ?? 0.5;
+    final adxTrendScore = (mp['adx_trend_score'] as double?) ?? 0.5;
+    final volumeConfirmScore = (mp['volume_confirm_score'] as double?) ?? 0.5;
+    final priceDeviationScore = (mp['price_deviation_score'] as double?) ?? 0.5;
+    final description = mp['description'] as String? ?? '';
+
+    final scoreColor = persistenceScore >= 0.7
+        ? const Color(0xFFE74C3C)
+        : persistenceScore >= 0.5
+            ? const Color(0xFF58A6FF)
+            : const Color(0xFF2ECC71);
+    final scoreLabel = persistenceScore >= 0.7
+        ? '强'
+        : persistenceScore >= 0.5
+            ? '中'
+            : '弱';
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF30363D)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.trending_up, size: 16, color: Color(0xFFE74C3C)),
+              const SizedBox(width: 4),
+              const Text(
+                '动量持续性',
+                style: TextStyle(
+                  color: Color(0xFFF0F6FC),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: scoreColor.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  '${scoreLabel}(${persistenceScore.toStringAsFixed(2)})',
+                  style: TextStyle(color: scoreColor, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildFactorBar('趋势速率', adxTrendScore, const Color(0xFFE74C3C)),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _buildFactorBar('量能确认', volumeConfirmScore, const Color(0xFF58A6FF)),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _buildFactorBar('价格偏离', priceDeviationScore, const Color(0xFF2ECC71)),
+              ),
+            ],
+          ),
+          if (description.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              description,
+              style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFactorBar(String label, double score, Color color) {
+    return Column(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: Container(
+            height: 24,
+            color: const Color(0xFF21262D),
+            child: FractionallySizedBox(
+              widthFactor: score.clamp(0.0, 1.0),
+              alignment: Alignment.centerLeft,
+              child: Container(color: color.withOpacity(0.6)),
+            ),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: const TextStyle(color: Color(0xFF8B949E), fontSize: 10),
+        ),
+        Text(
+          '${(score * 100).toStringAsFixed(0)}%',
+          style: TextStyle(color: color, fontSize: 10),
+        ),
+      ],
+    );
+  }
+
+  // ─── 次日涨跌概率预测 ───────────────────────────────────────────
+
+  Widget _buildNextDayPredictionCard() {
+    final np = analysis!.nextDayPrediction!;
+    final upProbability = (np['up_probability'] as double?) ?? 0.5;
+    final downProbability = (np['down_probability'] as double?) ?? 0.5;
+    final neutralProbability = (np['neutral_probability'] as double?) ?? 0.0;
+    final sampleCount = (np['sample_count'] as int?) ?? 0;
+    final description = np['description'] as String? ?? '';
+
+    final predictionColor = upProbability > downProbability
+        ? const Color(0xFFE74C3C)
+        : upProbability < downProbability
+            ? const Color(0xFF2ECC71)
+            : const Color(0xFF8B949E);
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: predictionColor.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.calendar_today, size: 16, color: Color(0xFF58A6FF)),
+              const SizedBox(width: 4),
+              const Text(
+                '次日预测',
+                style: TextStyle(
+                  color: Color(0xFFF0F6FC),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '样本: ${sampleCount}个',
+                style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE74C3C).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '${(upProbability * 100).toStringAsFixed(1)}%',
+                        style: const TextStyle(
+                          color: Color(0xFFE74C3C),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text('上涨', style: TextStyle(color: Color(0xFF8B949E), fontSize: 10)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2ECC71).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '${(downProbability * 100).toStringAsFixed(1)}%',
+                        style: const TextStyle(
+                          color: Color(0xFF2ECC71),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text('下跌', style: TextStyle(color: Color(0xFF8B949E), fontSize: 10)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B949E).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '${(neutralProbability * 100).toStringAsFixed(1)}%',
+                        style: const TextStyle(
+                          color: Color(0xFF8B949E),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text('震荡', style: TextStyle(color: Color(0xFF8B949E), fontSize: 10)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (description.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              description,
+              style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ─── 预警信号 ───────────────────────────────────────────
+
+  Widget _buildEarlyWarningSignalsCard() {
+    final signals = analysis!.earlyWarningSignals!;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFFF9800).withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warning, size: 16, color: Color(0xFFFF9800)),
+              const SizedBox(width: 4),
+              const Text(
+                '预警信号',
+                style: TextStyle(
+                  color: Color(0xFFF0F6FC),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${signals.length}个',
+                style: const TextStyle(color: Color(0xFFFF9800), fontSize: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...signals.map((s) => _buildEarlyWarningSignalRow(s)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEarlyWarningSignalRow(SignalItem s) {
+    final isBuy = s.type == 'buy';
+    final color = isBuy ? const Color(0xFFE74C3C) : const Color(0xFF2ECC71);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Row(
+        children: [
+          Icon(
+            isBuy ? Icons.trending_up : Icons.trending_down,
+            color: color,
+            size: 14,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              s.signal,
+              style: TextStyle(color: color, fontSize: 12),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (s.description.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Text(
+              s.description,
+              style: const TextStyle(color: Color(0xFF8B949E), fontSize: 10),
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ],

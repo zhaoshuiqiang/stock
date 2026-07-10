@@ -362,7 +362,7 @@ void main() {
       final quote = QuoteData(code: '600000', name: '测试', price: 15, pe: 20, pb: 2);
       final result = generateAnalysis(data, quote);
       expect(result.confidenceBreakdown, isNotNull);
-      expect(result.confidenceBreakdown!.length, equals(7));
+      expect(result.confidenceBreakdown!.length, equals(8));
       expect(result.confidenceBreakdown!.containsKey('signal_consistency'), isTrue);
       expect(result.confidenceBreakdown!.containsKey('fundamental_support'), isTrue);
       expect(result.confidenceBreakdown!.containsKey('sentiment_confirm'), isTrue);
@@ -370,6 +370,7 @@ void main() {
       expect(result.confidenceBreakdown!.containsKey('structure_confirm'), isTrue);
       expect(result.confidenceBreakdown!.containsKey('signal_freshness'), isTrue);
       expect(result.confidenceBreakdown!.containsKey('historical_winrate'), isTrue);
+      expect(result.confidenceBreakdown!.containsKey('prediction_support'), isTrue);
     });
 
     test('confidenceScore应在[0.3, 0.95]范围内', () {

@@ -24,12 +24,38 @@ import 'ai_layer.dart';
 import 'debate_engine.dart';
 import 'recommendation_tracker.dart';
 import 'recommendation_explainer.dart';
+import 'recommendation_calibrator.dart';
 import 'pattern_recognizer.dart';
 import 'sector_rotation.dart';
+import 'momentum_persistence_analyzer.dart';
+import 'next_day_predictor.dart';
+import 'signal_detector.dart';
 
 /// 向后兼容：检测特有信号（量价背离、布林收口）
 List<SignalItem> detectSignals(List<HistoryKline> data) {
   return SignalLayer.detectUniqueSignals(data);
+}
+
+double _predictionSupportForRecommendation(
+  int totalScore,
+  NextDayPredictionResult prediction,
+) {
+  if (totalScore >= 6) {
+    return prediction.upProbability.clamp(0.0, 1.0).toDouble();
+  }
+  if (totalScore <= 4) {
+    return prediction.downProbability.clamp(0.0, 1.0).toDouble();
+  }
+  final neutralSupport =
+      prediction.neutralProbability.clamp(0.0, 1.0).toDouble();
+  if (prediction.sampleCount < NextDayPredictor.minSampleSize) {
+    return neutralSupport;
+  }
+  final balanceSupport =
+      1.0 - (prediction.upProbability - prediction.downProbability).abs();
+  return (neutralSupport * 0.7 + balanceSupport * 0.3)
+      .clamp(0.0, 1.0)
+      .toDouble();
 }
 
 /// 计算交易价位（v2.25: ATR动态止损 + 追踪止损 + 分级止盈）
@@ -286,6 +312,10 @@ AnalysisResult generateAnalysis(
   final signals = SignalLayer.detectAllSignals(data);
   final indicators = getIndicatorSummary(data);
 
+  // 1d. 预警信号检测（提前1-2天）
+  final earlyWarningSignals = SignalDetector.detectEarlyWarningSignals(data);
+  signals.addAll(earlyWarningSignals);
+
   // v2.30: 经典形态识别（双底/头肩底/三角突破）
   if (data.length >= 30) {
     try {
@@ -296,7 +326,7 @@ AnalysisResult generateAnalysis(
           indicator: '形态',
           signal: p.patternName,
           description: p.description,
-          strength: (p.confidence * 3).round().clamp(1, 3),
+          strength: (p.confidence * 100).round().clamp(45, 90).toInt(),
           duration: SignalDuration.mediumTerm,
           confidence: p.confidence,
         ));
@@ -322,6 +352,12 @@ AnalysisResult generateAnalysis(
           quote: quote,
         )
       : null;
+
+  // 1e. 动量持续性分析（新增）
+  final momentumPersistence = MomentumPersistenceAnalyzer.analyze(data);
+
+  // 1f. 次日涨跌概率预测（新增）
+  final nextDayPrediction = NextDayPredictor.predict(data, quote);
 
   final buySignals = signals.where((s) => s.type == 'buy').toList();
   final sellSignals = signals.where((s) => s.type == 'sell').toList();
@@ -381,6 +417,19 @@ AnalysisResult generateAnalysis(
     recommendation = _recommendationFromScore(totalScore, quote);
   }
 
+  final calibration = RecommendationCalibrator.calibrateScore(
+    score: totalScore,
+    data: data,
+    buySignals: buySignals,
+    sellSignals: sellSignals,
+    currentChangePct: quote?.changePct,
+  );
+  final calibrationReason = calibration.reason;
+  if (calibration.score < totalScore) {
+    totalScore = calibration.score;
+    recommendation = _recommendationFromScore(totalScore, quote);
+  }
+
   // 6. 推荐理由（见下方步骤13，全部上下文就绪后生成）
 
   // 7. 风险分析
@@ -424,7 +473,7 @@ AnalysisResult generateAnalysis(
     debugPrint('SignalEngine.structureFilter: $e');
   }
 
-  // 12. 置信度计算（内部已包含对抗验证 + v2.30: 回测胜率维度）
+  // 12. 置信度计算（内部已包含对抗验证 + v2.30: 回测胜率维度 + 新增: 预测准确率反馈）
   final confResult = ConfidenceCalculator.calculate(
     buySignals: buySignals,
     sellSignals: sellSignals,
@@ -437,6 +486,8 @@ AnalysisResult generateAnalysis(
     marketContext: marketContext,
     marketStructure: marketStructure,
     backtestResults: backtestResults,
+    predictionAccuracy:
+        _predictionSupportForRecommendation(totalScore, nextDayPrediction),
   );
   // 回测反馈闭环：根据策略历史表现调整置信度
   double confidenceScore = confResult.confidenceScore;
@@ -489,6 +540,9 @@ AnalysisResult generateAnalysis(
     newsSentiment: compResult.newsSentiment,
     marketContext: marketContext,
     marketStructure: marketStructure,
+    backtestResults: backtestResults,
+    predictionSupport:
+        _predictionSupportForRecommendation(totalScore, nextDayPrediction),
   );
 
   // 13. 详细推荐理由（增强版：含市场结构/策略/回测/置信度上下文）
@@ -504,6 +558,8 @@ AnalysisResult generateAnalysis(
     '基本面': compResult.fundamentalScore?.totalScore ?? 5.0,
     '结构': marketStructure.structureScore,
     '短线交易': shortTermResult.score,
+    '动量持续性': momentumPersistence.persistenceScore * 10,
+    '次日预测': nextDayPrediction.upProbability * 10,
   };
   final reasons = _generateReasons(
     buySignals,
@@ -521,6 +577,9 @@ AnalysisResult generateAnalysis(
     recommendation: recommendation,
     dimensionScores: dimensionScores,
   );
+  if (calibrationReason.isNotEmpty) {
+    reasons.add(calibrationReason);
+  }
   reasons.add(
       '短线交易分：${shortTermResult.score.toStringAsFixed(1)}，${shortTermResult.actionLabel}');
   if (shortTermResult.riskCaps.isNotEmpty) {
@@ -691,6 +750,9 @@ AnalysisResult generateAnalysis(
     percentile: percentile,
     limitUpAnalysis: limitUpAnalysis,
     dimensionScores: dimensionScores,
+    momentumPersistence: momentumPersistence.toJson(),
+    nextDayPrediction: nextDayPrediction.toJson(),
+    earlyWarningSignals: earlyWarningSignals,
   );
 }
 

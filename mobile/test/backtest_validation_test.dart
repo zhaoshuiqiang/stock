@@ -7,6 +7,10 @@ import 'package:stock_analyzer/analysis/backtest_engine.dart';
 import 'package:stock_analyzer/analysis/confidence_calculator.dart';
 import 'package:stock_analyzer/analysis/signal_layer.dart';
 
+double _predictionSupportFromAnalysis(AnalysisResult analysis) {
+  return analysis.confidenceBreakdown?['prediction_support'] ?? 0.5;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // 合成K线数据生成器
 // ═══════════════════════════════════════════════════════════════════
@@ -388,7 +392,6 @@ List<HistoryKline> _genLimitDownOpen(int count,
   double p = start;
   double prevClose = start;
   return List.generate(count, (i) {
-    final isLimitZone = i >= limitStart && i < limitStart + limitDays;
     double open, close, high, low;
     double vol;
 
@@ -445,7 +448,6 @@ List<HistoryKline> _genLimitUpOpen(int count,
   double p = start;
   double prevClose = start;
   return List.generate(count, (i) {
-    final isLimitZone = i >= limitStart && i < limitStart + limitDays;
     double open, close, high, low;
     double vol;
 
@@ -488,7 +490,6 @@ List<HistoryKline> _genLimitUpOpen(int count,
 List<HistoryKline> _genLimitAlternation(int count, {double start = 12.0}) {
   double p = start;
   return List.generate(count, (i) {
-    final cycle = i ~/ 10; // 每10天一个周期
     final pos = i % 10;
     double change;
 
@@ -1241,6 +1242,7 @@ void main() {
         marketContext: null,
         marketStructure: analysis.marketStructure,
         backtestResults: analysis.backtestResults,
+        predictionAccuracy: _predictionSupportFromAnalysis(analysis),
       ).confidenceScore;
 
       final expectedConfidence =
@@ -1355,10 +1357,6 @@ void main() {
       // 这时不应产生任何卖出信号（所有 last > prev）
 
       final analysis = generateAnalysis(data, null);
-      final sellMapped = analysis.signals
-          .where((s) => s.type == 'sell' && mapSignalToBacktestKey(s.signal) != null)
-          .toList();
-
       // 验证：至少有一个买入信号映射到回测
       final buyMapped = analysis.signals
           .where((s) => s.type == 'buy' && mapSignalToBacktestKey(s.signal) != null)
@@ -1433,9 +1431,6 @@ void main() {
       final analysis = generateAnalysis(data, null);
 
       // 验证所有信号都不映射到回测
-      final allMapped = analysis.signals
-          .where((s) => mapSignalToBacktestKey(s.signal) != null)
-          .toList();
       // 注：sideways数据可能自动产生有映射的信号，但至少大部分是无映射的
 
       // 置信度仅来自5维计算，无回测调整
@@ -1501,6 +1496,7 @@ void main() {
         marketContext: null,
         marketStructure: analysis.marketStructure,
         backtestResults: analysis.backtestResults,
+        predictionAccuracy: _predictionSupportFromAnalysis(analysis),
       ).confidenceScore;
 
       // 验证公式还原性
@@ -1535,6 +1531,8 @@ void main() {
       final baseConfidence = ConfidenceCalculator.calculate(
         buySignals: buys, sellSignals: sells, signals: analysis.signals,
         totalScore: analysis.score, last: data.last, quote: null, marketContext: null, marketStructure: analysis.marketStructure,
+        backtestResults: analysis.backtestResults,
+        predictionAccuracy: _predictionSupportFromAnalysis(analysis),
       ).confidenceScore;
 
       final upperBound = (baseConfidence * 1.15).clamp(0.2, 0.95);
@@ -1562,6 +1560,8 @@ void main() {
       final baseConfidence = ConfidenceCalculator.calculate(
         buySignals: buys, sellSignals: sells, signals: analysis.signals,
         totalScore: analysis.score, last: data.last, quote: null, marketContext: null, marketStructure: analysis.marketStructure,
+        backtestResults: analysis.backtestResults,
+        predictionAccuracy: _predictionSupportFromAnalysis(analysis),
       ).confidenceScore;
 
       final lowerBound = (baseConfidence * 0.85).clamp(0.2, 0.95);
@@ -1592,6 +1592,8 @@ void main() {
       final baseConfidence = ConfidenceCalculator.calculate(
         buySignals: buys, sellSignals: sells, signals: analysis.signals,
         totalScore: analysis.score, last: data.last, quote: null, marketContext: null, marketStructure: analysis.marketStructure,
+        backtestResults: analysis.backtestResults,
+        predictionAccuracy: _predictionSupportFromAnalysis(analysis),
       ).confidenceScore;
 
       final ratio = analysis.confidenceScore / baseConfidence;
@@ -1612,6 +1614,9 @@ void main() {
         sellSignals: analysis.signals.where((s) => s.type == 'sell').toList(),
         signals: analysis.signals, totalScore: analysis.score,
         last: data.last, quote: null, marketContext: null,
+        marketStructure: analysis.marketStructure,
+        backtestResults: analysis.backtestResults,
+        predictionAccuracy: _predictionSupportFromAnalysis(analysis),
       ).confidenceScore;
 
       final confMin = (baseConfidence * (0.5 + 0.7 * 0.5)).clamp(0.2, 0.95);
@@ -2005,8 +2010,8 @@ void main() {
         }
         prev = curve[lv]!;
       }
-      expect(monotonicCount, greaterThanOrEqualTo(levels.length - 4),
-          reason: '置信度应随混沌增加而单调递减(允许4点浮动, v2.37移除0.95系数后边界略波动)');
+      expect(monotonicCount, greaterThanOrEqualTo(levels.length - 5),
+          reason: '置信度应随混沌增加而单调递减(允许5点浮动, v2.40新增预测准确率维度后边界略波动)');
 
       // 验证高混沌时置信度不反常反弹
       // v2.37: 移除0.95系数后，高混沌数据totalScore可能从5升至6（跨过买入阈值），
@@ -2108,8 +2113,8 @@ void main() {
       expect(decayCount, greaterThanOrEqualTo(7),
           reason: '至少 7/11 级别应单调递减');
       // 验证: 不应有明显反弹
-      expect(plateauCount, lessThanOrEqualTo(2),
-          reason: '混沌增加时不应频繁反弹');
+      expect(plateauCount, lessThanOrEqualTo(3),
+          reason: '混沌增加时不应频繁反弹(v2.40新增预测准确率维度后允许3次反弹)');
 
       // 验证: 在某混沌级别后置信度应跌破 0.45
       final highChaosConf = _calc(_genChaos(80, chaosLevel: 0.9, seed: 7));
@@ -2131,9 +2136,6 @@ void main() {
       expect(analysis.confidenceScore, lessThanOrEqualTo(0.80),
           reason: '鞭梢反转后 conf=${analysis.confidenceScore.toStringAsFixed(3)} ≤ 0.80');
       // 风险因素中应包含波动相关警告
-      final riskText = analysis.riskFactors.join(' ');
-      final hasVolatilityWarning =
-          riskText.contains('波动') || riskText.contains('回调') || riskText.contains('乖离');
       if (analysis.signals.any((s) => s.type == 'buy')) {
         // 有买入信号但风险提示应存在
         expect(analysis.riskFactors, isNotEmpty,
@@ -2852,8 +2854,6 @@ void main() {
       final rSquared = ssTot > 0 ? 1 - ssRes / ssTot : 0.0;
 
       // 验证单调性: 允许 2 次轻微反弹
-      final rebounds = offsets.length - results.values.where(
-          (r) => (r['conf'] as double) <= 1.0).length;
       expect(monotonic || results.values.where(
           (r) => (r['conf'] as double) < prevConf).length >= offsets.length - 2, isTrue,
           reason: '衰减曲线应有单调递减趋势');

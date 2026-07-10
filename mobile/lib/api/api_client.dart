@@ -8,6 +8,8 @@ import 'package:charset_converter/charset_converter.dart';
 import '../models/stock_models.dart';
 import '../analysis/limit_up_analyzer.dart';
 import '../validators/data_validator.dart';
+import '../core/stock_code_utils.dart';
+import 'timeshare_parser.dart';
 
 class ApiClient {
   http.Client _client = http.Client();
@@ -34,7 +36,9 @@ class ApiClient {
 
   /// 重建HTTP客户端（连接池失效时调用）
   void _rebuildClient() {
-    try { _client.close(); } catch (_) {}
+    try {
+      _client.close();
+    } catch (_) {}
     _client = http.Client();
   }
 
@@ -47,17 +51,23 @@ class ApiClient {
   }
 
   /// 公共 HTTP GET 请求方法，统一处理超时、重试和异常捕获
-  Future<http.Response?> _httpGet(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 8), int retries = 2}) async {
+  Future<http.Response?> _httpGet(Uri url,
+      {Map<String, String>? headers,
+      Duration timeout = const Duration(seconds: 8),
+      int retries = 2}) async {
     if (_disposed) return null;
     for (var attempt = 0; attempt < retries; attempt++) {
       try {
-        final response = await _client.get(url, headers: headers ?? {}).timeout(timeout);
+        final response =
+            await _client.get(url, headers: headers ?? {}).timeout(timeout);
         if (response.statusCode == 200) return response;
         debugPrint('HTTP ${response.statusCode}: ${url.host}${url.path}');
       } catch (e) {
-        debugPrint('HTTP attempt ${attempt + 1}/$retries failed: ${url.host}${url.path} - $e');
+        debugPrint(
+            'HTTP attempt ${attempt + 1}/$retries failed: ${url.host}${url.path} - $e');
         // 连接池失效时重建客户端
-        if (e.toString().contains('Connection closed') || e.toString().contains('Connection reset')) {
+        if (e.toString().contains('Connection closed') ||
+            e.toString().contains('Connection reset')) {
           _rebuildClient();
         }
         if (attempt < retries - 1) {
@@ -70,23 +80,31 @@ class ApiClient {
   }
 
   /// 备用HTTP GET：使用dart:io HttpClient，避免http包连接池问题
-  Future<http.Response?> _httpGetFallback(Uri url, {Map<String, String>? headers, Duration timeout = const Duration(seconds: 8)}) async {
+  Future<http.Response?> _httpGetFallback(Uri url,
+      {Map<String, String>? headers,
+      Duration timeout = const Duration(seconds: 8)}) async {
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         final client = _getFallbackClient();
         final request = await client.getUrl(url);
         headers?.forEach((key, value) => request.headers.set(key, value));
         final ioResponse = await request.close().timeout(timeout);
-        final bodyBytes = await ioResponse.fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d)).then((b) => b.takeBytes());
+        final bodyBytes = await ioResponse
+            .fold<BytesBuilder>(BytesBuilder(), (b, d) => b..add(d))
+            .then((b) => b.takeBytes());
         if (ioResponse.statusCode == 200) {
           return http.Response.bytes(Uint8List.fromList(bodyBytes), 200,
-            headers: {'content-type': 'application/json; charset=utf-8'});
+              headers: {'content-type': 'application/json; charset=utf-8'});
         }
-        debugPrint('HTTP fallback ${ioResponse.statusCode}: ${url.host}${url.path}');
+        debugPrint(
+            'HTTP fallback ${ioResponse.statusCode}: ${url.host}${url.path}');
       } catch (e) {
-        debugPrint('HTTP fallback attempt ${attempt + 1}/2 failed: ${url.host}${url.path} - $e');
+        debugPrint(
+            'HTTP fallback attempt ${attempt + 1}/2 failed: ${url.host}${url.path} - $e');
         // fallback客户端连接异常时重建
-        try { _fallbackClient?.close(); } catch (_) {}
+        try {
+          _fallbackClient?.close();
+        } catch (_) {}
         _fallbackClient = null;
         if (attempt < 1) {
           await Future.delayed(const Duration(milliseconds: 500));
@@ -118,9 +136,11 @@ class ApiClient {
     }
   }
 
-  Future<List<StockInfo>> _fetchSearchStocks(String keyword, String cacheKey) async {
+  Future<List<StockInfo>> _fetchSearchStocks(
+      String keyword, String cacheKey) async {
     final encoded = Uri.encodeComponent(keyword);
-    final url = Uri.parse('https://suggest3.sinajs.cn/suggest/type=111&key=$encoded');
+    final url =
+        Uri.parse('https://suggest3.sinajs.cn/suggest/type=111&key=$encoded');
     final response = await _httpGet(url, headers: {
       'Referer': 'https://finance.sina.com.cn',
     });
@@ -145,7 +165,8 @@ class ApiClient {
               // parts[4] = full stock name (always the real name)
               final name = parts[4].isNotEmpty ? parts[4] : parts[0];
               // Strip any existing sh/sz prefix from code field
-              final rawCode = parts[2].replaceAll(RegExp(r'^(sh|sz|SH|SZ)'), '');
+              final rawCode =
+                  parts[2].replaceAll(RegExp(r'^(sh|sz|SH|SZ)'), '');
               final code = addMarketPrefix(rawCode);
               results.add(StockInfo(
                 code: code,
@@ -161,7 +182,8 @@ class ApiClient {
           for (var i = 0; i < parts.length; i += 5) {
             if (i + 4 < parts.length) {
               final name = parts[i + 4].isNotEmpty ? parts[i + 4] : parts[i];
-              final rawCode = parts[i + 2].replaceAll(RegExp(r'^(sh|sz|SH|SZ)'), '');
+              final rawCode =
+                  parts[i + 2].replaceAll(RegExp(r'^(sh|sz|SH|SZ)'), '');
               final code = addMarketPrefix(rawCode);
               results.add(StockInfo(
                 code: code,
@@ -177,12 +199,14 @@ class ApiClient {
         final filtered = <StockInfo>[];
         for (final stock in results) {
           // Only keep A-share stocks (sh/sz prefix)
-          if (!stock.code.startsWith('sh') && !stock.code.startsWith('sz')) continue;
+          if (!stock.code.startsWith('sh') && !stock.code.startsWith('sz'))
+            continue;
           // Deduplicate by code
           if (seen.contains(stock.code)) continue;
           seen.add(stock.code);
           // Ensure name is not empty; use raw code (without prefix) as fallback
-          final name = stock.name.isEmpty ? stock.code.substring(2) : stock.name;
+          final name =
+              stock.name.isEmpty ? stock.code.substring(2) : stock.name;
           final rawCode = stock.code.substring(2);
           final display = (name == rawCode) ? rawCode : '$name($rawCode)';
           filtered.add(StockInfo(
@@ -292,8 +316,11 @@ class ApiClient {
           final validation = DataValidator.validateQuote(quote);
           String confidence = 'high';
           if (validation.anomalies.isNotEmpty) {
-            confidence = validation.anomalies.any((a) => a.type == DataAnomalyType.zeroPrice || a.type == DataAnomalyType.extremeChange) 
-                ? 'low' : 'medium';
+            confidence = validation.anomalies.any((a) =>
+                    a.type == DataAnomalyType.zeroPrice ||
+                    a.type == DataAnomalyType.extremeChange)
+                ? 'low'
+                : 'medium';
           }
           final validatedQuote = QuoteData(
             code: quote.code,
@@ -320,7 +347,8 @@ class ApiClient {
             updateTime: quote.updateTime,
             confidence: confidence,
           );
-          _setCached(cacheKey, validatedQuote, duration: const Duration(seconds: 5));
+          _setCached(cacheKey, validatedQuote,
+              duration: const Duration(seconds: 5));
           return validatedQuote;
         }
       }
@@ -342,7 +370,9 @@ class ApiClient {
           final sinaHigh = _parseDouble(parts[4]);
           final sinaLow = _parseDouble(parts[5]);
           final sinaPreClose = _parseDouble(parts[2]);
-          final sinaAmplitude = sinaPreClose > 0 ? (sinaHigh - sinaLow) / sinaPreClose * 100 : 0.0;
+          final sinaAmplitude = sinaPreClose > 0
+              ? (sinaHigh - sinaLow) / sinaPreClose * 100
+              : 0.0;
           final quote = QuoteData(
             code: code,
             name: parts[0],
@@ -355,7 +385,7 @@ class ApiClient {
             amount: _parseDouble(parts[9]),
             change: _parseDouble(parts[3]) - sinaPreClose,
             changePct: (_parseDouble(parts[3]) - sinaPreClose) /
-                    (sinaPreClose > 0 ? sinaPreClose : 1) *
+                (sinaPreClose > 0 ? sinaPreClose : 1) *
                 100,
             amplitude: sinaAmplitude,
           );
@@ -363,8 +393,11 @@ class ApiClient {
           final validation = DataValidator.validateQuote(quote);
           String confidence = 'high';
           if (validation.anomalies.isNotEmpty) {
-            confidence = validation.anomalies.any((a) => a.type == DataAnomalyType.zeroPrice || a.type == DataAnomalyType.extremeChange) 
-                ? 'low' : 'medium';
+            confidence = validation.anomalies.any((a) =>
+                    a.type == DataAnomalyType.zeroPrice ||
+                    a.type == DataAnomalyType.extremeChange)
+                ? 'low'
+                : 'medium';
           }
           final validatedQuote = QuoteData(
             code: quote.code,
@@ -391,7 +424,8 @@ class ApiClient {
             updateTime: quote.updateTime,
             confidence: confidence,
           );
-          _setCached(cacheKey, validatedQuote, duration: const Duration(seconds: 5));
+          _setCached(cacheKey, validatedQuote,
+              duration: const Duration(seconds: 5));
           return validatedQuote;
         }
       }
@@ -434,7 +468,7 @@ class ApiClient {
       final parts = (klines.last as String).split(',');
       if (parts.length < 7) return null;
 
-      final mainNetFlow = _parseDouble(parts[1]);     // f52 主力净流入额(元)
+      final mainNetFlow = _parseDouble(parts[1]); // f52 主力净流入额(元)
       final mainNetFlowRate = _parseDouble(parts[6]); // f57 主力净流入占比(%)
 
       // 从净流入和净流入率推算主力总成交额，再算流入流出
@@ -442,7 +476,8 @@ class ApiClient {
       double mainInflow = 0;
       double mainOutflow = 0;
       if (mainNetFlowRate.abs() > 0.01) {
-        final mainTotalAmount = (mainNetFlow.abs() / mainNetFlowRate.abs()) * 100;
+        final mainTotalAmount =
+            (mainNetFlow.abs() / mainNetFlowRate.abs()) * 100;
         mainInflow = (mainTotalAmount + mainNetFlow) / 2;
         mainOutflow = (mainTotalAmount - mainNetFlow) / 2;
       } else if (mainNetFlow.abs() > 0) {
@@ -450,7 +485,8 @@ class ApiClient {
         mainOutflow = mainNetFlow < 0 ? mainNetFlow.abs() : 0;
       }
 
-      debugPrint('[API] getMainFundFlow($code) netFlow=$mainNetFlow, rate=$mainNetFlowRate%, inflow=$mainInflow, outflow=$mainOutflow');
+      debugPrint(
+          '[API] getMainFundFlow($code) netFlow=$mainNetFlow, rate=$mainNetFlowRate%, inflow=$mainInflow, outflow=$mainOutflow');
 
       return QuoteData(
         code: code,
@@ -537,7 +573,8 @@ class ApiClient {
   }
 
   /// 多数据源交叉验证获取实时行情
-  Future<ValidatedQuoteData?> getRealtimeQuoteWithValidation(String code) async {
+  Future<ValidatedQuoteData?> getRealtimeQuoteWithValidation(
+      String code) async {
     final results = await Future.wait([
       getRealtimeQuote(code),
       _fetchQuoteFromEastMoney(code),
@@ -586,7 +623,8 @@ class ApiClient {
 
     // 两个源都成功，进行交叉验证
     final priceDiff = (tencentQuote.price - eastMoneyQuote.price).abs();
-    final priceDiffPct = tencentQuote.price > 0 ? (priceDiff / tencentQuote.price) * 100 : 0.0;
+    final priceDiffPct =
+        tencentQuote.price > 0 ? (priceDiff / tencentQuote.price) * 100 : 0.0;
 
     DataConfidence confidence;
     String? validationNote;
@@ -598,7 +636,8 @@ class ApiClient {
       }
     } else if (priceDiffPct <= 2.0) {
       confidence = DataConfidence.medium;
-      validationNote = '价格偏差${priceDiffPct.toStringAsFixed(2)}%，腾讯:${tencentQuote.price.toStringAsFixed(2)} 东方财富:${eastMoneyQuote.price.toStringAsFixed(2)}';
+      validationNote =
+          '价格偏差${priceDiffPct.toStringAsFixed(2)}%，腾讯:${tencentQuote.price.toStringAsFixed(2)} 东方财富:${eastMoneyQuote.price.toStringAsFixed(2)}';
     } else {
       confidence = DataConfidence.low;
       validationNote = '价格偏差${priceDiffPct.toStringAsFixed(2)}%过大，使用腾讯数据';
@@ -612,7 +651,8 @@ class ApiClient {
     );
   }
 
-  Future<List<HistoryKline>> getStockHistory(String code, {int days = 120, bool bypassCache = false}) async {
+  Future<List<HistoryKline>> getStockHistory(String code,
+      {int days = 120, bool bypassCache = false}) async {
     final cacheKey = 'history_${code}_$days';
 
     // Check cache first (skip if bypassCache is true)
@@ -635,7 +675,8 @@ class ApiClient {
       // Validate kline data before returning
       final klineValidation = DataValidator.validateKlines(result);
       if (klineValidation.anomalies.isNotEmpty) {
-        result.removeWhere((k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
+        result.removeWhere(
+            (k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
       }
       return result;
     } finally {
@@ -643,7 +684,8 @@ class ApiClient {
     }
   }
 
-  Future<List<HistoryKline>> _fetchStockHistory(String code, int days, String cacheKey) async {
+  Future<List<HistoryKline>> _fetchStockHistory(
+      String code, int days, String cacheKey) async {
     // 数据源优先级：通达信 > 腾讯 > 东方财富 > 新浪
     // 通达信（第一优先级）：使用通达信兼容格式的K线数据
     try {
@@ -660,7 +702,8 @@ class ApiClient {
     try {
       final tencentResult = await _fetchStockHistoryFromTencent(code, days);
       if (tencentResult.isNotEmpty) {
-        _setCached(cacheKey, tencentResult, duration: const Duration(minutes: 5));
+        _setCached(cacheKey, tencentResult,
+            duration: const Duration(minutes: 5));
         return tencentResult;
       }
     } catch (e) {
@@ -693,12 +736,15 @@ class ApiClient {
 
   /// 通达信K线API（第一优先级数据源）
   /// 通达信与腾讯共享底层数据基础设施，使用通达信兼容格式
-  Future<List<HistoryKline>> _fetchStockHistoryFromTDX(String code, int days) async {
+  Future<List<HistoryKline>> _fetchStockHistoryFromTDX(
+      String code, int days) async {
     // 计算日期范围：通达信格式要求 yyyyMMdd
     final endDate = DateTime.now();
     final startDate = endDate.subtract(const Duration(days: 200));
-    final startStr = '${startDate.year}-${startDate.month.toString().padLeft(2, '0')}-${startDate.day.toString().padLeft(2, '0')}';
-    final endStr = '${endDate.year}-${endDate.month.toString().padLeft(2, '0')}-${endDate.day.toString().padLeft(2, '0')}';
+    final startStr =
+        '${startDate.year}-${startDate.month.toString().padLeft(2, '0')}-${startDate.day.toString().padLeft(2, '0')}';
+    final endStr =
+        '${endDate.year}-${endDate.month.toString().padLeft(2, '0')}-${endDate.day.toString().padLeft(2, '0')}';
 
     // 通达信兼容API：使用前复权日K线数据
     final url = Uri.parse(
@@ -760,18 +806,22 @@ class ApiClient {
     // 校验数据
     final klineValidation = DataValidator.validateKlines(results);
     if (klineValidation.anomalies.isNotEmpty) {
-      results.removeWhere((k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
+      results.removeWhere(
+          (k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
     }
     return results;
   }
 
   /// 腾讯K线API（第二优先级，通达信同源数据）
-  Future<List<HistoryKline>> _fetchStockHistoryFromTencent(String code, int days) async {
+  Future<List<HistoryKline>> _fetchStockHistoryFromTencent(
+      String code, int days) async {
     // 计算日期范围：从半年前开始
     final endDate = DateTime.now();
     final startDate = endDate.subtract(const Duration(days: 200));
-    final startStr = '${startDate.year}-${startDate.month.toString().padLeft(2, '0')}-${startDate.day.toString().padLeft(2, '0')}';
-    final endStr = '${endDate.year}-${endDate.month.toString().padLeft(2, '0')}-${endDate.day.toString().padLeft(2, '0')}';
+    final startStr =
+        '${startDate.year}-${startDate.month.toString().padLeft(2, '0')}-${startDate.day.toString().padLeft(2, '0')}';
+    final endStr =
+        '${endDate.year}-${endDate.month.toString().padLeft(2, '0')}-${endDate.day.toString().padLeft(2, '0')}';
 
     final url = Uri.parse(
         'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=$code,day,$startStr,$endStr,$days,qfq');
@@ -832,18 +882,22 @@ class ApiClient {
     // 校验数据
     final klineValidation = DataValidator.validateKlines(results);
     if (klineValidation.anomalies.isNotEmpty) {
-      results.removeWhere((k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
+      results.removeWhere(
+          (k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
     }
     return results;
   }
 
   /// 新浪K线API（备用1）
-  Future<List<HistoryKline>> _fetchStockHistoryFromSina(String code, int days) async {
+  Future<List<HistoryKline>> _fetchStockHistoryFromSina(
+      String code, int days) async {
     final url = Uri.parse(
         'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=$code&scale=240&ma=no&datalen=$days');
-    final response = await _httpGet(url, headers: {
-      'Referer': 'https://finance.sina.com.cn',
-    }, timeout: const Duration(seconds: 10));
+    final response = await _httpGet(url,
+        headers: {
+          'Referer': 'https://finance.sina.com.cn',
+        },
+        timeout: const Duration(seconds: 10));
     if (response == null) return [];
 
     final body = response.body;
@@ -886,12 +940,14 @@ class ApiClient {
     }
     final klineValidation = DataValidator.validateKlines(results);
     if (klineValidation.anomalies.isNotEmpty) {
-      results.removeWhere((k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
+      results.removeWhere(
+          (k) => k.close <= 0 || k.high <= 0 || k.low <= 0 || k.open <= 0);
     }
     return results;
   }
 
-  Future<List<HistoryKline>> _fetchStockHistoryFromEastMoney(String code, int days) async {
+  Future<List<HistoryKline>> _fetchStockHistoryFromEastMoney(
+      String code, int days) async {
     // 东方财富K线API
     String secid;
     if (code.startsWith('sh')) {
@@ -904,9 +960,11 @@ class ApiClient {
 
     final url = Uri.parse(
         'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=$secid&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=$days');
-    final response = await _httpGet(url, headers: {
-      'User-Agent': 'Mozilla/5.0',
-    }, timeout: const Duration(seconds: 15));
+    final response = await _httpGet(url,
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+        },
+        timeout: const Duration(seconds: 15));
 
     if (response != null) {
       final body = response.body;
@@ -1071,8 +1129,11 @@ class ApiClient {
   dynamic _getCached(String key) {
     final cached = _cache[key];
     if (cached is Map && cached['timestamp'] != null) {
-      final timestamp = DateTime.fromMillisecondsSinceEpoch(cached['timestamp'] as int);
-      final duration = Duration(milliseconds: cached['duration'] as int? ?? _cacheDuration.inMilliseconds);
+      final timestamp =
+          DateTime.fromMillisecondsSinceEpoch(cached['timestamp'] as int);
+      final duration = Duration(
+          milliseconds:
+              cached['duration'] as int? ?? _cacheDuration.inMilliseconds);
       if (DateTime.now().difference(timestamp) < duration) {
         return cached['data'];
       }
@@ -1097,7 +1158,9 @@ class ApiClient {
     _cache.removeWhere((key, value) {
       if (value is Map && value['timestamp'] != null) {
         final timestamp = value['timestamp'] as int;
-        final duration = Duration(milliseconds: value['duration'] as int? ?? _cacheDuration.inMilliseconds);
+        final duration = Duration(
+            milliseconds:
+                value['duration'] as int? ?? _cacheDuration.inMilliseconds);
         return now - timestamp > duration.inMilliseconds;
       }
       return true;
@@ -1105,11 +1168,12 @@ class ApiClient {
 
     // If still over limit, remove oldest entries
     if (_cache.length >= _maxCacheSize) {
-      final sortedKeys = _cache.keys.toList()..sort((a, b) {
-        final ta = (_cache[a] as Map)['timestamp'] as int;
-        final tb = (_cache[b] as Map)['timestamp'] as int;
-        return ta.compareTo(tb);
-      });
+      final sortedKeys = _cache.keys.toList()
+        ..sort((a, b) {
+          final ta = (_cache[a] as Map)['timestamp'] as int;
+          final tb = (_cache[b] as Map)['timestamp'] as int;
+          return ta.compareTo(tb);
+        });
       final removeCount = _cache.length - _maxCacheSize + 1;
       for (var i = 0; i < removeCount && i < sortedKeys.length; i++) {
         _cache.remove(sortedKeys[i]);
@@ -1119,7 +1183,9 @@ class ApiClient {
 
   String addMarketPrefix(String code) {
     if (code.isEmpty) return code;
-    if (code.startsWith('sh') || code.startsWith('sz') || code.startsWith('bj')) {
+    if (code.startsWith('sh') ||
+        code.startsWith('sz') ||
+        code.startsWith('bj')) {
       return code.toLowerCase();
     }
     // 北交所：830xxx/870xxx/889xxx 或 430xxx
@@ -1139,7 +1205,8 @@ class ApiClient {
   /// 判断是否为主板股票（沪深主板，排除创业板/科创板/北交所）
   bool isMainBoardStock(String code) {
     final pureCode = code.replaceAll(RegExp(r'^[a-zA-Z]+'), '');
-    return pureCode.length == 6 && (pureCode.startsWith('60') || pureCode.startsWith('00'));
+    return pureCode.length == 6 &&
+        (pureCode.startsWith('60') || pureCode.startsWith('00'));
   }
 
   /// 获取财经快讯
@@ -1148,7 +1215,8 @@ class ApiClient {
     final cached = _getCached(cacheKey);
     if (cached != null) return cached as List<dynamic>;
 
-    final url = Uri.parse('https://newsapi.eastmoney.com/kuaixun/v1/getlist_102_ajaxResult_50_1_.html');
+    final url = Uri.parse(
+        'https://newsapi.eastmoney.com/kuaixun/v1/getlist_102_ajaxResult_50_1_.html');
     final response = await _httpGet(url);
     if (response != null) {
       final body = response.body;
@@ -1160,13 +1228,15 @@ class ApiClient {
         final data = json.decode(jsonStr) as Map<String, dynamic>;
         final list = data['LivesList'] as List?;
         if (list != null) {
-          final result = list.map((item) => {
-            'title': item['title'] ?? '',
-            'digest': item['digest'] ?? item['simdigest'] ?? '',
-            'url': item['url_m'] ?? item['url_w'] ?? '',
-            'showTime': item['showtime'] ?? '',
-            'source': item['column'] == '100,102,105' ? '东方财富' : '财经快讯',
-          }).toList();
+          final result = list
+              .map((item) => {
+                    'title': item['title'] ?? '',
+                    'digest': item['digest'] ?? item['simdigest'] ?? '',
+                    'url': item['url_m'] ?? item['url_w'] ?? '',
+                    'showTime': item['showtime'] ?? '',
+                    'source': item['column'] == '100,102,105' ? '东方财富' : '财经快讯',
+                  })
+              .toList();
           _setCached(cacheKey, result, duration: const Duration(seconds: 60));
           return result;
         }
@@ -1182,7 +1252,8 @@ class ApiClient {
     if (cached != null) return cached as List<dynamic>;
 
     final encoded = Uri.encodeComponent(stockName);
-    final url = Uri.parse('https://search-api-web.eastmoney.com/search/jsonp?cb=jQueryCallback&param=%7B%22uid%22%3A%22%22%2C%22keyword%22%3A%22$encoded%22%2C%22type%22%3A%5B%22cmsArticleWebOld%22%5D%2C%22client%22%3A%22web%22%2C%22clientType%22%3A%22web%22%2C%22clientVersion%22%3A%22curr%22%2C%22param%22%3A%7B%22cmsArticleWebOld%22%3A%7B%22searchScope%22%3A%22default%22%2C%22sort%22%3A%22default%22%2C%22pageIndex%22%3A1%2C%22pageSize%22%3A10%2C%22preTag%22%3A%22%22%2C%22postTag%22%3A%22%22%7D%7D%7D');
+    final url = Uri.parse(
+        'https://search-api-web.eastmoney.com/search/jsonp?cb=jQueryCallback&param=%7B%22uid%22%3A%22%22%2C%22keyword%22%3A%22$encoded%22%2C%22type%22%3A%5B%22cmsArticleWebOld%22%5D%2C%22client%22%3A%22web%22%2C%22clientType%22%3A%22web%22%2C%22clientVersion%22%3A%22curr%22%2C%22param%22%3A%7B%22cmsArticleWebOld%22%3A%7B%22searchScope%22%3A%22default%22%2C%22sort%22%3A%22default%22%2C%22pageIndex%22%3A1%2C%22pageSize%22%3A10%2C%22preTag%22%3A%22%22%2C%22postTag%22%3A%22%22%7D%7D%7D');
     final response = await _httpGet(url, headers: {
       'User-Agent': 'Mozilla/5.0',
       'Referer': 'https://so.eastmoney.com/',
@@ -1190,7 +1261,8 @@ class ApiClient {
     if (response != null) {
       var body = response.body;
       // 去掉 JSONP 包裹：jQueryCallback({...})
-      final jsonpMatch = RegExp(r'^[a-zA-Z_]\w*\(([\s\S]*)\);?$').firstMatch(body);
+      final jsonpMatch =
+          RegExp(r'^[a-zA-Z_]\w*\(([\s\S]*)\);?$').firstMatch(body);
       if (jsonpMatch != null) {
         body = jsonpMatch.group(1)!;
       } else {
@@ -1204,13 +1276,15 @@ class ApiClient {
         // cmsArticleWebOld 是一个直接的 List（数组），不是 Map
         final list = result['cmsArticleWebOld'] as List?;
         if (list != null) {
-          final newsList = list.map((item) => {
-            'title': item['title'] ?? item['articleTitle'] ?? '',
-            'digest': item['content'] ?? item['description'] ?? '',
-            'url': item['url'] ?? item['articleUrl'] ?? '',
-            'showTime': item['date'] ?? item['publishDate'] ?? '',
-            'source': item['mediaName'] ?? item['source'] ?? '',
-          }).toList();
+          final newsList = list
+              .map((item) => {
+                    'title': item['title'] ?? item['articleTitle'] ?? '',
+                    'digest': item['content'] ?? item['description'] ?? '',
+                    'url': item['url'] ?? item['articleUrl'] ?? '',
+                    'showTime': item['date'] ?? item['publishDate'] ?? '',
+                    'source': item['mediaName'] ?? item['source'] ?? '',
+                  })
+              .toList();
           _setCached(cacheKey, newsList, duration: const Duration(seconds: 60));
           return newsList;
         }
@@ -1267,22 +1341,35 @@ class ApiClient {
     return '';
   }
 
-  /// 获取热门行业板块（东方财富行业板块涨幅排名前5）
-  Future<List<SectorInfo>> getHotSectors() async {
-    const cacheKey = 'hot_sectors';
+  /// 获取热门行业板块（东方财富行业板块涨幅排名）
+  /// fs=m:90+t:2 表示行业板块
+  Future<List<SectorInfo>> getHotSectors({int limit = 30}) async {
+    return _fetchSectors('hot_sectors', 'm:90+t:2', limit: limit);
+  }
+
+  /// 获取热门概念板块（东方财富概念板块涨幅排名）
+  /// fs=m:90+t:3 表示概念板块
+  Future<List<SectorInfo>> getConceptSectors({int limit = 30}) async {
+    return _fetchSectors('concept_sectors', 'm:90+t:3', limit: limit);
+  }
+
+  /// 通用板块获取方法
+  Future<List<SectorInfo>> _fetchSectors(String cacheKey, String fs,
+      {int limit = 30}) async {
     final cached = _getCached(cacheKey);
     if (cached != null) return cached as List<SectorInfo>;
 
-    // 主接口：东方财富板块列表
     List<SectorInfo>? sectors;
     try {
       final url = Uri.parse(
-        'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
+        'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=$limit&po=1&np=1&fltt=2&invl=2&fid=f3&fs=$fs&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
       );
-      final response = await _httpGet(url, headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Referer': 'https://quote.eastmoney.com/',
-      }, retries: 3);
+      final response = await _httpGet(url,
+          headers: {
+            'User-Agent': 'Mozilla/5.0',
+            'Referer': 'https://quote.eastmoney.com/',
+          },
+          retries: 3);
       if (response != null) {
         final data = json.decode(response.body) as Map<String, dynamic>;
         final diff = data['data']?['diff'] as List?;
@@ -1305,19 +1392,7 @@ class ApiClient {
         }
       }
     } catch (e) {
-      debugPrint('getHotSectors eastmoney failed: $e');
-    }
-
-    // 备用接口：新浪行业板块
-    if (sectors == null || sectors.isEmpty) {
-      try {
-        sectors = await _fetchHotSectorsFromSina();
-        if (sectors.isNotEmpty) {
-          _setCached(cacheKey, sectors, duration: const Duration(seconds: 30));
-        }
-      } catch (e) {
-        debugPrint('getHotSectors sina failed: $e');
-      }
+      debugPrint('_fetchSectors $fs failed: $e');
     }
 
     return sectors ?? [];
@@ -1348,11 +1423,13 @@ class ApiClient {
 
     try {
       // 并行请求所有指数的K线数据
-      final futures = indexSpec.entries.map((e) => _fetchGlobalIndexKline(e.key, e.value[0], e.value[1]));
+      final futures = indexSpec.entries
+          .map((e) => _fetchGlobalIndexKline(e.key, e.value[0], e.value[1]));
       final results = await Future.wait(futures);
       final result = results.whereType<GlobalIndex>().toList();
 
-      debugPrint('[API] getGlobalIndices fetched ${result.length}/${indexSpec.length} indices');
+      debugPrint(
+          '[API] getGlobalIndices fetched ${result.length}/${indexSpec.length} indices');
       if (result.isNotEmpty) {
         _setCached(cacheKey, result, duration: const Duration(minutes: 2));
       }
@@ -1364,7 +1441,8 @@ class ApiClient {
   }
 
   /// 获取单个全球指数的最近2条日K线，计算当前价格和涨跌幅
-  Future<GlobalIndex?> _fetchGlobalIndexKline(String secid, String displayName, String market) async {
+  Future<GlobalIndex?> _fetchGlobalIndexKline(
+      String secid, String displayName, String market) async {
     try {
       final url = Uri.parse(
         'https://push2his.eastmoney.com/api/qt/stock/kline/get'
@@ -1372,10 +1450,12 @@ class ApiClient {
         '&fields1=f1,f2,f3,f4,f5,f6'
         '&fields2=f51,f52,f53,f54,f55,f56,f57',
       );
-      final response = await _httpGet(url, headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Referer': 'https://quote.eastmoney.com/',
-      }, retries: 2);
+      final response = await _httpGet(url,
+          headers: {
+            'User-Agent': 'Mozilla/5.0',
+            'Referer': 'https://quote.eastmoney.com/',
+          },
+          retries: 2);
       if (response == null) return null;
 
       final data = json.decode(response.body) as Map<String, dynamic>;
@@ -1414,55 +1494,6 @@ class ApiClient {
       debugPrint('[API] _fetchGlobalIndexKline($secid) failed: $e');
       return null;
     }
-  }
-
-  Future<List<SectorInfo>> _fetchHotSectorsFromSina() async {
-    final url = Uri.parse(
-      'https://vip.stock.finance.sina.com.cn/q/view/newSinaHy.php',
-    );
-    final response = await _httpGet(url, headers: {
-      'Referer': 'https://finance.sina.com.cn',
-    }, timeout: const Duration(seconds: 10));
-    if (response != null) {
-      final body = await _decodeGbk(response.bodyBytes);
-      // 新浪行业板块返回格式: var S_Finance_bankuai_sinaindustry = {"key":"key,板块名,股票数,均价,涨跌额,涨跌幅,...",...}
-      // 尝试JSON解析
-      try {
-        final jsonStart = body.indexOf('{');
-        final jsonEnd = body.lastIndexOf('}');
-        if (jsonStart >= 0 && jsonEnd > jsonStart) {
-          final jsonStr = body.substring(jsonStart, jsonEnd + 1);
-          final data = json.decode(jsonStr) as Map<String, dynamic>;
-          final sectors = <SectorInfo>[];
-          for (final entry in data.values) {
-            final parts = entry.toString().split(',');
-            if (parts.length >= 6) {
-              final name = parts[1].trim();
-              final changePct = double.tryParse(parts[5].trim()) ?? 0.0;
-              String leadStockName = '';
-              String leadStockCode = '';
-              if (parts.length >= 9) leadStockCode = parts[8].trim();
-              if (parts.length >= 10) leadStockName = parts[9].trim();
-              if (name.isNotEmpty) {
-                sectors.add(SectorInfo(
-                  name: name,
-                  code: parts[0].trim(),
-                  changePct: changePct,
-                  leadStockName: leadStockName,
-                  leadStockCode: addMarketPrefix(leadStockCode),
-                ));
-              }
-            }
-          }
-          // 按涨跌幅降序排列
-          sectors.sort((a, b) => b.changePct.compareTo(a.changePct));
-          return sectors;
-        }
-      } catch (e) {
-        debugPrint('Sina sectors JSON parse failed: $e');
-      }
-    }
-    return [];
   }
 
   /// 获取板块内个股（涨幅前20）
@@ -1538,9 +1569,11 @@ class ApiClient {
     final url = Uri.parse(
       'https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=1&num=30&sort=changepercent&asc=0&node=$encodedSectorCode&symbol=&_s_r_a=auto',
     );
-    final response = await _httpGet(url, headers: {
-      'Referer': 'https://finance.sina.com.cn',
-    }, timeout: const Duration(seconds: 10));
+    final response = await _httpGet(url,
+        headers: {
+          'Referer': 'https://finance.sina.com.cn',
+        },
+        timeout: const Duration(seconds: 10));
     if (response != null) {
       final body = await _decodeGbk(response.bodyBytes);
       final data = json.decode(body);
@@ -1599,7 +1632,8 @@ class ApiClient {
     }
   }
 
-  Future<List<QuoteData>> _fetchBatchRealtimeQuotes(List<String> codes, String cacheKey) async {
+  Future<List<QuoteData>> _fetchBatchRealtimeQuotes(
+      List<String> codes, String cacheKey) async {
     // 腾讯批量接口：多个代码用逗号分隔
     final codesStr = codes.join(',');
     final url = Uri.parse('https://qt.gtimg.cn/q=$codesStr');
@@ -1622,7 +1656,8 @@ class ApiClient {
             final high = _parseDouble(parts[33]);
             final low = _parseDouble(parts[34]);
             final preClose = _parseDouble(parts[4]);
-            final amplitude = preClose > 0 ? (high - low) / preClose * 100 : 0.0;
+            final amplitude =
+                preClose > 0 ? (high - low) / preClose * 100 : 0.0;
 
             results.add(QuoteData(
               code: prefixedCode,
@@ -1640,8 +1675,10 @@ class ApiClient {
               turnover: parts.length > 38 ? _parseDouble(parts[38]) : 0,
               pe: parts.length > 39 ? _parseDouble(parts[39]) : 0,
               pb: parts.length > 46 ? _parseDouble(parts[46]) : 0,
-              totalMarketCap: parts.length > 44 ? _parseDouble(parts[44]) * 10000 : 0,
-              circulatingMarketCap: parts.length > 43 ? _parseDouble(parts[43]) * 10000 : 0,
+              totalMarketCap:
+                  parts.length > 44 ? _parseDouble(parts[44]) * 10000 : 0,
+              circulatingMarketCap:
+                  parts.length > 43 ? _parseDouble(parts[43]) * 10000 : 0,
               volumeRatio: parts.length > 49 ? _parseDouble(parts[49]) : 0,
             ));
           }
@@ -1655,11 +1692,13 @@ class ApiClient {
 
   /// 当日涨停板池（东方财富 push2ex.eastmoney.com/getTopicZTPool）
   /// 返回完整涨停数据：连板数/首封时间/封单/换手/炸板标记
-  Future<List<LimitUpStock>> getLimitUpBoard({DateTime? date, int pageSize = 500}) async {
+  Future<List<LimitUpStock>> getLimitUpBoard(
+      {DateTime? date, int pageSize = 500}) async {
     // A股交易日按上海时区(UTC+8)计算，避免海外用户日期偏移
     final base = date ?? DateTime.now();
     final shanghai = base.toUtc().add(const Duration(hours: 8));
-    final dateStr = shanghai.toIso8601String().substring(0, 10).replaceAll('-', '');
+    final dateStr =
+        shanghai.toIso8601String().substring(0, 10).replaceAll('-', '');
     final url = Uri.parse(
       'https://push2ex.eastmoney.com/getTopicZTPool'
       '?ut=7eea3edcaed734bea9cbfc24409ed989'
@@ -1673,7 +1712,8 @@ class ApiClient {
     try {
       final response = await _httpGet(url, headers: {
         'Referer': 'https://quote.eastmoney.com/ztb/detail',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
       });
       if (response == null) {
         debugPrint('getLimitUpBoard: response null for date=$dateStr');
@@ -1696,7 +1736,8 @@ class ApiClient {
     final shanghaiNow = DateTime.now().toUtc().add(const Duration(hours: 8));
     var yesterday = shanghaiNow.subtract(const Duration(days: 1));
     // 跳过周末：周六回退到周五，周日回退到周五
-    while (yesterday.weekday == DateTime.saturday || yesterday.weekday == DateTime.sunday) {
+    while (yesterday.weekday == DateTime.saturday ||
+        yesterday.weekday == DateTime.sunday) {
       yesterday = yesterday.subtract(const Duration(days: 1));
     }
     return getLimitUpBoard(date: yesterday);
@@ -1712,26 +1753,33 @@ class ApiClient {
 
   /// 获取分时线数据（东方财富接口，盘后也可获取全天走势）
   /// 返回: Map<int, double> 分钟偏移量->价格, Map<int, double> 分钟偏移量->均价
-  Future<Map<String, Map<int, double>>?> getTimeshareData(String code, {bool bypassCache = false}) async {
-    final cacheKey = 'timeshare_$code';
+  Future<Map<String, Map<int, double>>?> getTimeshareData(String code,
+      {bool bypassCache = false}) async {
+    final normalizedCode = StockCodeUtils.normalizeForArchive(code);
+    final cacheKey = 'timeshare_$normalizedCode';
     if (!bypassCache) {
       final cached = _getCached(cacheKey);
       if (cached != null) return cached as Map<String, Map<int, double>>;
     }
 
     // 优先尝试东方财富，失败则降级到新浪
-    final result = await _getTimeshareFromEastMoney(code);
+    final result = await _getTimeshareFromEastMoney(normalizedCode);
     if (result != null) {
       final now = DateTime.now();
-      final isWeekday = now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
+      final isWeekday =
+          now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
       final totalMin = now.hour * 60 + now.minute;
-      final isTradingHour = isWeekday && totalMin >= (9 * 60 + 30) && totalMin <= 15 * 60;
-      _setCached(cacheKey, result, duration: isTradingHour ? const Duration(seconds: 5) : const Duration(seconds: 10));
+      final isTradingHour =
+          isWeekday && totalMin >= (9 * 60 + 30) && totalMin <= 15 * 60;
+      _setCached(cacheKey, result,
+          duration: isTradingHour
+              ? const Duration(seconds: 5)
+              : const Duration(seconds: 10));
       return result;
     }
 
     debugPrint('getTimeshareData: 东方财富分时接口失败，降级使用新浪5分钟K线');
-    final fallback = await _getTimeshareFromSina(code);
+    final fallback = await _getTimeshareFromSina(normalizedCode);
     if (fallback != null) {
       _setCached(cacheKey, fallback, duration: const Duration(seconds: 60));
       return fallback;
@@ -1742,27 +1790,21 @@ class ApiClient {
   }
 
   /// 东方财富分时数据（主接口）
-  Future<Map<String, Map<int, double>>?> _getTimeshareFromEastMoney(String code) async {
-    String secid;
-    if (code.startsWith('sh')) {
-      secid = '1.${code.substring(2)}';
-    } else if (code.startsWith('sz')) {
-      secid = '0.${code.substring(2)}';
-    } else {
-      secid = code;
-    }
+  Future<Map<String, Map<int, double>>?> _getTimeshareFromEastMoney(
+      String code) async {
+    final secid = StockCodeUtils.toEastMoneySecId(code);
 
-    final url = Uri.parse(
-      'https://push2his.eastmoney.com/api/qt/stock/trends2/get'
-      '?secid=$secid'
-      '&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13'
-      '&fields2=f51,f52,f53,f54,f55,f56,f57,f58'
-      '&iscr=0'
-    );
+    final url =
+        Uri.parse('https://push2his.eastmoney.com/api/qt/stock/trends2/get'
+            '?secid=$secid'
+            '&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13'
+            '&fields2=f51,f52,f53,f54,f55,f56,f57,f58'
+            '&iscr=0');
 
     try {
       final response = await _httpGet(url, headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
         'Referer': 'https://quote.eastmoney.com/',
       });
       if (response == null) {
@@ -1773,7 +1815,8 @@ class ApiClient {
       final data = json.decode(response.body) as Map<String, dynamic>;
       final rc = data['rc'];
       if (rc == null) {
-        debugPrint('getTimeshareData: EastMoney响应缺少rc字段, body=${response.body.substring(0, response.body.length.clamp(0, 200))}');
+        debugPrint(
+            'getTimeshareData: EastMoney响应缺少rc字段, body=${response.body.substring(0, response.body.length.clamp(0, 200))}');
         return null;
       }
       if (rc != 0) {
@@ -1797,45 +1840,26 @@ class ApiClient {
       final priceMap = <int, double>{};
       final volumeMap = <int, double>{};
       final amountMap = <int, double>{};
+      final vwapMap = <int, double>{};
 
       for (final item in trends) {
-        final parts = (item as String).split(',');
-        if (parts.length < 5) continue;
+        final point = TimeshareParser.parseEastMoneyTrendLine(item as String);
+        if (point == null) continue;
 
-        final timeStr = parts[0];
-        final price = _parseDouble(parts[1]);
-        final volume = _parseDouble(parts[2]);
-        final amount = _parseDouble(parts[3]);
-
-        final timePart = timeStr.split(' ').last;
-        final timeParts = timePart.split(':');
-        if (timeParts.length < 2) continue;
-        final hour = int.tryParse(timeParts[0]) ?? 0;
-        final minute = int.tryParse(timeParts[1]) ?? 0;
-        final totalMinutes = hour * 60 + minute;
-
-        const morningStart = 9 * 60 + 30;
-        const morningEnd = 11 * 60 + 30;
-        const afternoonStart = 13 * 60;
-
-        int offset;
-        if (totalMinutes >= morningStart && totalMinutes <= morningEnd) {
-          offset = totalMinutes - morningStart;
-        } else if (totalMinutes >= afternoonStart) {
-          offset = 120 + (totalMinutes - afternoonStart);
-        } else {
-          continue;
+        priceMap[point.offset] = point.price;
+        volumeMap[point.offset] = point.volume;
+        amountMap[point.offset] = point.amount;
+        final vwap = point.vwap;
+        if (vwap != null && vwap > 0) {
+          vwapMap[point.offset] = vwap;
         }
-
-        priceMap[offset] = price;
-        volumeMap[offset] = volume;
-        amountMap[offset] = amount;
       }
 
       return {
         'prices': priceMap,
         'volumes': volumeMap,
         'amounts': amountMap,
+        'vwapData': vwapMap,
         'preClose': {0: preClose},
       };
     } on FormatException catch (e) {
@@ -1848,18 +1872,19 @@ class ApiClient {
   }
 
   /// 新浪5分钟K线降级（盘后和主接口失败时使用）
-  Future<Map<String, Map<int, double>>?> _getTimeshareFromSina(String code) async {
+  Future<Map<String, Map<int, double>>?> _getTimeshareFromSina(
+      String code) async {
     // 新浪K线API symbol格式: sh600519 或 sz000001
     final sinaCode = code.toLowerCase();
 
     final url = Uri.parse(
-      'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData'
-      '?symbol=$sinaCode&scale=5&ma=no&datalen=240'
-    );
+        'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData'
+        '?symbol=$sinaCode&scale=5&ma=no&datalen=240');
 
     try {
       final response = await _httpGet(url, headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
         'Referer': 'https://finance.sina.com.cn/',
       });
       if (response == null) {
@@ -1873,7 +1898,8 @@ class ApiClient {
         return null;
       }
       if (!bodyStr.startsWith('[')) {
-        debugPrint('getTimeshareData: Sina返回非数组响应(前100字符): ${bodyStr.substring(0, bodyStr.length.clamp(0, 100))}');
+        debugPrint(
+            'getTimeshareData: Sina返回非数组响应(前100字符): ${bodyStr.substring(0, bodyStr.length.clamp(0, 100))}');
         return null;
       }
 
@@ -1966,7 +1992,8 @@ class ApiClient {
   /// v3.2: K线缓存TTL策略 — 交易时段短(2min)，非交易时段长(10min)
   static Duration _klineCacheDuration() {
     final now = DateTime.now();
-    final isWeekday = now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
+    final isWeekday =
+        now.weekday >= DateTime.monday && now.weekday <= DateTime.friday;
     if (!isWeekday) return const Duration(minutes: 10);
     final totalMinutes = now.hour * 60 + now.minute;
     // A股交易时段: 9:30-15:00, 盘前9:15-9:30
