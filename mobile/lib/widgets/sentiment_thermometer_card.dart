@@ -108,9 +108,25 @@ class SentimentThermometerCard extends StatelessWidget {
                 style: const TextStyle(fontSize: 11, color: Colors.white70),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
           ],
+          // v3.10: 显示数据更新时间戳
+          const SizedBox(height: 6),
+          Text(
+            '更新于 ${_formatTime(s.timestamp)}',
+            style: const TextStyle(fontSize: 10, color: Colors.white38),
+          ),
         ],
       ),
     );
+  }
+
+  /// 格式化时间戳为短时间显示
+  static String _formatTime(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inMinutes < 1) return '刚刚';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
+    if (diff.inHours < 24) return '${diff.inHours}小时前';
+    return '${dt.month}/${dt.day} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
   List<Color> _phaseGradient(EmotionPhase p) => switch (p) {

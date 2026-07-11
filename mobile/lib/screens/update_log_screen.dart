@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.12.20260711',
+        'date': '2026-07-11',
+        'changes': [
+          '情绪温度计结果持久化到本地数据库，重启APP立即恢复上次显示',
+          '短线工作台温度计卡片新增更新时间戳（刚刚/N分钟前/N小时前）',
+          '数据库升级至v19，新增sentiment持久化表',
+        ],
+      },
+      {
         'version': 'v3.11.20260711',
         'date': '2026-07-11',
         'changes': [

@@ -79,6 +79,8 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
                 yesterdayPhase: _lastSentiment?.phase,
               );
               _lastSentiment = sentiment;
+      // v3.10: 持久化情绪温度计结果，供启动时快速恢复
+      try { await _dbService.saveSentiment(sentiment); } catch (_) {}
               emit(LimitUpScanProgress(
                 stage: 'done',
                 message: '使用缓存数据计算情绪',
@@ -103,6 +105,8 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
           yesterdayPhase: _lastSentiment?.phase,
         );
         _lastSentiment = sentiment;
+      // v3.10: 持久化情绪温度计结果，供启动时快速恢复
+      try { await _dbService.saveSentiment(sentiment); } catch (_) {}
         emit(LimitUpScanProgress(
           stage: 'done',
           message: '使用缓存数据计算情绪',
@@ -159,6 +163,8 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
         limitDownCount: limitDownCount,
       );
       _lastSentiment = sentiment;
+      // v3.10: 持久化情绪温度计结果，供启动时快速恢复
+      try { await _dbService.saveSentiment(sentiment); } catch (_) {}
 
       // Step 5: 落库
       // A股交易日按上海时区计算，避免海外/出差用户日期偏移

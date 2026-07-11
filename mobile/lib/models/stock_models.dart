@@ -1,3 +1,4 @@
+import 'dart:convert';
 import '../analysis/strategy_engine.dart';
 import '../analysis/backtest_engine.dart';
 import '../analysis/market_structure_analyzer.dart';
@@ -1816,13 +1817,26 @@ class SentimentResult {
         limitUpCount: (map['limit_up_count'] as int?) ?? 0,
         limitDownCount: (map['limit_down_count'] as int?) ?? 0,
         continuationHeight: (map['continuation_height'] as int?) ?? 0,
-        signals: (map['signals'] as List?)?.map((e) => e.toString()).toList() ??
-            const [],
+        signals: _parseSignalsFromMap(map['signals']),
         timestamp: map['timestamp'] != null
             ? DateTime.fromMillisecondsSinceEpoch(
                 (map['timestamp'] as num).toInt())
             : DateTime.now(),
       );
+
+  /// 兼容 signals 从内存 List 和 SQLite TEXT 两种来源
+  static List<String> _parseSignalsFromMap(dynamic value) {
+    if (value == null) return const [];
+    if (value is List) return value.map((e) => e.toString()).toList();
+    if (value is String) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is List) return decoded.map((e) => e.toString()).toList();
+      } catch (_) {}
+      return [];
+    }
+    return [];
+  }
 }
 
 /// 全球主要股指（美股/港股/亚太/欧洲）

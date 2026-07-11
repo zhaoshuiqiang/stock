@@ -37,7 +37,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 18,
+      version: 19,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -349,6 +349,25 @@ class DatabaseService {
             await txn.execute(
                 "ALTER TABLE recommendation_tracking ADD COLUMN feedback TEXT DEFAULT ''");
           }
+          if (oldVersion < 19) {
+            // v3.10: 情绪温度计结果持久化（启动时快速恢复）
+            await txn.execute('''
+              CREATE TABLE IF NOT EXISTS sentiment (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                temperature REAL NOT NULL DEFAULT 50,
+                phase TEXT NOT NULL DEFAULT 'freezing',
+                zhaban_rate REAL NOT NULL DEFAULT 0,
+                continuation_rate REAL NOT NULL DEFAULT 0,
+                seal_success_rate REAL NOT NULL DEFAULT 0,
+                money_making_effect REAL NOT NULL DEFAULT 0,
+                limit_up_count INTEGER NOT NULL DEFAULT 0,
+                limit_down_count INTEGER NOT NULL DEFAULT 0,
+                continuation_height INTEGER NOT NULL DEFAULT 0,
+                signals TEXT NOT NULL DEFAULT '[]',
+                timestamp INTEGER NOT NULL
+              )
+            ''');
+          }
           // 索引补建（幂等，保证升级路径和新装路径都有）
           await txn.execute(
               'CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
@@ -588,6 +607,23 @@ class DatabaseService {
         'CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_date ON recommendation_tracking(signal_date)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_explore_results_score ON explore_results(score)');
+    // v3.10: 情绪温度计持久化
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sentiment (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        temperature REAL NOT NULL DEFAULT 50,
+        phase TEXT NOT NULL DEFAULT 'freezing',
+        zhaban_rate REAL NOT NULL DEFAULT 0,
+        continuation_rate REAL NOT NULL DEFAULT 0,
+        seal_success_rate REAL NOT NULL DEFAULT 0,
+        money_making_effect REAL NOT NULL DEFAULT 0,
+        limit_up_count INTEGER NOT NULL DEFAULT 0,
+        limit_down_count INTEGER NOT NULL DEFAULT 0,
+        continuation_height INTEGER NOT NULL DEFAULT 0,
+        signals TEXT NOT NULL DEFAULT '[]',
+        timestamp INTEGER NOT NULL
+      )
+    ''');
   }
 
   Future<void> addToWatchlist(
@@ -1317,6 +1353,24 @@ class DatabaseService {
     return result
         .map((row) => DateTime.parse(row['snapshot_date'] as String))
         .toList();
+  }
+
+  // --- 情绪温度计持久化 (v3.10) ---
+
+  Future<void> saveSentiment(SentimentResult sentiment) async {
+    final db = await database;
+    await db.insert(
+      'sentiment',
+      sentiment.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<SentimentResult?> getLatestSentiment() async {
+    final db = await database;
+    final rows = await db.query('sentiment', limit: 1);
+    if (rows.isEmpty) return null;
+    return SentimentResult.fromMap(rows.first);
   }
 
   static String _formatSnapshotDate(DateTime date) =>

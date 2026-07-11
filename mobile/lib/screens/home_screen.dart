@@ -56,6 +56,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _loadFromCache();
     _loadCachedPicks();
     _loadIntradayState();
+    _loadCachedSentiment();
     _loadWorkbenchData();
     // 如果引擎正在运行，订阅进度流（完成时刷新主线板块计数）
     if (_pickEngine.isRunning) {
@@ -184,6 +185,18 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _loadIntradayState() async {
     final enabled = await _notificationService.isIntradayEnabled();
     if (mounted) setState(() => _intradayEnabled = enabled);
+  }
+
+  /// v3.10: 从DB加载上次保存的情绪温度计（启动时快速恢复）
+  Future<void> _loadCachedSentiment() async {
+    try {
+      final cached = await _dbService.getLatestSentiment();
+      if (mounted && cached != null) {
+        setState(() => _sentiment = cached);
+      }
+    } catch (e) {
+      debugPrint('加载缓存情绪结果失败: $e');
+    }
   }
 
   Future<void> _toggleIntraday() async {
