@@ -9,6 +9,7 @@ import '../analysis/sector_pick_engine.dart';
 import '../analysis/intraday_scan_engine.dart';
 import '../storage/database_service.dart';
 import '../widgets/sentiment_thermometer_card.dart';
+import '../services/notification_service.dart';
 import '../core/trading_session.dart';
 import 'quote_screen.dart';
 import 'sector_screen.dart';
@@ -42,6 +43,9 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isWorkbenchLoading = false; // 工作台刷新中
   // 情绪温度计 (v2.27+)：从 LimitUpScanEngine 缓存读取，不在工作台本地重算
   SentimentResult? _sentiment;
+  // 分时信号推送开关状态
+  bool _intradayEnabled = true;
+  final NotificationService _notificationService = NotificationService();
   bool _isScanning = false; // 打板扫描进行中（首页触发时跟踪状态）
   StreamSubscription<LimitUpScanProgress>? _limitUpScanSub;
 
@@ -51,6 +55,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _loadFromCache();
     _loadCachedPicks();
+    _loadIntradayState();
     _loadWorkbenchData();
     // 如果引擎正在运行，订阅进度流（完成时刷新主线板块计数）
     if (_pickEngine.isRunning) {
@@ -174,6 +179,17 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         });
       }
     }
+  }
+
+  Future<void> _loadIntradayState() async {
+    final enabled = await _notificationService.isIntradayEnabled();
+    if (mounted) setState(() => _intradayEnabled = enabled);
+  }
+
+  Future<void> _toggleIntraday() async {
+    final newValue = !_intradayEnabled;
+    await _notificationService.setIntradayEnabled(newValue);
+    if (mounted) setState(() => _intradayEnabled = newValue);
   }
 
   Future<void> _loadCachedPicks() async {
@@ -516,7 +532,20 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     const SizedBox(width: 8),
                     Text('短线工作台',
                         style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                    const Spacer(),
+                    const SizedBox(width: 8),
+                    // 分时信号推送开关
+                    GestureDetector(
+                      onTap: _toggleIntraday,
+                      child: Tooltip(
+                        message: _intradayEnabled ? '分时信号推送已开启，点击关闭' : '分时信号推送已关闭，点击开启',
+                        child: Icon(
+                          _intradayEnabled ? Icons.notifications_active : Icons.notifications_off_outlined,
+                          color: _intradayEnabled ? Colors.amber : Colors.white30,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     GestureDetector(
                       onTap: _isWorkbenchLoading ? null : _loadWorkbenchData,
                       child: _isWorkbenchLoading

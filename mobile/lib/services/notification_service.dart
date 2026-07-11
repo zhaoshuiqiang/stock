@@ -44,11 +44,11 @@ class NotificationService {
   static const int _alertCooldownMinutes = 5;
 
   // 日内信号时效：信号产生后超过此分钟数不再推送
-  static const int _intradaySignalMaxAgeMinutes = 3;
-  // 日内信号轮询间隔（分钟）
-  static const int _intradayPollIntervalMinutes = 1;
+  static const int _intradaySignalMaxAgeMinutes = 5;
+  // 日内信号轮询间隔（秒）
+  static const int _intradayPollIntervalSeconds = 30;
   // 日内信号单次扫描持仓股上限
-  static const int _intradayMaxPositions = 10;
+  static const int _intradayMaxPositions = 20;
 
   static const String _intradayPrefKeyEnabled = 'intraday_notification_enabled';
 
@@ -135,13 +135,13 @@ class NotificationService {
     await prefs.setBool(_prefKeyEnabled, enabled);
     if (enabled) {
       startPolling();
-      // 日内信号轮询独立于资讯轮询，按用户开关启动
+      // 日内信号独立控制，不再随资讯推送联动开关
       if (await isIntradayEnabled()) {
         startIntradayPolling();
       }
     } else {
       stopPolling();
-      stopIntradayPolling();
+      // 不停止日内轮询 - 二者独立控制
     }
   }
 
@@ -196,13 +196,13 @@ class NotificationService {
     _pollTimer = null;
   }
 
-  /// 启动日内高抛低吸信号轮询（1分钟间隔）
+  /// 启动日内高抛低吸信号轮询（30秒间隔）
   void startIntradayPolling() async {
     stopIntradayPolling();
     if (!await isIntradayEnabled()) return;
 
     _intradayPollTimer = Timer.periodic(
-      const Duration(minutes: _intradayPollIntervalMinutes),
+      Duration(seconds: _intradayPollIntervalSeconds),
       (_) => _checkIntradaySignals(),
     );
     // 启动时立即检查一次

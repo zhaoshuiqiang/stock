@@ -134,18 +134,29 @@ class LimitUpScanEngine extends BaseAnalysisEngine<LimitUpScanProgress> {
           message: '分析打板质量...'));
       final todayAnalyses = LimitUpAnalyzer.analyzeBatchList(todayStocks);
 
-      // Step 3: 计算情绪温度计
+      // Step 3: 获取市场情绪数据（跌停家数，P0修复）
       emit(const LimitUpScanProgress(stage: 'computing_sentiment', message: '计算情绪温度计...'));
       // 赚钱效应 = 昨日涨停股今日涨跌幅的均值，因此 todayQuotePct 必须以昨日 code 为键
       final todayQuotePct = <String, double>{};
       for (final a in yesterdayAnalyses) {
         todayQuotePct[a.code] = a.changePct;
       }
+      // 获取全市场跌停家数，失败时默认为0
+      int limitDownCount = 0;
+      try {
+        final mSent = await _apiClient.getMarketSentiment();
+        if (mSent != null) {
+          limitDownCount = mSent.limitDownCount;
+        }
+      } catch (e) {
+        debugPrint('LimitUpScanEngine: 获取市场情绪失败: $e');
+      }
       final sentiment = SentimentThermometer.compute(
         todayPool: todayAnalyses,
         yesterdayPool: yesterdayAnalyses,
         todayQuotePct: todayQuotePct,
         yesterdayPhase: _lastSentiment?.phase,
+        limitDownCount: limitDownCount,
       );
       _lastSentiment = sentiment;
 

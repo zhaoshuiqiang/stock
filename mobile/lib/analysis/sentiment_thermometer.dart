@@ -2,17 +2,19 @@ import 'package:stock_analyzer/analysis/limit_up_analyzer.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 
 /// 情绪温度计纯函数引擎
-/// 输入：今日打板池 + 昨日打板池 + 今日行情涨跌幅 + 昨日阶段
-/// 输出：SentimentResult（5维指标 + 温度 + 阶段 + 信号）
+/// 输入：今日打板池 + 昨日打板池 + 今日行情涨跌幅 + 昨日阶段 + 跌停家数
+/// 输出：SentimentResult（6维指标 + 温度 + 阶段 + 信号）
 class SentimentThermometer {
   const SentimentThermometer._();
 
   /// 主计算入口
+  /// [limitDownCount] 全市场跌停家数，用于计算恐慌维度（P0修复）
   static SentimentResult compute({
     required List<LimitUpAnalysis> todayPool,
     required List<LimitUpAnalysis> yesterdayPool,
     required Map<String, double> todayQuotePct,
     EmotionPhase? yesterdayPhase,
+    int limitDownCount = 0,
   }) {
     final zhabanRate = _computeZhabanRate(todayPool);
     final continuationRate = _computeContinuationRate(todayPool, yesterdayPool);
@@ -20,7 +22,6 @@ class SentimentThermometer {
     final moneyMakingEffect = _computeMoneyMakingEffect(yesterdayPool, todayQuotePct);
     final continuationHeight = _computeContinuationHeight(todayPool);
     final limitUpCount = todayPool.where((a) => !a.isZhaBan).length;
-    const limitDownCount = 0;  // P0 暂不接入跌停数据
 
     final temperature = _computeTemperature(
       zhabanRate: zhabanRate,
@@ -28,11 +29,13 @@ class SentimentThermometer {
       sealSuccessRate: sealSuccessRate,
       moneyMakingEffect: moneyMakingEffect,
       continuationHeight: continuationHeight,
+      limitDownCount: limitDownCount,
     );
 
     final phase = _inferPhase(
       temperature: temperature,
       limitUpCount: limitUpCount,
+      limitDownCount: limitDownCount,
       continuationHeight: continuationHeight,
       continuationRate: continuationRate,
       yesterdayPhase: yesterdayPhase,
@@ -44,6 +47,7 @@ class SentimentThermometer {
       moneyMakingEffect: moneyMakingEffect,
       continuationHeight: continuationHeight,
       limitUpCount: limitUpCount,
+      limitDownCount: limitDownCount,
     );
 
     return SentimentResult(
@@ -114,25 +118,35 @@ class SentimentThermometer {
     required double sealSuccessRate,
     required double moneyMakingEffect,
     required int continuationHeight,
+    required int limitDownCount,
   }) {
     final zhabanScore = 1.0 - zhabanRate;
     final contScore = continuationRate.clamp(0.0, 1.0);
     final sealScore = sealSuccessRate.clamp(0.0, 1.0);
     final moneyScore = ((moneyMakingEffect + 5) / 10).clamp(0.0, 1.0);
     final heightScore = (continuationHeight / 7).clamp(0.0, 1.0);
-    final temp = zhabanScore * 20 + contScore * 25 + sealScore * 15
-               + moneyScore * 30 + heightScore * 10;
-    return temp.clamp(0.0, 100.0);
+    // 5维基础分（保持原有权重100）
+    final baseTemp = zhabanScore * 20 + contScore * 25 + sealScore * 15
+                   + moneyScore * 30 + heightScore * 10;
+    // 跌停恐慌惩罚：0家无惩罚，80+家扣满12分
+    final limitDownPenalty = (limitDownCount / 80.0).clamp(0.0, 1.0) * 12;
+    return (baseTemp - limitDownPenalty).clamp(0.0, 100.0);
   }
 
   // === 阶段判定 ===
   static EmotionPhase _inferPhase({
     required double temperature,
     required int limitUpCount,
+    required int limitDownCount,
     required int continuationHeight,
     required double continuationRate,
     required EmotionPhase? yesterdayPhase,
   }) {
+    // 跌停恐慌优先：全市场大量跌停时直接判定为冰点
+    if (limitDownCount >= 50) return EmotionPhase.freezing;
+    // 中度跌停 + 温度低 → 退潮
+    if (limitDownCount >= 20 && temperature < 45) return EmotionPhase.retreat;
+
     if (limitUpCount >= 30 && continuationHeight <= 3 &&
         temperature >= 30 && temperature < 55) {
       return EmotionPhase.startup;
@@ -168,8 +182,11 @@ class SentimentThermometer {
     required double moneyMakingEffect,
     required int continuationHeight,
     required int limitUpCount,
+    required int limitDownCount,
   }) {
     return [
+      if (limitDownCount >= 50) '🆘 跌停潮：$limitDownCount家跌停，市场恐慌',
+      if (limitDownCount >= 20 && limitDownCount < 50) '⚠️ 跌停预警：$limitDownCount家跌停，注意风险',
       if (zhabanRate >= 0.7) '⚠️ 炸板潮：封板意愿极弱，打板胜率低',
       if (zhabanRate < 0.15) '🔥 封板极强：打板情绪高涨',
       if (continuationRate > 0.5) '🚀 接力强：连板晋级率高',

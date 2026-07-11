@@ -118,14 +118,16 @@ void main() {
         expect(r.phase, EmotionPhase.climax);
       });
 
-      test('freezing: <20 limitUp, height≤2, temp<30', () {
+      test('freezing: <20 limitUp, height≤2, temp<30 + limitDown penalty', () {
         final pool = [
           LimitUpAnalysis(code: '001', name: 'A', consecutiveDays: 1, isZhaBan: true),
           LimitUpAnalysis(code: '002', name: 'B', consecutiveDays: 1, isZhaBan: true),
         ];
         final r = SentimentThermometer.compute(
-          todayPool: pool, yesterdayPool: [], todayQuotePct: {});
+          todayPool: pool, yesterdayPool: [], todayQuotePct: {},
+          limitDownCount: 80); // 大量跌停触发恐慌惩罚
         expect(r.phase, EmotionPhase.freezing);
+        expect(r.temperature, lessThan(30));
       });
 
       test('state transition: climax → retreat when temp drops', () {

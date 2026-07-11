@@ -81,10 +81,10 @@ void main() async {
   // 如果用户已开启推送，启动轮询
   if (await notificationService.isEnabled()) {
     notificationService.startPolling();
-    // 日内高抛低吸信号轮询（独立于资讯轮询，默认开启）
-    if (await notificationService.isIntradayEnabled()) {
-      notificationService.startIntradayPolling();
-    }
+  }
+  // 日内高抛低吸信号轮询（独立于资讯轮询，P0修复）
+  if (await notificationService.isIntradayEnabled()) {
+    notificationService.startIntradayPolling();
   }
   runApp(const MyApp());
 }
