@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.8.20260711',
+        'date': '2026-07-11',
+        'changes': [
+          '修复自选页面持仓股因代码格式不一致（带/不带sh前缀）导致的重复显示问题',
+          '持仓同步到自选列表时统一使用市场前缀格式，与搜索添加格式一致',
+          '启动时自动清理已存在的重复记录，确保自选列表数据干净',
+        ],
+      },
+      {
         'version': 'v3.7.20260711',
         'date': '2026-07-11',
         'changes': [

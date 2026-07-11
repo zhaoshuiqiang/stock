@@ -373,12 +373,57 @@ class WatchlistScreenState extends State<WatchlistScreen>
       if (watchlist.isNotEmpty) {
         _refreshQuotes();
       }
+      // 清理因代码格式不一致导致的重复记录（仅执行一次）
+      _cleanupDuplicateWatchlistEntries(watchlist);
     } catch (e) {
       debugPrint('[Watchlist] 加载自选失败: $e');
       if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
+    }
+  }
+
+  /// 清理因持仓代码格式不一致（带/不带 sh/sz/bj 前缀）导致的自选重复记录
+  bool _duplicateCleanupDone = false;
+  Future<void> _cleanupDuplicateWatchlistEntries(List<WatchlistItem> items) async {
+    if (_duplicateCleanupDone || items.length < 2) return;
+    _duplicateCleanupDone = true;
+
+    // 构建前缀化 code → 无前缀 code 的映射
+    final prefixPattern = RegExp(r'^(sh|sz|bj)', caseSensitive: false);
+    final prefixedMap = <String, String>{}; // unprefixed → prefixed code
+    final toRemove = <String>[];
+
+    for (final item in items) {
+      if (item.code.startsWith(prefixPattern)) {
+        final unprefixed = _normalizeCode(item.code);
+        prefixedMap[unprefixed] = item.code;
+      }
+    }
+
+    // 找出同时存在无前缀版本的记录
+    for (final item in items) {
+      if (!item.code.startsWith(prefixPattern)) {
+        final unprefixed = _normalizeCode(item.code);
+        if (prefixedMap.containsKey(unprefixed)) {
+          toRemove.add(item.code);
+        }
+      }
+    }
+
+    // 删除重复的无前缀记录
+    for (final code in toRemove) {
+      await _dbService.removeFromWatchlist(code);
+    }
+
+    if (toRemove.isNotEmpty) {
+      debugPrint('[Watchlist] 清理重复持仓记录: $toRemove');
+      // 重新加载自选列表
+      final updated = await _dbService.getWatchlist();
+      if (mounted) {
+        setState(() => _watchlist = updated);
+      }
     }
   }
 
@@ -743,12 +788,18 @@ class WatchlistScreenState extends State<WatchlistScreen>
   Future<void> _syncPositionsToPinnedWatchlist(List<Position> positions) async {
     for (final position in positions) {
       if (position.quantity <= 0) continue;
+      // 规范化代码：统一加市场前缀(sh/sz/bj)，与搜索添加的格式一致
+      final normalizedCode = _apiClient.addMarketPrefix(position.code);
+      // 清理可能存在的无前缀旧记录，避免因代码格式不同导致的重复
+      if (position.code != normalizedCode) {
+        await _dbService.removeFromWatchlist(position.code);
+      }
       await _dbService.addToWatchlist(
-        position.code,
+        normalizedCode,
         position.name,
         isPinned: true,
       );
-      await _dbService.togglePin(position.code, true);
+      await _dbService.togglePin(normalizedCode, true);
     }
   }
 
