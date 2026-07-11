@@ -61,6 +61,7 @@ class QuoteScreenState extends State<QuoteScreen>
   QuoteData? _quote;
   List<HistoryKline> _klines = [];
   AnalysisResult? _analysis;
+  List<Map<String, dynamic>>? _scoreTrend; // v3.13: 评分趋势数据
   MarketContext? _marketContext;
   bool _isLoading = true;
   bool _isAnalysisRefreshing = false;
@@ -437,6 +438,8 @@ class QuoteScreenState extends State<QuoteScreen>
         _isAnalysisRefreshing = false;
       });
       _refreshLimitUpAnalysisFromPool(); // 异步用打板池缓存覆盖
+      // v3.13: 异步加载评分趋势（不阻塞分析刷新）
+      _loadScoreTrend();
     } catch (e) {
       if (mounted)
         setState(() {
@@ -461,6 +464,18 @@ class QuoteScreenState extends State<QuoteScreen>
       }
     } catch (e) {
       debugPrint('_refreshLimitUpAnalysisFromPool failed: $e');
+    }
+  }
+
+  /// v3.13: 加载评分趋势数据
+  Future<void> _loadScoreTrend() async {
+    try {
+      final trend = await _dbService.getScoreTrend(widget.code);
+      if (mounted) {
+        setState(() => _scoreTrend = trend);
+      }
+    } catch (e) {
+      debugPrint('_loadScoreTrend failed: $e');
     }
   }
 
@@ -673,6 +688,8 @@ class QuoteScreenState extends State<QuoteScreen>
         }
       });
       _refreshLimitUpAnalysisFromPool(); // 异步用打板池缓存覆盖
+      // v3.13: 异步加载评分趋势
+      _loadScoreTrend();
     } catch (e) {
       // ignore
     } finally {
@@ -2480,6 +2497,7 @@ class QuoteScreenState extends State<QuoteScreen>
       analysis: _analysis,
       isRefreshing: _isAnalysisRefreshing,
       lastUpdateTime: _lastUpdateTime,
+      scoreTrend: _scoreTrend,
       onRefresh: () => _refreshAnalysis(),
     );
   }

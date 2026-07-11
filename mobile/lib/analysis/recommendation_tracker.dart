@@ -30,6 +30,7 @@ class RecommendationSnapshot {
   final String? confidenceAdjustment;
   final String? feedback;
   final Map<String, double>? dimensionScores;
+  final double? score;
 
   RecommendationSnapshot({
     this.id,
@@ -50,6 +51,7 @@ class RecommendationSnapshot {
     this.confidenceAdjustment,
     this.feedback,
     this.dimensionScores,
+    this.score,
   });
 
   factory RecommendationSnapshot.fromMap(Map<String, dynamic> map) {
@@ -72,6 +74,7 @@ class RecommendationSnapshot {
       alphaVsMarket: (map['alpha_vs_market'] as num?)?.toDouble(),
       confidenceAdjustment: map['confidence_adjustment'] as String? ?? '',
       feedback: map['feedback'] as String? ?? '',
+      score: (map['score'] as num?)?.toDouble(),
       dimensionScores:
           _decodeDimensionScores(map['dimension_scores_json'] as String?),
     );
@@ -99,6 +102,7 @@ class RecommendationSnapshot {
       'alpha_vs_market': alphaVsMarket,
       'confidence_adjustment': confidenceAdjustment ?? '',
       'feedback': feedback ?? '',
+      'score': score,
       'dimension_scores_json': _encodeDimensionScores(dimensionScores),
     };
   }
@@ -189,6 +193,7 @@ class RecommendationTracker {
       strategy: strategy,
       conceptTags: conceptTags,
       dimensionScores: analysis.dimensionScores,
+      score: analysis.score.toDouble(),
     );
 
     await _dbService.insertRecommendationSnapshot(snapshot.toMap());
@@ -245,6 +250,7 @@ class RecommendationTracker {
         strategy: strategy,
         conceptTags: conceptTags,
         dimensionScores: analysis.dimensionScores,
+        score: analysis.score.toDouble(),
       );
       newSnapshots.add(snapshot);
       // 标记为已存在，防止批次内重复添加

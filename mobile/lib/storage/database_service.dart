@@ -37,7 +37,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 19,
+      version: 20,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -368,6 +368,10 @@ class DatabaseService {
               )
             ''');
           }
+          if (oldVersion < 20) {
+            await txn.execute(
+                "ALTER TABLE recommendation_tracking ADD COLUMN score REAL");
+          }
           // 索引补建（幂等，保证升级路径和新装路径都有）
           await txn.execute(
               'CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
@@ -519,7 +523,8 @@ class DatabaseService {
         alpha_vs_market REAL,
         confidence_adjustment TEXT DEFAULT '',
         dimension_scores_json TEXT DEFAULT '',
-        feedback TEXT DEFAULT ''
+        feedback TEXT DEFAULT '',
+        score REAL
       )
     ''');
 
@@ -1206,6 +1211,40 @@ class DatabaseService {
         DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
     await db.delete('recommendation_tracking',
         where: 'signal_date < ?', whereArgs: [cutoff]);
+  }
+
+  /// v3.13: 获取某只股票的历史评分趋势（最近20条记录）
+  /// 返回按时间升序的 {date, score} 列表
+  Future<List<Map<String, dynamic>>> getScoreTrend(String code) async {
+    final db = await database;
+    final rows = await db.query(
+      'recommendation_tracking',
+      columns: ['signal_date', 'score', 'dimension_scores_json', 'signal_price'],
+      where: 'code = ?',
+      whereArgs: [code],
+      orderBy: 'signal_date ASC',
+      limit: 20,
+    );
+    return rows.map((row) {
+      double score = (row['score'] as num?)?.toDouble() ?? 0;
+      // 兼容旧数据：score 为 null 时从 dimension_scores_json 反推
+      if (score == 0) {
+        final dimJson = row['dimension_scores_json'] as String?;
+        if (dimJson != null && dimJson.isNotEmpty) {
+          try {
+            final dims = jsonDecode(dimJson) as Map<String, dynamic>;
+            final total = dims.values
+                .whereType<double>()
+                .fold(0.0, (a, b) => a + b);
+            score = (total / dims.length).clamp(0, 10).toDouble();
+          } catch (_) {}
+        }
+      }
+      return {
+        'date': DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int),
+        'score': score,
+      };
+    }).toList();
   }
 
   // ========== 持仓管理 CRUD (v2.33) ==========

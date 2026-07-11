@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/stock_models.dart';
+import 'score_trend_chart.dart';
 
 /// 交易仪表盘：聚合短线交易关键决策信息
 /// 替代传统多Tab翻页模式，一屏展示全部决策要点
@@ -9,6 +10,7 @@ class TradingDashboard extends StatelessWidget {
   final VoidCallback? onRefresh;
   final bool isRefreshing;
   final String lastUpdateTime;
+  final List<Map<String, dynamic>>? scoreTrend;
 
   const TradingDashboard({
     super.key,
@@ -17,6 +19,7 @@ class TradingDashboard extends StatelessWidget {
     this.onRefresh,
     this.isRefreshing = false,
     this.lastUpdateTime = '',
+    this.scoreTrend,
   });
 
   @override
@@ -56,6 +59,10 @@ class TradingDashboard extends StatelessWidget {
           if (analysis!.nextDayPrediction != null) ...[
             const SizedBox(height: 10),
             _buildNextDayPredictionCard(),
+          ],
+          if (scoreTrend != null && scoreTrend!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _buildScoreTrendCard(),
           ],
           if (analysis!.earlyWarningSignals != null && analysis!.earlyWarningSignals!.isNotEmpty) ...[
             const SizedBox(height: 10),
@@ -973,6 +980,90 @@ class TradingDashboard extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+
+  // ─── 评分历史趋势 (v3.13) ────────────────────────────────
+
+  Widget _buildScoreTrendCard() {
+    final avgScore = scoreTrend!
+        .map((d) => (d['score'] as num).toDouble())
+        .reduce((a, b) => a + b) / scoreTrend!.length;
+    final firstScore =
+        (scoreTrend!.first['score'] as num).toDouble();
+    final lastScore =
+        (scoreTrend!.last['score'] as num).toDouble();
+    final trend = lastScore - firstScore;
+    final trendIcon = trend > 0.5
+        ? Icons.trending_up
+        : trend < -0.5
+            ? Icons.trending_down
+            : Icons.trending_flat;
+    final trendColor = trend > 0.5
+        ? const Color(0xFFE74C3C)
+        : trend < -0.5
+            ? const Color(0xFF2ECC71)
+            : Colors.grey;
+    final trendLabel = trend > 0.5
+        ? '上升'
+        : trend < -0.5
+            ? '下降'
+            : '平稳';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF30363D), width: 0.8),
+      ),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        initiallyExpanded: false,
+        leading: const Icon(Icons.show_chart, color: Color(0xFF58A6FF), size: 20),
+        title: Row(
+          children: [
+            const Text('评分趋势',
+                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 8),
+            Text('${scoreTrend!.length}条', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            const SizedBox(width: 8),
+            Icon(trendIcon, color: trendColor, size: 14),
+            const SizedBox(width: 2),
+            Text('$trendLabel', style: TextStyle(color: trendColor, fontSize: 11, fontWeight: FontWeight.w500)),
+            const Spacer(),
+            Text('均${avgScore.toStringAsFixed(1)}分',
+                style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          ],
+        ),
+        children: [
+          ScoreTrendChart(trendData: scoreTrend!),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _legendDot(const Color(0xFFE74C3C), '≥7 强'),
+              const SizedBox(width: 16),
+              _legendDot(Colors.orange, '≥6 谨慎'),
+              const SizedBox(width: 16),
+              _legendDot(const Color(0xFF58A6FF), '≥4 中性'),
+              const SizedBox(width: 16),
+              _legendDot(const Color(0xFF2ECC71), '<4 弱'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _legendDot(Color color, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 4),
+        Text(label, style: const TextStyle(color: Colors.white38, fontSize: 10)),
+      ],
     );
   }
 

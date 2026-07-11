@@ -29,7 +29,8 @@ const _recommendationTrackingSchema = '''
     alpha_vs_market REAL,
     confidence_adjustment TEXT DEFAULT '',
     dimension_scores_json TEXT DEFAULT '',
-    feedback TEXT DEFAULT ''
+    feedback TEXT DEFAULT '',
+    score REAL
   )
 ''';
 
