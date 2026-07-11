@@ -10,6 +10,17 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.13.20260711',
+        'date': '2026-07-11',
+        'changes': [
+          '预警规则完整支持RSI/MACD/KDJ/均线交叉/布林带/CCI/WR/ATR等指标后台自动触发',
+          '量比/换手率/振幅预警从行情数据直接计算，无需K线，即时响应',
+          'MACD支持金叉/死叉检测，均线交叉支持MA5/10/20/60任意周期',
+          'RSI/KDJ按阈值方向自动判定超买(>=50)或超卖(<50)',
+          '预警检查时按需获取K线数据+cacheAllIndicators一次性计算所有指标',
+        ],
+      },
+      {
         'version': 'v3.12.20260711',
         'date': '2026-07-11',
         'changes': [

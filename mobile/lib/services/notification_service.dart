@@ -9,6 +9,7 @@ import 'package:stock_analyzer/core/trading_session.dart';
 import 'package:stock_analyzer/screens/webview_screen.dart';
 import 'package:stock_analyzer/screens/quote_screen.dart';
 import 'package:stock_analyzer/analysis/intraday_level_analyzer.dart';
+import 'package:stock_analyzer/analysis/indicators.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 
 class NotificationService {
@@ -300,6 +301,20 @@ class NotificationService {
         }
         if (quote == null || quote.price <= 0) continue;
 
+        // P3: 检查是否需要K线数据（指标类预警）, 按需获取并只计算一次
+        final needsKline = rules.any((r) => _needsKlineData(r));
+        List<HistoryKline>? klines;
+        if (needsKline) {
+          try {
+            final raw = await _apiClient.getStockHistory(code, days: 120);
+            if (raw.isNotEmpty) {
+              klines = calcAllIndicators(raw);
+            }
+          } catch (e) {
+            // K线获取失败，指标预警本次跳过但不影响价格/涨跌幅预警
+          }
+        }
+
         for (final rule in rules) {
           // 冷却检查：5分钟内不重复触发
           if (rule.lastTriggeredAt != null) {
@@ -307,7 +322,7 @@ class NotificationService {
             if (elapsed.inMinutes < _alertCooldownMinutes) continue;
           }
 
-          final triggered = _evaluateAlert(rule, quote);
+          final triggered = _evaluateAlert(rule, quote, klines);
           if (triggered) {
             final desc = _formatAlertDesc(rule, quote);
             await _showAlertNotification(
@@ -326,8 +341,17 @@ class NotificationService {
     }
   }
 
+  /// 是否需要K线数据来计算该预警
+  static bool _needsKlineData(AlertRule rule) {
+    final type = rule.conditionType.isNotEmpty ? rule.conditionType : rule.alertType;
+    if (type != 'indicator') return false;
+    // volume/volume_ratio/turnover/amplitude 可从 QuoteData 直接获取
+    return !['volume', 'volume_ratio', 'turnover', 'amplitude']
+        .contains(rule.indicatorType);
+  }
+
   /// 评估单个预警规则是否触发
-  bool _evaluateAlert(AlertRule rule, QuoteData quote) {
+  bool _evaluateAlert(AlertRule rule, QuoteData quote, List<HistoryKline>? klines) {
     final type = rule.conditionType.isNotEmpty ? rule.conditionType : rule.alertType;
     switch (type) {
       case 'price_above':
@@ -343,23 +367,136 @@ class NotificationService {
       case 'fall':
         return quote.changePct <= -rule.thresholdValue;
       case 'indicator':
-        return _evaluateIndicatorAlert(rule, quote);
+        return _evaluateIndicatorAlert(rule, quote, klines);
       default:
         return false;
     }
   }
 
-  /// 评估指标类预警
-  bool _evaluateIndicatorAlert(AlertRule rule, QuoteData quote) {
-    // 指标预警需要K线数据，此处仅基于行情数据做简单判断
-    // 完整指标计算需要在应用内维护K线缓存，当前版本先支持基础指标
+  /// 评估指标类预警 (P3: 完整支持 RSI/MACD/KDJ/MA/BOLL/CCI/WR/ATR)
+  bool _evaluateIndicatorAlert(AlertRule rule, QuoteData quote, List<HistoryKline>? klines) {
     switch (rule.indicatorType) {
-      case '成交量':
-        // 成交量超过阈值（手数）
+      // --- 基于行情数据的基础指标 ---
+      case 'volume':
         return quote.volume > 0 && quote.volume >= rule.thresholdValue;
+      case 'volume_ratio':
+        return quote.volumeRatio > 0 && quote.volumeRatio >= rule.thresholdValue;
+      case 'turnover':
+        return quote.turnover > 0 && quote.turnover >= rule.thresholdValue;
+      case 'amplitude':
+        return quote.amplitude > 0 && quote.amplitude >= rule.thresholdValue;
+
+      // --- 需要K线数据的技术指标 ---
       default:
-        // RSI/MACD/KDJ/MA 等需要K线数据，暂不支持自动触发
+        if (klines == null || klines.length < 2) return false;
+        return _evaluateKlineIndicator(rule, klines);
+    }
+  }
+
+  /// 基于K线数据 + calcAllIndicators 的技术指标评估
+  bool _evaluateKlineIndicator(AlertRule rule, List<HistoryKline> klines) {
+    final last = klines.last;
+    final prev = klines[klines.length - 2];
+    final t = rule.thresholdValue;
+
+    switch (rule.indicatorType) {
+      case 'rsi':
+        if (last.rsi6 <= 0) return false;
+        // t>=50 表示"高于阈值"(超买)，t<50 表示"低于阈值"(超卖)
+        if (t >= 50) return last.rsi6 >= t;
+        return last.rsi6 <= t;
+
+      case 'macd':
+        if (last.macdDif.isNaN) return false;
+        // DIF 绝对值或方向变化
+        if (t > 0) return last.macdDif >= t;
+        // t==0 表示金叉: prev DIF < prev DEA AND last DIF > last DEA
+        // t<0 表示死叉: prev DIF > prev DEA AND last DIF < last DEA
+        return _detectMacdSignal(prev, last, t);
+
+      case 'kdj':
+        if (last.k <= 0) return false;
+        if (t >= 50) return last.k >= t;
+        return last.k <= t;
+
+      case 'ma_cross':
+        // t 为均线周期，检测对应MA与下一级别MA的交叉
+        return _detectMaCross(prev, last, t.toInt());
+
+      case 'boll':
+        // t==1 突破上轨, t==0 突破下轨
+        if (last.bollUpper <= 0) return false;
+        if (t >= 1) return last.close >= last.bollUpper && prev.close < prev.bollUpper;
+        return last.close <= last.bollLower && prev.close > prev.bollLower;
+
+      case 'cci':
+        final cci = last.cci14 ?? double.nan;
+        if (cci.isNaN) return false;
+        if (t >= 0) return cci >= t;
+        return cci <= t;  // t 为负值，如 -100 检测 CCI <= -100
+
+      case 'wr':
+        final wr = last.wr14 ?? double.nan;
+        if (wr.isNaN) return false;
+        // t>=50 表示超卖(WR>80), t<50 表示超买(WR<20)
+        if (t >= 50) return wr >= t;
+        return wr <= t;
+
+      case 'atr':
+        if (last.atr14 <= 0 || last.close <= 0) return false;
+        final atrPct = last.atr14 / last.close * 100;
+        return atrPct >= t;
+
+      default:
         return false;
+    }
+  }
+
+  /// MACD 信号检测: t=0→金叉, t<0→死叉
+  static bool _detectMacdSignal(HistoryKline prev, HistoryKline last, double t) {
+    if (prev.macdDif.isNaN || prev.macdDea.isNaN ||
+        last.macdDif.isNaN || last.macdDea.isNaN) return false;
+    if (t == 0) {
+      // 金叉: 前一日 DIF < DEA, 当日 DIF > DEA
+      return prev.macdDif < prev.macdDea && last.macdDif > last.macdDea;
+    } else {
+      // 死叉: 前一日 DIF > DEA, 当日 DIF < DEA
+      return prev.macdDif > prev.macdDea && last.macdDif < last.macdDea;
+    }
+  }
+
+  /// 均线交叉检测: period 指定短期MA, 自动匹配下一级长期MA
+  /// period=60 时使用收盘价 vs MA60 交叉（MA120 不可用）
+  static bool _detectMaCross(HistoryKline prev, HistoryKline last, int period) {
+    final short = _getMa(last, period);
+    final shortPrev = _getMa(prev, period);
+
+    if (period == 60) {
+      // MA60 vs 收盘价交叉: 价格突破长期均线
+      if (short <= 0 || prev.close <= 0 || last.close <= 0) return false;
+      final prevCross = prev.close - shortPrev;
+      final nowCross = last.close - short;
+      return (prevCross * nowCross < 0);
+    }
+
+    final longPeriod = period == 5 ? 10 : period == 10 ? 20 : 60;
+    final long = _getMa(last, longPeriod);
+    final longPrev = _getMa(prev, longPeriod);
+    if (short <= 0 || long <= 0 || shortPrev <= 0 || longPrev <= 0) return false;
+    // 金叉 OR 死叉均触发（用户可自行判断方向）
+    final prevCross = shortPrev - longPrev;
+    final nowCross = short - long;
+    return (prevCross * nowCross < 0); // 正负号反转即交叉
+  }
+
+  /// 安全获取MA值, 0表示无效
+  static double _getMa(HistoryKline k, int period) {
+    switch (period) {
+      case 5: return k.ma5;
+      case 10: return k.ma10;
+      case 20: return k.ma20;
+      case 60: return k.ma60;
+      default: return 0; // ma120 暂不可用
     }
   }
 

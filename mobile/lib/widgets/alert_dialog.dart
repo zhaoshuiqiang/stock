@@ -374,7 +374,7 @@ class _AlertCreateDialogState extends State<AlertCreateDialog> {
       case 'atr':
         return '百分比 (%)';
       case 'ma_cross':
-        return '均线周期 (5/10/20/60)';
+        return '周期 (5=MA5↔10, 10=MA10↔20, 20=MA20↔60, 60=收盘价↔MA60)';
       case 'boll':
         return '方向 (上轨1/下轨0)';
       default:
