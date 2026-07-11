@@ -9,7 +9,9 @@ enum SectorType {
 }
 
 class SectorOverviewScreen extends StatefulWidget {
-  const SectorOverviewScreen({super.key});
+  final bool autoLoad;
+
+  const SectorOverviewScreen({super.key, this.autoLoad = true});
 
   @override
   State<SectorOverviewScreen> createState() => _SectorOverviewScreenState();
@@ -18,6 +20,7 @@ class SectorOverviewScreen extends StatefulWidget {
 class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
   final ApiClient _apiClient = ApiClient();
   SectorType _currentType = SectorType.industry;
+  SectorSortMode _sortMode = SectorSortMode.all;
   bool _isLoading = true;
   List<SectorInfo> _sectors = [];
   String? _error;
@@ -25,7 +28,11 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
   @override
   void initState() {
     super.initState();
-    _loadSectors();
+    if (widget.autoLoad) {
+      _loadSectors();
+    } else {
+      _isLoading = false;
+    }
   }
 
   Future<void> _loadSectors() async {
@@ -35,24 +42,29 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
     });
 
     try {
-      List<SectorInfo> sectors;
-      if (_currentType == SectorType.industry) {
-        sectors = await _apiClient.getHotSectors(limit: 60);
-      } else {
-        sectors = await _apiClient.getConceptSectors(limit: 60);
-      }
+      final sectors = await _apiClient.getSectorRanking(
+        category: _currentType == SectorType.industry
+            ? SectorCategory.industry
+            : SectorCategory.concept,
+        sortMode: _sortMode,
+        limit: 100,
+      );
+      if (!mounted) return;
       setState(() {
         _sectors = sectors;
       });
     } catch (e) {
       debugPrint('Load sectors failed: $e');
+      if (!mounted) return;
       setState(() {
         _error = '加载失败：$e';
       });
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -60,8 +72,8 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
     final isUp = sector.changePct >= 0;
     final color = isUp ? const Color(0xFFef5350) : const Color(0xFF26a69a);
     final backgroundColor = isUp
-        ? const Color(0xFFef5350).withOpacity(0.1)
-        : const Color(0xFF26a69a).withOpacity(0.1);
+        ? const Color(0xFFef5350).withValues(alpha: 0.1)
+        : const Color(0xFF26a69a).withValues(alpha: 0.1);
 
     return InkWell(
       onTap: () {
@@ -76,14 +88,14 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
         );
       },
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: backgroundColor,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: isUp
-                ? const Color(0xFFef5350).withOpacity(0.3)
-                : const Color(0xFF26a69a).withOpacity(0.3),
+                ? const Color(0xFFef5350).withValues(alpha: 0.3)
+                : const Color(0xFF26a69a).withValues(alpha: 0.3),
             width: 1,
           ),
         ),
@@ -94,34 +106,106 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
               sector.name,
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 14,
+                fontSize: 13,
                 fontWeight: FontWeight.w500,
               ),
               overflow: TextOverflow.ellipsis,
               maxLines: 1,
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
                   isUp ? Icons.trending_up : Icons.trending_down,
                   color: color,
-                  size: 14,
+                  size: 13,
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 3),
                 Text(
                   '${isUp ? '+' : ''}${sector.changePct.toStringAsFixed(2)}%',
                   style: TextStyle(
                     color: color,
-                    fontSize: 13,
+                    fontSize: 12,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ],
             ),
+            if (sector.leadStockName.isNotEmpty) ...[
+              const SizedBox(height: 3),
+              Text(
+                sector.leadStockName,
+                style: const TextStyle(color: Colors.white54, fontSize: 11),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSortTabs() {
+    return _buildTabRow<SectorSortMode>(
+      value: _sortMode,
+      items: const {
+        SectorSortMode.all: '全部',
+        SectorSortMode.gainers: '上涨',
+        SectorSortMode.losers: '下跌',
+      },
+      onChanged: (value) {
+        if (_sortMode == value) return;
+        setState(() => _sortMode = value);
+        _loadSectors();
+      },
+    );
+  }
+
+  Widget _buildTabRow<T>({
+    required T value,
+    required Map<T, String> items,
+    required ValueChanged<T> onChanged,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          for (final entry in items.entries) ...[
+            Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => onChanged(entry.key),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  child: Center(
+                    child: Text(
+                      entry.value,
+                      style: TextStyle(
+                        color:
+                            value == entry.key ? Colors.white : Colors.white54,
+                        fontSize: 13,
+                        fontWeight: value == entry.key
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (entry.key != items.keys.last)
+              Container(
+                width: 1,
+                height: 22,
+                color: const Color(0xFF30363D),
+              ),
+          ],
+        ],
       ),
     );
   }
@@ -130,7 +214,8 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
     if (_sectors.isEmpty) return '';
     final upCount = _sectors.where((s) => s.changePct > 0).length;
     final downCount = _sectors.where((s) => s.changePct < 0).length;
-    final avgChange = _sectors.map((s) => s.changePct).reduce((a, b) => a + b) / _sectors.length;
+    final avgChange = _sectors.map((s) => s.changePct).reduce((a, b) => a + b) /
+        _sectors.length;
     final sign = avgChange >= 0 ? '+' : '';
 
     String direction;
@@ -146,7 +231,7 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
       direction = '涨跌互现';
     }
 
-    return '${_currentType == SectorType.industry ? '行业' : '概念'}板块${direction}(均$sign${avgChange.toStringAsFixed(2)}%)';
+    return '${_currentType == SectorType.industry ? '行业' : '概念'}板块$direction(均$sign${avgChange.toStringAsFixed(2)}%)';
   }
 
   @override
@@ -188,7 +273,8 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
                           child: InkWell(
                             onTap: () {
                               if (_currentType != SectorType.industry) {
-                                setState(() => _currentType = SectorType.industry);
+                                setState(
+                                    () => _currentType = SectorType.industry);
                                 _loadSectors();
                               }
                             },
@@ -202,9 +288,10 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
                                         ? Colors.white
                                         : Colors.white54,
                                     fontSize: 14,
-                                    fontWeight: _currentType == SectorType.industry
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
+                                    fontWeight:
+                                        _currentType == SectorType.industry
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
                                   ),
                                 ),
                               ),
@@ -220,7 +307,8 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
                           child: InkWell(
                             onTap: () {
                               if (_currentType != SectorType.concept) {
-                                setState(() => _currentType = SectorType.concept);
+                                setState(
+                                    () => _currentType = SectorType.concept);
                                 _loadSectors();
                               }
                             },
@@ -234,9 +322,10 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
                                         ? Colors.white
                                         : Colors.white54,
                                     fontSize: 14,
-                                    fontWeight: _currentType == SectorType.concept
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
+                                    fontWeight:
+                                        _currentType == SectorType.concept
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
                                   ),
                                 ),
                               ),
@@ -246,6 +335,8 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  _buildSortTabs(),
                   const SizedBox(height: 8),
                   Text(
                     _buildSummary(),
@@ -262,7 +353,9 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Text(_error!, style: const TextStyle(color: Colors.white38)),
+                              Text(_error!,
+                                  style:
+                                      const TextStyle(color: Colors.white38)),
                               const SizedBox(height: 12),
                               TextButton(
                                 onPressed: _loadSectors,
@@ -273,17 +366,26 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
                         )
                       : RefreshIndicator(
                           onRefresh: _loadSectors,
-                          child: GridView.builder(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              crossAxisSpacing: 10,
-                              mainAxisSpacing: 10,
-                              childAspectRatio: 1.5,
-                            ),
-                            itemCount: _sectors.length,
-                            itemBuilder: (context, index) {
-                              return _buildSectorCard(_sectors[index]);
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final isWide = constraints.maxWidth >= 520;
+                              return GridView.builder(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                gridDelegate:
+                                    SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: isWide ? 3 : 2,
+                                  crossAxisSpacing: 8,
+                                  mainAxisSpacing: 8,
+                                  childAspectRatio: isWide ? 2.25 : 1.9,
+                                ),
+                                itemCount: _sectors.length,
+                                itemBuilder: (context, index) {
+                                  return _buildSectorCard(_sectors[index]);
+                                },
+                              );
                             },
                           ),
                         ),

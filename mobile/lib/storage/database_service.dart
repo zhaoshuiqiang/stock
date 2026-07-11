@@ -186,7 +186,8 @@ class DatabaseService {
                 created_at INTEGER NOT NULL
               )
             ''');
-            await txn.execute('CREATE INDEX idx_positions_code ON positions(code)');
+            await txn
+                .execute('CREATE INDEX idx_positions_code ON positions(code)');
           }
           if (oldVersion < 10) {
             // v2.33: sector_pick_results 增加主线轮动字段
@@ -231,8 +232,10 @@ class DatabaseService {
                 PRIMARY KEY (code, trade_date)
               )
             ''');
-            await txn.execute('CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
-            await txn.execute('CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
+            await txn.execute(
+                'CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
+            await txn.execute(
+                'CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
             debugPrint('[DB] v10→v11: created limit_up_pool table');
           }
           if (oldVersion < 13) {
@@ -266,10 +269,14 @@ class DatabaseService {
                 PRIMARY KEY (code, trade_date)
               )
             ''');
-            await txn.execute('CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
-            await txn.execute('CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
-            await txn.execute('CREATE INDEX idx_limit_up_pool_code ON limit_up_pool(code)');
-            debugPrint('[DB] v12→v13: rebuilt limit_up_pool table with all columns');
+            await txn.execute(
+                'CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
+            await txn.execute(
+                'CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
+            await txn.execute(
+                'CREATE INDEX idx_limit_up_pool_code ON limit_up_pool(code)');
+            debugPrint(
+                '[DB] v12→v13: rebuilt limit_up_pool table with all columns');
           }
           if (oldVersion < 14) {
             // v2.53: AI决策反馈闭环 — 增加反思存储和Alpha计算字段
@@ -282,7 +289,8 @@ class DatabaseService {
             await txn.execute('''
               ALTER TABLE recommendation_tracking ADD COLUMN confidence_adjustment TEXT DEFAULT ''
             ''');
-            debugPrint('[DB] v13→v14: added reflection/alpha/confidence_adjustment columns');
+            debugPrint(
+                '[DB] v13→v14: added reflection/alpha/confidence_adjustment columns');
           }
           if (oldVersion < 15) {
             // v3.0: 持仓增加浮动盈亏、盈亏比例、市值字段
@@ -304,7 +312,8 @@ class DatabaseService {
             await txn.execute('''
               ALTER TABLE positions ADD COLUMN latest_price REAL NOT NULL DEFAULT 0
             ''');
-            debugPrint('[DB] v14→v15: added float_pnl/pnl_pct/market_value/today_pnl columns to positions');
+            debugPrint(
+                '[DB] v14→v15: added float_pnl/pnl_pct/market_value/today_pnl columns to positions');
           }
           if (oldVersion < 16) {
             // v3.1: 持仓每日快照表（收益率趋势图数据源）
@@ -325,32 +334,37 @@ class DatabaseService {
               )
             ''');
             await txn.execute(
-              'CREATE INDEX idx_snapshot_date ON position_daily_snapshot(snapshot_date)'
-            );
+                'CREATE INDEX idx_snapshot_date ON position_daily_snapshot(snapshot_date)');
             debugPrint('[DB] v15→v16: created position_daily_snapshot table');
           }
           if (oldVersion < 17) {
             // v3.2: 推荐追踪表增加维度评分JSON字段（用于动态权重优化）
             await txn.execute(
-              "ALTER TABLE recommendation_tracking ADD COLUMN dimension_scores_json TEXT DEFAULT ''"
-            );
-            debugPrint('[DB] v16→v17: added dimension_scores_json column to recommendation_tracking');
+                "ALTER TABLE recommendation_tracking ADD COLUMN dimension_scores_json TEXT DEFAULT ''");
+            debugPrint(
+                '[DB] v16→v17: added dimension_scores_json column to recommendation_tracking');
           }
           if (oldVersion < 18) {
             // v3.2: 推荐反馈机制 — 用户可对推荐结果给出好评/差评
             await txn.execute(
-              "ALTER TABLE recommendation_tracking ADD COLUMN feedback TEXT DEFAULT ''"
-            );
+                "ALTER TABLE recommendation_tracking ADD COLUMN feedback TEXT DEFAULT ''");
           }
           // 索引补建（幂等，保证升级路径和新装路径都有）
-          await txn.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
-          await txn.execute('CREATE INDEX IF NOT EXISTS idx_alerts_code ON alerts(code)');
-          await txn.execute('CREATE INDEX IF NOT EXISTS idx_limit_up_pool_code ON limit_up_pool(code)');
+          await txn.execute(
+              'CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
+          await txn.execute(
+              'CREATE INDEX IF NOT EXISTS idx_alerts_code ON alerts(code)');
+          await txn.execute(
+              'CREATE INDEX IF NOT EXISTS idx_limit_up_pool_code ON limit_up_pool(code)');
           // v3.2: 性能优化 — 为高频查询列添加索引
-          await txn.execute('CREATE INDEX IF NOT EXISTS idx_archive_records_code ON archive_records(code)');
-          await txn.execute('CREATE INDEX IF NOT EXISTS idx_archive_records_archived_at ON archive_records(archived_at)');
-          await txn.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_date ON recommendation_tracking(signal_date)');
-          await txn.execute('CREATE INDEX IF NOT EXISTS idx_explore_results_score ON explore_results(score)');
+          await txn.execute(
+              'CREATE INDEX IF NOT EXISTS idx_archive_records_code ON archive_records(code)');
+          await txn.execute(
+              'CREATE INDEX IF NOT EXISTS idx_archive_records_archived_at ON archive_records(archived_at)');
+          await txn.execute(
+              'CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_date ON recommendation_tracking(signal_date)');
+          await txn.execute(
+              'CREATE INDEX IF NOT EXISTS idx_explore_results_score ON explore_results(score)');
         });
       },
     );
@@ -525,7 +539,8 @@ class DatabaseService {
         created_at          INTEGER NOT NULL
       )
     ''');
-    await db.execute('CREATE INDEX idx_snapshot_date ON position_daily_snapshot(snapshot_date)');
+    await db.execute(
+        'CREATE INDEX idx_snapshot_date ON position_daily_snapshot(snapshot_date)');
     await db.execute('''
       CREATE TABLE limit_up_pool (
         code              TEXT    NOT NULL,
@@ -554,19 +569,32 @@ class DatabaseService {
         PRIMARY KEY (code, trade_date)
       )
     ''');
-    await db.execute('CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
-    await db.execute('CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
-    await db.execute('CREATE INDEX IF NOT EXISTS idx_limit_up_pool_code ON limit_up_pool(code)');
-    await db.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
-    await db.execute('CREATE INDEX IF NOT EXISTS idx_alerts_code ON alerts(code)');
+    await db.execute(
+        'CREATE INDEX idx_limit_up_pool_date ON limit_up_pool(trade_date)');
+    await db.execute(
+        'CREATE INDEX idx_limit_up_pool_consec ON limit_up_pool(trade_date, consecutive_days DESC)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_limit_up_pool_code ON limit_up_pool(code)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
+    await db
+        .execute('CREATE INDEX IF NOT EXISTS idx_alerts_code ON alerts(code)');
     // v3.2: 性能优化 — 为高频查询列添加索引
-    await db.execute('CREATE INDEX IF NOT EXISTS idx_archive_records_code ON archive_records(code)');
-    await db.execute('CREATE INDEX IF NOT EXISTS idx_archive_records_archived_at ON archive_records(archived_at)');
-    await db.execute('CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_date ON recommendation_tracking(signal_date)');
-    await db.execute('CREATE INDEX IF NOT EXISTS idx_explore_results_score ON explore_results(score)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_archive_records_code ON archive_records(code)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_archive_records_archived_at ON archive_records(archived_at)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_date ON recommendation_tracking(signal_date)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_explore_results_score ON explore_results(score)');
   }
 
-  Future<void> addToWatchlist(String code, String name) async {
+  Future<void> addToWatchlist(
+    String code,
+    String name, {
+    bool isPinned = false,
+  }) async {
     final db = await database;
     await db.insert(
       'watchlist',
@@ -574,6 +602,7 @@ class DatabaseService {
         'code': code,
         'name': name,
         'added_at': DateTime.now().millisecondsSinceEpoch,
+        'is_pinned': isPinned ? 1 : 0,
       },
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
@@ -598,6 +627,7 @@ class DatabaseService {
             'code': item.code,
             'name': item.name,
             'added_at': item.addedAt.millisecondsSinceEpoch,
+            'is_pinned': item.isPinned ? 1 : 0,
           },
           conflictAlgorithm: ConflictAlgorithm.ignore,
         );
@@ -637,12 +667,15 @@ class DatabaseService {
       orderBy: 'is_pinned DESC, added_at DESC',
     );
 
-    return result.map((row) => WatchlistItem(
-      code: row['code'] as String,
-      name: row['name'] as String,
-      addedAt: DateTime.fromMillisecondsSinceEpoch(row['added_at'] as int),
-      isPinned: (row['is_pinned'] as int) == 1,
-    )).toList();
+    return result
+        .map((row) => WatchlistItem(
+              code: row['code'] as String,
+              name: row['name'] as String,
+              addedAt:
+                  DateTime.fromMillisecondsSinceEpoch(row['added_at'] as int),
+              isPinned: (row['is_pinned'] as int) == 1,
+            ))
+        .toList();
   }
 
   Future<void> togglePin(String code, bool pinned) async {
@@ -707,20 +740,24 @@ class DatabaseService {
       orderBy: 'created_at DESC',
     );
 
-    return result.map((row) => AlertRule(
-      id: row['id'] as int,
-      code: row['code'] as String,
-      name: row['name'] as String,
-      conditionType: row['condition_type'] as String,
-      thresholdValue: row['threshold_value'] as double,
-      createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
-      enabled: (row['enabled'] as int) == 1,
-      lastTriggeredAt: row['last_triggered_at'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(row['last_triggered_at'] as int)
-          : null,
-      alertType: row['alert_type'] as String? ?? '',
-      indicatorType: row['indicator_type'] as String? ?? '',
-    )).toList();
+    return result
+        .map((row) => AlertRule(
+              id: row['id'] as int,
+              code: row['code'] as String,
+              name: row['name'] as String,
+              conditionType: row['condition_type'] as String,
+              thresholdValue: row['threshold_value'] as double,
+              createdAt:
+                  DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
+              enabled: (row['enabled'] as int) == 1,
+              lastTriggeredAt: row['last_triggered_at'] != null
+                  ? DateTime.fromMillisecondsSinceEpoch(
+                      row['last_triggered_at'] as int)
+                  : null,
+              alertType: row['alert_type'] as String? ?? '',
+              indicatorType: row['indicator_type'] as String? ?? '',
+            ))
+        .toList();
   }
 
   Future<List<AlertRule>> getEnabledAlerts() async {
@@ -730,20 +767,24 @@ class DatabaseService {
       where: 'enabled = 1',
     );
 
-    return result.map((row) => AlertRule(
-      id: row['id'] as int,
-      code: row['code'] as String,
-      name: row['name'] as String,
-      conditionType: row['condition_type'] as String,
-      thresholdValue: row['threshold_value'] as double,
-      createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
-      enabled: true,
-      lastTriggeredAt: row['last_triggered_at'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(row['last_triggered_at'] as int)
-          : null,
-      alertType: row['alert_type'] as String? ?? '',
-      indicatorType: row['indicator_type'] as String? ?? '',
-    )).toList();
+    return result
+        .map((row) => AlertRule(
+              id: row['id'] as int,
+              code: row['code'] as String,
+              name: row['name'] as String,
+              conditionType: row['condition_type'] as String,
+              thresholdValue: row['threshold_value'] as double,
+              createdAt:
+                  DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
+              enabled: true,
+              lastTriggeredAt: row['last_triggered_at'] != null
+                  ? DateTime.fromMillisecondsSinceEpoch(
+                      row['last_triggered_at'] as int)
+                  : null,
+              alertType: row['alert_type'] as String? ?? '',
+              indicatorType: row['indicator_type'] as String? ?? '',
+            ))
+        .toList();
   }
 
   Future<void> updateAlertTriggerTime(int id, DateTime time) async {
@@ -763,13 +804,15 @@ class DatabaseService {
 
   Future<List<ArchiveRecord>> getArchives() async {
     final db = await database;
-    final result = await db.query('archive_records', orderBy: 'archived_at DESC');
+    final result =
+        await db.query('archive_records', orderBy: 'archived_at DESC');
     return result.map((row) => ArchiveRecord.fromMap(row)).toList();
   }
 
   Future<ArchiveRecord?> getArchiveById(int id) async {
     final db = await database;
-    final result = await db.query('archive_records', where: 'id = ?', whereArgs: [id], limit: 1);
+    final result = await db.query('archive_records',
+        where: 'id = ?', whereArgs: [id], limit: 1);
     if (result.isEmpty) return null;
     return ArchiveRecord.fromMap(result.first);
   }
@@ -807,9 +850,11 @@ class DatabaseService {
 
   Future<DateTime?> getExploreLastTime() async {
     final db = await database;
-    final result = await db.rawQuery('SELECT MAX(analyzed_at) as last_time FROM explore_results');
+    final result = await db
+        .rawQuery('SELECT MAX(analyzed_at) as last_time FROM explore_results');
     if (result.isNotEmpty && result.first['last_time'] != null) {
-      return DateTime.fromMillisecondsSinceEpoch(result.first['last_time'] as int);
+      return DateTime.fromMillisecondsSinceEpoch(
+          result.first['last_time'] as int);
     }
     return null;
   }
@@ -821,7 +866,8 @@ class DatabaseService {
 
   // ========== 机会结果缓存 CRUD ==========
 
-  Future<void> replaceOpportunityResults(List<Map<String, dynamic>> results) async {
+  Future<void> replaceOpportunityResults(
+      List<Map<String, dynamic>> results) async {
     final db = await database;
     await db.transaction((txn) async {
       await txn.delete('opportunity_results');
@@ -839,16 +885,19 @@ class DatabaseService {
 
   Future<DateTime?> getOpportunityLastTime() async {
     final db = await database;
-    final result = await db.rawQuery('SELECT MAX(analyzed_at) as last_time FROM opportunity_results');
+    final result = await db.rawQuery(
+        'SELECT MAX(analyzed_at) as last_time FROM opportunity_results');
     if (result.isNotEmpty && result.first['last_time'] != null) {
-      return DateTime.fromMillisecondsSinceEpoch(result.first['last_time'] as int);
+      return DateTime.fromMillisecondsSinceEpoch(
+          result.first['last_time'] as int);
     }
     return null;
   }
 
   // ========== 板块精选结果缓存 CRUD ==========
 
-  Future<void> replaceSectorPickResults(List<Map<String, dynamic>> results) async {
+  Future<void> replaceSectorPickResults(
+      List<Map<String, dynamic>> results) async {
     final db = await database;
     await db.transaction((txn) async {
       await txn.delete('sector_pick_results');
@@ -866,9 +915,11 @@ class DatabaseService {
 
   Future<DateTime?> getSectorPickLastTime() async {
     final db = await database;
-    final result = await db.rawQuery('SELECT MAX(analyzed_at) as last_time FROM sector_pick_results');
+    final result = await db.rawQuery(
+        'SELECT MAX(analyzed_at) as last_time FROM sector_pick_results');
     if (result.isNotEmpty && result.first['last_time'] != null) {
-      return DateTime.fromMillisecondsSinceEpoch(result.first['last_time'] as int);
+      return DateTime.fromMillisecondsSinceEpoch(
+          result.first['last_time'] as int);
     }
     return null;
   }
@@ -876,10 +927,12 @@ class DatabaseService {
   // ========== 打板梯队池 CRUD (v2.34) ==========
 
   /// 全量替换指定交易日的打板池数据
-  Future<void> replaceLimitUpPool(List<LimitUpAnalysis> analyses, String tradeDate) async {
+  Future<void> replaceLimitUpPool(
+      List<LimitUpAnalysis> analyses, String tradeDate) async {
     final db = await database;
     await db.transaction((txn) async {
-      await txn.delete('limit_up_pool', where: 'trade_date = ?', whereArgs: [tradeDate]);
+      await txn.delete('limit_up_pool',
+          where: 'trade_date = ?', whereArgs: [tradeDate]);
       final now = DateTime.now().millisecondsSinceEpoch;
       for (final a in analyses) {
         final m = a.toMap();
@@ -898,7 +951,11 @@ class DatabaseService {
     final db = await database;
     // 使用上海时区(UTC+8)计算默认交易日，与 replaceLimitUpPool 写入时区一致
     final date = tradeDate ??
-        DateTime.now().toUtc().add(const Duration(hours: 8)).toIso8601String().substring(0, 10);
+        DateTime.now()
+            .toUtc()
+            .add(const Duration(hours: 8))
+            .toIso8601String()
+            .substring(0, 10);
     final result = await db.query(
       'limit_up_pool',
       where: 'trade_date = ?',
@@ -938,23 +995,30 @@ class DatabaseService {
     final db = await database;
     await db.insert(
       'home_cache',
-      {'key': key, 'value': value, 'updated_at': DateTime.now().millisecondsSinceEpoch},
+      {
+        'key': key,
+        'value': value,
+        'updated_at': DateTime.now().millisecondsSinceEpoch
+      },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
   Future<String?> getHomeCache(String key) async {
     final db = await database;
-    final result = await db.query('home_cache', where: 'key = ?', whereArgs: [key], limit: 1);
+    final result = await db.query('home_cache',
+        where: 'key = ?', whereArgs: [key], limit: 1);
     if (result.isNotEmpty) return result.first['value'] as String;
     return null;
   }
 
   Future<DateTime?> getHomeCacheTime(String key) async {
     final db = await database;
-    final result = await db.query('home_cache', where: 'key = ?', whereArgs: [key], limit: 1);
+    final result = await db.query('home_cache',
+        where: 'key = ?', whereArgs: [key], limit: 1);
     if (result.isNotEmpty && result.first['updated_at'] != null) {
-      return DateTime.fromMillisecondsSinceEpoch(result.first['updated_at'] as int);
+      return DateTime.fromMillisecondsSinceEpoch(
+          result.first['updated_at'] as int);
     }
     return null;
   }
@@ -968,7 +1032,9 @@ class DatabaseService {
     final json = await getHomeCache('market_quotes');
     if (json == null) return [];
     final list = jsonDecode(json) as List;
-    return list.map((e) => QuoteData.fromJson(e as Map<String, dynamic>)).toList();
+    return list
+        .map((e) => QuoteData.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<void> saveSectorsCache(List<SectorInfo> sectors) async {
@@ -980,12 +1046,15 @@ class DatabaseService {
     final json = await getHomeCache('hot_sectors');
     if (json == null) return [];
     final list = jsonDecode(json) as List;
-    return list.map((e) => SectorInfo.fromJson(e as Map<String, dynamic>)).toList();
+    return list
+        .map((e) => SectorInfo.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   // ========== 推荐收益追踪 CRUD ==========
 
-  Future<void> insertRecommendationSnapshot(Map<String, dynamic> snapshot) async {
+  Future<void> insertRecommendationSnapshot(
+      Map<String, dynamic> snapshot) async {
     final db = await database;
     await db.insert('recommendation_tracking', snapshot);
   }
@@ -993,7 +1062,8 @@ class DatabaseService {
   /// 获取所有活跃推荐（is_closed = 0）的 code 集合，用于批量去重
   Future<Set<String>> getActiveRecommendationCodes() async {
     final db = await database;
-    final rows = await db.query('recommendation_tracking',
+    final rows = await db.query(
+      'recommendation_tracking',
       columns: ['code'],
       where: 'is_closed = 0',
     );
@@ -1001,7 +1071,8 @@ class DatabaseService {
   }
 
   /// 批量插入推荐快照（事务包裹，提升并发性能）
-  Future<void> batchInsertRecommendationSnapshots(List<Map<String, dynamic>> snapshots) async {
+  Future<void> batchInsertRecommendationSnapshots(
+      List<Map<String, dynamic>> snapshots) async {
     if (snapshots.isEmpty) return;
     final db = await database;
     await db.transaction((txn) async {
@@ -1011,64 +1082,81 @@ class DatabaseService {
     });
   }
 
-  Future<void> updateRecommendationReturn(int id, int days, double price, double returnPct) async {
+  Future<void> updateRecommendationReturn(
+      int id, int days, double price, double returnPct) async {
     final db = await database;
     final now = DateTime.now().millisecondsSinceEpoch;
     if (days == 5) {
-      await db.update('recommendation_tracking',
-        {'day5_price': price, 'day5_return': returnPct, 'last_checked_date': now},
-        where: 'id = ?', whereArgs: [id]);
+      await db.update(
+          'recommendation_tracking',
+          {
+            'day5_price': price,
+            'day5_return': returnPct,
+            'last_checked_date': now
+          },
+          where: 'id = ?',
+          whereArgs: [id]);
     } else if (days == 10) {
-      await db.update('recommendation_tracking',
-        {'day10_price': price, 'day10_return': returnPct, 'last_checked_date': now},
-        where: 'id = ?', whereArgs: [id]);
+      await db.update(
+          'recommendation_tracking',
+          {
+            'day10_price': price,
+            'day10_return': returnPct,
+            'last_checked_date': now
+          },
+          where: 'id = ?',
+          whereArgs: [id]);
     } else if (days == 20) {
-      await db.update('recommendation_tracking',
-        {'day20_price': price, 'day20_return': returnPct, 'last_checked_date': now},
-        where: 'id = ?', whereArgs: [id]);
+      await db.update(
+          'recommendation_tracking',
+          {
+            'day20_price': price,
+            'day20_return': returnPct,
+            'last_checked_date': now
+          },
+          where: 'id = ?',
+          whereArgs: [id]);
     }
   }
 
-  Future<List<Map<String, dynamic>>> getRecentRecommendations({int limit = 50}) async {
+  Future<List<Map<String, dynamic>>> getRecentRecommendations(
+      {int limit = 50}) async {
     final db = await database;
     return db.query('recommendation_tracking',
-      orderBy: 'signal_date DESC',
-      limit: limit);
+        orderBy: 'signal_date DESC', limit: limit);
   }
 
   Future<Map<String, dynamic>?> getRecommendationByCode(String code) async {
     final db = await database;
     final results = await db.query('recommendation_tracking',
-      where: 'code = ? AND is_closed = 0',
-      whereArgs: [code],
-      orderBy: 'signal_date DESC',
-      limit: 1);
+        where: 'code = ? AND is_closed = 0',
+        whereArgs: [code],
+        orderBy: 'signal_date DESC',
+        limit: 1);
     return results.isNotEmpty ? results.first : null;
   }
 
   Future<void> closeRecommendation(int id) async {
     final db = await database;
-    await db.update('recommendation_tracking',
-      {'is_closed': 1},
-      where: 'id = ?', whereArgs: [id]);
+    await db.update('recommendation_tracking', {'is_closed': 1},
+        where: 'id = ?', whereArgs: [id]);
   }
 
   /// v3.2: 用户反馈 — 更新推荐的可信度评价
   /// [feedback] 值为 'helpful' / 'not_helpful' / '' (清除)
   Future<void> updateRecommendationFeedback(int id, String feedback) async {
     final db = await database;
-    await db.update('recommendation_tracking',
-      {'feedback': feedback},
-      where: 'id = ?', whereArgs: [id]);
+    await db.update('recommendation_tracking', {'feedback': feedback},
+        where: 'id = ?', whereArgs: [id]);
   }
 
   /// v3.2: 获取推荐反馈统计（用于权重优化）
   Future<Map<String, int>> getFeedbackStats() async {
     final db = await database;
     final helpful = Sqflite.firstIntValue(await db.rawQuery(
-      "SELECT COUNT(*) FROM recommendation_tracking WHERE feedback = 'helpful'"));
+        "SELECT COUNT(*) FROM recommendation_tracking WHERE feedback = 'helpful'"));
     final notHelpful = Sqflite.firstIntValue(await db.rawQuery(
-      "SELECT COUNT(*) FROM recommendation_tracking WHERE feedback = 'not_helpful'"));
+        "SELECT COUNT(*) FROM recommendation_tracking WHERE feedback = 'not_helpful'"));
     return {
       'helpful': helpful ?? 0,
       'not_helpful': notHelpful ?? 0,
@@ -1078,9 +1166,10 @@ class DatabaseService {
 
   Future<void> clearOldRecommendations({int days = 90}) async {
     final db = await database;
-    final cutoff = DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
+    final cutoff =
+        DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
     await db.delete('recommendation_tracking',
-      where: 'signal_date < ?', whereArgs: [cutoff]);
+        where: 'signal_date < ?', whereArgs: [cutoff]);
   }
 
   // ========== 持仓管理 CRUD (v2.33) ==========

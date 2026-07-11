@@ -10,12 +10,15 @@ import '../api/websocket_client.dart';
 import '../analysis/opportunity_engine.dart';
 import '../analysis/ai_layer.dart';
 import '../analysis/backtest_engine.dart';
+import '../analysis/position_valuation.dart';
 import '../analysis/portfolio_snapshot_service.dart';
+import '../analysis/watchlist_position_priority.dart';
 import '../core/ai_config.dart';
 import '../core/stock_code_utils.dart';
 import '../core/trading_session.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
+import '../storage/portfolio_asset_store.dart';
 import '../analysis/sector_pick_engine.dart';
 import '../widgets/stock_card.dart';
 import '../widgets/alert_dialog.dart';
@@ -64,6 +67,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
   Map<String, Position> _positionMap = {}; // code → Position
   double _totalAssets = 0;
   double _availableCash = 0;
+  bool _assetSummaryLoaded = false;
 
   // ─── AI 持仓分析状态 ──────────────────────────────────────────
   bool _isPortfolioAnalyzing = false;
@@ -75,6 +79,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
   bool _isPositionPolling = false;
   Timer? _sessionCheckTimer;
   final PortfolioSnapshotService _snapshotService = PortfolioSnapshotService();
+  final PortfolioAssetStore _assetStore = PortfolioAssetStore();
 
   // ─── 颜色常量 ──────────────────────────────────────────────────
   static const Color _bgColor = Color(0xFF0D1117);
@@ -97,7 +102,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     _startRefreshTimer();
     _loadOppFromDb();
     _loadAlerts();
-    _loadPositions();
+    _loadPositionState();
 
     // v3.1: 启动交易时段检查（30秒一次，控制3秒轮询启停 + 收盘快照）
     _startSessionCheck();
@@ -195,23 +200,125 @@ class WatchlistScreenState extends State<WatchlistScreen>
   void _onQuoteUpdate(QuoteData quote) {
     if (!mounted) return;
 
+    final updated = _revaluePositionsFromQuotes([quote]);
+    if (_tabController.index == 1) {
+      setState(() {
+        _upsertQuote(quote);
+        _positionMap = updated.positions;
+        _updateTotalAssetsFromPositions();
+      });
+    } else {
+      _upsertQuote(quote);
+      _positionMap = updated.positions;
+      _updateTotalAssetsFromPositions();
+    }
+    unawaited(_persistUpdatedPositions(updated.updated));
+    unawaited(_savePortfolioAssetSummary());
+  }
+
+  void _upsertQuote(QuoteData quote) {
     final idx = _quotes.indexWhere((q) => q.code == quote.code);
     if (idx >= 0) {
       _quotes[idx] = quote;
     } else {
       _quotes.add(quote);
     }
+  }
 
-    // 仅持仓Tab可见时才刷新
-    if (_tabController.index == 1) {
-      setState(() {});
+  Future<void> _loadPositionState() async {
+    await _loadPortfolioAssetSummary();
+    await _loadPositions();
+  }
+
+  Future<void> _loadPortfolioAssetSummary() async {
+    try {
+      final summary = await _assetStore.load();
+      if (!mounted) return;
+      setState(() {
+        _totalAssets = summary.totalAssets;
+        _availableCash = summary.availableCash;
+        _assetSummaryLoaded = true;
+      });
+    } catch (e) {
+      _assetSummaryLoaded = true;
+      debugPrint('[Watchlist] 加载资产汇总失败: $e');
     }
+  }
+
+  Future<void> _savePortfolioAssetSummary() async {
+    if (!_assetSummaryLoaded) return;
+    try {
+      await _assetStore.save(
+        PortfolioAssetSummary(
+          totalAssets: _totalAssets,
+          availableCash: _availableCash,
+        ),
+      );
+    } catch (e) {
+      debugPrint('[Watchlist] 保存资产汇总失败: $e');
+    }
+  }
+
+  ({
+    Map<String, Position> positions,
+    List<Position> updated,
+  }) _revaluePositionsFromQuotes(List<QuoteData> quotes) {
+    if (_positionMap.isEmpty || quotes.isEmpty) {
+      return (positions: _positionMap, updated: <Position>[]);
+    }
+
+    final next = Map<String, Position>.from(_positionMap);
+    final updated = <Position>[];
+
+    for (final quote in quotes) {
+      final current = _findPosition(quote.code);
+      if (current == null || current.quantity <= 0) continue;
+
+      final valuation = PositionValuation.fromQuote(current, quote);
+      final nextPosition = valuation.applyTo(current);
+      final key = _positionMapKeyFor(current.code);
+      next[key] = nextPosition;
+      updated.add(nextPosition);
+    }
+
+    return (positions: next, updated: updated);
+  }
+
+  String _positionMapKeyFor(String code) {
+    final target = _normalizeCode(code);
+    for (final key in _positionMap.keys) {
+      if (_normalizeCode(key) == target) return key;
+    }
+    return code;
+  }
+
+  Future<void> _persistUpdatedPositions(List<Position> positions) async {
+    for (final position in positions) {
+      if (position.id != null) {
+        await _dbService.updatePosition(position);
+      }
+    }
+  }
+
+  void _updateTotalAssetsFromPositions() {
+    if (_availableCash <= 0 || _positionMap.isEmpty) return;
+    _totalAssets = _availableCash +
+        _positionMap.values.fold<double>(
+          0,
+          (sum, position) {
+            final price = position.latestPrice > 0
+                ? position.latestPrice
+                : position.avgPrice;
+            return sum + position.quantity * price;
+          },
+        );
   }
 
   /// 收盘后自动记录持仓快照
   void _recordSnapshotIfNeeded() {
     if (_positionMap.isEmpty) return;
     if (TradingSession.isInTradingSession()) return;
+    _updateTotalAssetsFromPositions();
     _snapshotService.recordIfNeeded(
       positionMap: _positionMap,
       totalAssets: _totalAssets,
@@ -240,11 +347,16 @@ class WatchlistScreenState extends State<WatchlistScreen>
     if (codeSet.isEmpty) return;
     try {
       final quotes = await _apiClient.getBatchRealtimeQuotes(codeSet.toList());
+      final updated = _revaluePositionsFromQuotes(quotes);
       if (mounted) {
         setState(() {
           _quotes = quotes;
+          _positionMap = updated.positions;
+          _updateTotalAssetsFromPositions();
         });
       }
+      await _persistUpdatedPositions(updated.updated);
+      await _savePortfolioAssetSummary();
     } catch (e) {
       debugPrint('[Watchlist] 刷新行情失败: $e');
     }
@@ -361,13 +473,19 @@ class WatchlistScreenState extends State<WatchlistScreen>
       items.sort((a, b) {
         final vrA = (a['quote'] as QuoteData).volumeRatio;
         final vrB = (b['quote'] as QuoteData).volumeRatio;
-        return _sortAscending
-            ? vrA.compareTo(vrB)
-            : vrB.compareTo(vrA);
+        return _sortAscending ? vrA.compareTo(vrB) : vrB.compareTo(vrA);
       });
     }
 
-    return items;
+    return WatchlistPositionPriority.apply<Map<String, dynamic>>(
+      items,
+      hasPosition: (data) {
+        final item = data['item'] as WatchlistItem;
+        final position = _findPosition(item.code);
+        return position != null && position.quantity > 0;
+      },
+      isPinned: (data) => (data['item'] as WatchlistItem).isPinned,
+    );
   }
 
   // ─── 自选分析：数据加载 ────────────────────────────────────────
@@ -487,7 +605,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
         sellSignalCount: r.sellSignalCount,
         activeStrategyCount: r.activeStrategyCount,
         confluenceScore: r.confluenceScore,
-        tradeLevelsJson: r.tradeLevels != null ? r.tradeLevels.toString() : null,
+        tradeLevelsJson:
+            r.tradeLevels != null ? r.tradeLevels.toString() : null,
         topSignals: r.topSignals.join('  '),
         archivedAt: DateTime.now(),
       );
@@ -514,7 +633,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
     setState(() {
       _isEditMode = false;
       _selectedCodes.clear();
-      _oppResults = _oppResults.where((r) => !removedCodes.contains(r.code)).toList();
+      _oppResults =
+          _oppResults.where((r) => !removedCodes.contains(r.code)).toList();
       _rebuildOppMap();
     });
     _loadWatchlist();
@@ -564,7 +684,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
         sellSignalCount: r.sellSignalCount,
         activeStrategyCount: r.activeStrategyCount,
         confluenceScore: r.confluenceScore,
-        tradeLevelsJson: r.tradeLevels != null ? r.tradeLevels.toString() : null,
+        tradeLevelsJson:
+            r.tradeLevels != null ? r.tradeLevels.toString() : null,
         topSignals: r.topSignals.join('  '),
         archivedAt: DateTime.now(),
       );
@@ -619,6 +740,18 @@ class WatchlistScreenState extends State<WatchlistScreen>
     }
   }
 
+  Future<void> _syncPositionsToPinnedWatchlist(List<Position> positions) async {
+    for (final position in positions) {
+      if (position.quantity <= 0) continue;
+      await _dbService.addToWatchlist(
+        position.code,
+        position.name,
+        isPinned: true,
+      );
+      await _dbService.togglePin(position.code, true);
+    }
+  }
+
   /// 规范化股票代码：去除 sh/sz/bj 前缀，返回纯数字代码
   String _normalizeCode(String code) {
     return code.replaceFirst(RegExp(r'^(sh|sz|bj)', caseSensitive: false), '');
@@ -644,7 +777,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
       final sectors = await _apiClient.getHotSectors();
       if (sectors.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('无法获取板块数据'), duration: Duration(seconds: 1)),
+          const SnackBar(
+              content: Text('无法获取板块数据'), duration: Duration(seconds: 1)),
         );
         return;
       }
@@ -652,19 +786,23 @@ class WatchlistScreenState extends State<WatchlistScreen>
       _sectorSub?.cancel();
       _sectorSub = engine.progressStream.listen((p) {
         if (!mounted) return;
-        if (p.status == SectorPickStatus.complete && p.picks != null && p.picks!.isNotEmpty) {
+        if (p.status == SectorPickStatus.complete &&
+            p.picks != null &&
+            p.picks!.isNotEmpty) {
           _showPickResults(p.picks!);
           _sectorSub?.cancel();
         }
       });
       engine.pick(sectors);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('正在分析热门板块...'), duration: Duration(seconds: 1)),
+        const SnackBar(
+            content: Text('正在分析热门板块...'), duration: Duration(seconds: 1)),
       );
     } catch (e) {
       debugPrint('[Watchlist] 板块选股失败: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('分析失败，请稍后重试'), duration: Duration(seconds: 1)),
+        const SnackBar(
+            content: Text('分析失败，请稍后重试'), duration: Duration(seconds: 1)),
       );
     }
   }
@@ -686,9 +824,14 @@ class WatchlistScreenState extends State<WatchlistScreen>
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  const Text('精选标的', style: TextStyle(color: _textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text('精选标的',
+                      style: TextStyle(
+                          color: _textPrimary,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold)),
                   const Spacer(),
-                  Text('${picks.length}只', style: const TextStyle(color: _textSecondary)),
+                  Text('${picks.length}只',
+                      style: const TextStyle(color: _textSecondary)),
                 ],
               ),
             ),
@@ -700,16 +843,25 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   final p = picks[i];
                   final name = p['name'] ?? '';
                   final code = p['code'] ?? '';
-                  final score = p['score'] is num ? (p['score'] as num).toInt() : 0;
+                  final score =
+                      p['score'] is num ? (p['score'] as num).toInt() : 0;
                   final rec = p['recommendation'] ?? '';
                   return ListTile(
                     dense: true,
-                    title: Text('$name($code)', style: const TextStyle(color: _textPrimary, fontSize: 14)),
+                    title: Text('$name($code)',
+                        style:
+                            const TextStyle(color: _textPrimary, fontSize: 14)),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('$score分 ', style: TextStyle(color: rec.contains('强烈') ? _accentColor : _textSecondary)),
-                        Text(rec, style: const TextStyle(color: _textSecondary, fontSize: 12)),
+                        Text('$score分 ',
+                            style: TextStyle(
+                                color: rec.contains('强烈')
+                                    ? _accentColor
+                                    : _textSecondary)),
+                        Text(rec,
+                            style: const TextStyle(
+                                color: _textSecondary, fontSize: 12)),
                       ],
                     ),
                     onTap: () {
@@ -729,14 +881,19 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   height: 42,
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.add, size: 18),
-                    label: const Text('一键加自选', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                    label: const Text('一键加自选',
+                        style: TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.bold)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _accentColor,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
                     ),
                     onPressed: () async {
-                      final items = picks.map((p) => Map<String, dynamic>.from(p)).toList();
+                      final items = picks
+                          .map((p) => Map<String, dynamic>.from(p))
+                          .toList();
                       final existing = await _dbService.getWatchlist();
                       final existingCodes = existing.map((e) => e.code).toSet();
                       final newItems = items
@@ -747,15 +904,19 @@ class WatchlistScreenState extends State<WatchlistScreen>
                         if (ctx.mounted) {
                           Navigator.pop(ctx);
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('所有精选标的已在自选中'), duration: Duration(seconds: 1)),
+                            const SnackBar(
+                                content: Text('所有精选标的已在自选中'),
+                                duration: Duration(seconds: 1)),
                           );
                         }
                         return;
                       }
-                      final watchlistItems = newItems.map((p) => WatchlistItem(
-                        code: p['code'] as String,
-                        name: p['name'] as String,
-                      )).toList();
+                      final watchlistItems = newItems
+                          .map((p) => WatchlistItem(
+                                code: p['code'] as String,
+                                name: p['name'] as String,
+                              ))
+                          .toList();
                       await _dbService.batchAddToWatchlist(watchlistItems);
                       await _loadWatchlist();
                       if (ctx.mounted) {
@@ -784,14 +945,18 @@ class WatchlistScreenState extends State<WatchlistScreen>
     final exists = _watchlist.any((w) => w.code == code);
     if (exists) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$name 已在自选中'), duration: const Duration(seconds: 1)),
+        SnackBar(
+            content: Text('$name 已在自选中'), duration: const Duration(seconds: 1)),
       );
       return;
     }
     await _dbService.addToWatchlist(code, name);
     await _loadWatchlist();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$name 已加入自选'), backgroundColor: _accentColor, duration: const Duration(seconds: 1)),
+      SnackBar(
+          content: Text('$name 已加入自选'),
+          backgroundColor: _accentColor,
+          duration: const Duration(seconds: 1)),
     );
   }
 
@@ -850,7 +1015,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
     if (_isLoading) {
       return Container(
         color: _bgColor,
-        child: const Center(child: CircularProgressIndicator(color: _accentColor)),
+        child:
+            const Center(child: CircularProgressIndicator(color: _accentColor)),
       );
     }
     return Container(
@@ -929,7 +1095,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
         orElse: () => QuoteData.empty(),
       );
       // v3.2: 始终从实时行情计算盈亏，不使用DB中可能过期的存储值
-      final currentPrice = quote.price > 0 ? quote.price : (pos.latestPrice > 0 ? pos.latestPrice : pos.avgPrice);
+      final currentPrice = quote.price > 0
+          ? quote.price
+          : (pos.latestPrice > 0 ? pos.latestPrice : pos.avgPrice);
       final cost = pos.quantity * pos.avgPrice;
       final marketValue = pos.quantity * currentPrice;
       final pnl = marketValue - cost;
@@ -960,6 +1128,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
     final totalTodayPnlPct = totalYesterdayMarketValue > 0
         ? totalTodayPnl / totalYesterdayMarketValue * 100
         : 0.0;
+    final displayTotalAssets =
+        _availableCash > 0 ? _availableCash + totalMarketValue : _totalAssets;
 
     return Column(
       children: [
@@ -984,7 +1154,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
               Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.show_chart, color: _accentColor, size: 20),
+                    icon: const Icon(Icons.show_chart,
+                        color: _accentColor, size: 20),
                     onPressed: () {
                       Navigator.push(
                         context,
@@ -998,7 +1169,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                     tooltip: '收益率趋势',
                   ),
                   IconButton(
-                    icon: const Icon(Icons.settings, color: _textSecondary, size: 20),
+                    icon: const Icon(Icons.settings,
+                        color: _textSecondary, size: 20),
                     onPressed: _showAIProviderDialog,
                     tooltip: 'AI模型设置',
                   ),
@@ -1012,17 +1184,20 @@ class WatchlistScreenState extends State<WatchlistScreen>
                               color: _accentColor,
                             ),
                           )
-                        : const Icon(Icons.auto_awesome, color: _accentColor, size: 20),
+                        : const Icon(Icons.auto_awesome,
+                            color: _accentColor, size: 20),
                     onPressed: _isPortfolioAnalyzing ? null : _analyzePortfolio,
                     tooltip: 'AI分析持仓',
                   ),
                   IconButton(
-                    icon: const Icon(Icons.bar_chart, color: _accentColor, size: 20),
+                    icon: const Icon(Icons.bar_chart,
+                        color: _accentColor, size: 20),
                     onPressed: _showBacktestDialog,
                     tooltip: '回测分析',
                   ),
                   IconButton(
-                    icon: const Icon(Icons.upload_file, color: _accentColor, size: 20),
+                    icon: const Icon(Icons.upload_file,
+                        color: _accentColor, size: 20),
                     onPressed: _importPositionsFromExcel,
                     tooltip: '导入持仓Excel',
                   ),
@@ -1050,7 +1225,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   children: [
                     Expanded(
                       child: _buildPnlCard(
-                        '累计盈亏', totalPnl, totalPnlPct,
+                        '累计盈亏',
+                        totalPnl,
+                        totalPnlPct,
                         icon: Icons.trending_up,
                         subtitle: '自持仓起累计',
                       ),
@@ -1058,7 +1235,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
                     const SizedBox(width: 8),
                     Expanded(
                       child: _buildPnlCard(
-                        '当日盈亏', totalTodayPnl, totalTodayPnlPct,
+                        '当日盈亏',
+                        totalTodayPnl,
+                        totalTodayPnlPct,
                         icon: Icons.today,
                         subtitle: '今日浮动收益',
                       ),
@@ -1072,11 +1251,14 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   child: Row(
                     children: [
                       _buildAuxStat('持仓成本', '¥${totalCost.toStringAsFixed(0)}'),
-                      _buildAuxStat('持仓市值', '¥${totalMarketValue.toStringAsFixed(0)}'),
-                      if (_totalAssets > 0)
-                        _buildAuxStat('总资产', '¥${_totalAssets.toStringAsFixed(0)}'),
+                      _buildAuxStat(
+                          '持仓市值', '¥${totalMarketValue.toStringAsFixed(0)}'),
+                      if (displayTotalAssets > 0)
+                        _buildAuxStat(
+                            '总资产', '¥${displayTotalAssets.toStringAsFixed(0)}'),
                       if (_availableCash > 0)
-                        _buildAuxStat('可用资金', '¥${_availableCash.toStringAsFixed(0)}'),
+                        _buildAuxStat(
+                            '可用资金', '¥${_availableCash.toStringAsFixed(0)}'),
                       if (holdingDays > 0)
                         _buildAuxStat('持仓天数', '$holdingDays天'),
                     ],
@@ -1093,9 +1275,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
   Widget _buildPnlCard(String label, double pnl, double pnlPct,
       {required IconData icon, required String subtitle}) {
     final color = pnl >= 0 ? _upColor : _downColor;
-    final bgColor = pnl >= 0
-        ? const Color(0xFF2A1010)
-        : const Color(0xFF0F2A18);
+    final bgColor =
+        pnl >= 0 ? const Color(0xFF2A1010) : const Color(0xFF0F2A18);
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -1111,7 +1292,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
             children: [
               Icon(icon, color: color, size: 13),
               const SizedBox(width: 4),
-              Text(label, style: const TextStyle(color: _textSecondary, fontSize: 12)),
+              Text(label,
+                  style: const TextStyle(color: _textSecondary, fontSize: 12)),
             ],
           ),
           const SizedBox(height: 6),
@@ -1120,7 +1302,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
             alignment: Alignment.centerLeft,
             child: Text(
               '${pnl >= 0 ? '+' : ''}¥${pnl.toStringAsFixed(2)}',
-              style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: color, fontSize: 20, fontWeight: FontWeight.bold),
             ),
           ),
           const SizedBox(height: 2),
@@ -1129,7 +1312,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
             style: TextStyle(color: color, fontSize: 13),
           ),
           const SizedBox(height: 2),
-          Text(subtitle, style: const TextStyle(color: _textSecondary, fontSize: 10)),
+          Text(subtitle,
+              style: const TextStyle(color: _textSecondary, fontSize: 10)),
         ],
       ),
     );
@@ -1142,9 +1326,14 @@ class WatchlistScreenState extends State<WatchlistScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: _textSecondary, fontSize: 10)),
+          Text(label,
+              style: const TextStyle(color: _textSecondary, fontSize: 10)),
           const SizedBox(height: 2),
-          Text(value, style: const TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(value,
+              style: const TextStyle(
+                  color: _textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -1222,28 +1411,21 @@ class WatchlistScreenState extends State<WatchlistScreen>
     );
   }
 
-  Widget _buildPositionCard(Position pos, QuoteData quote, OpportunityResult? opp) {
-    final currentPrice = quote.price > 0 ? quote.price : (pos.latestPrice > 0 ? pos.latestPrice : pos.avgPrice);
-
-    // v3.2: 始终从实时行情计算盈亏，不使用DB中可能过期的存储值
-    final pnl = (currentPrice - pos.avgPrice) * pos.quantity;
-    final pnlPct = pos.avgPrice > 0
-        ? ((currentPrice - pos.avgPrice) / pos.avgPrice * 100)
-        : 0.0;
+  Widget _buildPositionCard(
+      Position pos, QuoteData quote, OpportunityResult? opp) {
+    final valuation = PositionValuation.fromQuote(pos, quote);
+    final currentPrice = valuation.currentPrice;
+    final pnl = valuation.floatPnl;
+    final pnlPct = valuation.pnlPct;
     final pnlColor = pnl >= 0 ? _upColor : _downColor;
-
-    final todayPnl = quote.preClose > 0
-        ? pos.quantity * (currentPrice - quote.preClose)
-        : 0.0;
-    final todayPnlPct = quote.preClose > 0 && quote.price > 0
-        ? (currentPrice - quote.preClose) / quote.preClose * 100
-        : 0.0;
+    final todayPnl = valuation.todayPnl;
+    final todayPnlPct = valuation.todayPnlPct;
     final todayPnlColor = todayPnl >= 0 ? _upColor : _downColor;
 
     final holdingDays = pos.buyDate != null
         ? DateTime.now().difference(pos.buyDate!).inDays
         : 0;
-    final marketValue = pos.quantity * currentPrice;
+    final marketValue = valuation.marketValue;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1291,7 +1473,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                           children: [
                             Text(
                               pos.code,
-                              style: const TextStyle(color: _textSecondary, fontSize: 11),
+                              style: const TextStyle(
+                                  color: _textSecondary, fontSize: 11),
                             ),
                             if (holdingDays > 0) ...[
                               const SizedBox(width: 8),
@@ -1311,7 +1494,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   Row(
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.edit, size: 16, color: Colors.white54),
+                        icon: const Icon(Icons.edit,
+                            size: 16, color: Colors.white54),
                         onPressed: () => _showEditPositionDialog(pos),
                         visualDensity: VisualDensity.compact,
                       ),
@@ -1321,7 +1505,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                           Text(
                             '¥${currentPrice.toStringAsFixed(2)}',
                             style: TextStyle(
-                              color: quote.changePct >= 0 ? _upColor : _downColor,
+                              color:
+                                  quote.changePct >= 0 ? _upColor : _downColor,
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                             ),
@@ -1329,7 +1514,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                           Text(
                             '${quote.changePct >= 0 ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
                             style: TextStyle(
-                              color: quote.changePct >= 0 ? _upColor : _downColor,
+                              color:
+                                  quote.changePct >= 0 ? _upColor : _downColor,
                               fontSize: 13,
                             ),
                           ),
@@ -1342,7 +1528,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
               const SizedBox(height: 10),
               // 盈亏区（分组强化，浅色背景条）
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
                   color: _darkSurface,
                   borderRadius: BorderRadius.circular(8),
@@ -1354,7 +1541,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                     ),
                     Container(width: 1, height: 32, color: _borderColor),
                     Expanded(
-                      child: _buildPnlDetail('当日盈亏', todayPnl, todayPnlPct, todayPnlColor),
+                      child: _buildPnlDetail(
+                          '当日盈亏', todayPnl, todayPnlPct, todayPnlColor),
                     ),
                   ],
                 ),
@@ -1364,8 +1552,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
               Row(
                 children: [
                   _buildPositionDetail('持仓', '${pos.quantity}股'),
-                  _buildPositionDetail('成本', '¥${pos.avgPrice.toStringAsFixed(3)}'),
-                  _buildPositionDetail('市值', '¥${marketValue.toStringAsFixed(0)}'),
+                  _buildPositionDetail(
+                      '成本', '¥${pos.avgPrice.toStringAsFixed(3)}'),
+                  _buildPositionDetail(
+                      '市值', '¥${marketValue.toStringAsFixed(0)}'),
                 ],
               ),
               if (opp != null) ...[
@@ -1375,9 +1565,11 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: _getRecommendationColor(opp.recommendation).withOpacity(0.15),
+                        color: _getRecommendationColor(opp.recommendation)
+                            .withOpacity(0.15),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -1391,7 +1583,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                     ),
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: _accentColor.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(6),
@@ -1408,7 +1601,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                     if (opp.confluenceScore > 0) ...[
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: _accentColor.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(6),
@@ -1432,9 +1626,11 @@ class WatchlistScreenState extends State<WatchlistScreen>
                     children: opp.topSignals.take(3).map((s) {
                       final isBuy = s.startsWith('▲');
                       return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: (isBuy ? _upColor : _downColor).withOpacity(0.1),
+                          color:
+                              (isBuy ? _upColor : _downColor).withOpacity(0.1),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
@@ -1469,11 +1665,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: _textSecondary, fontSize: 10)),
+        Text(label,
+            style: const TextStyle(color: _textSecondary, fontSize: 10)),
         const SizedBox(height: 2),
         Text(
           '${pnl >= 0 ? '+' : ''}¥${pnl.toStringAsFixed(2)}',
-          style: TextStyle(color: color, fontSize: 15, fontWeight: FontWeight.bold),
+          style: TextStyle(
+              color: color, fontSize: 15, fontWeight: FontWeight.bold),
         ),
         Text(
           '${pnlPct >= 0 ? '+' : ''}${pnlPct.toStringAsFixed(2)}%',
@@ -1575,10 +1773,14 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 }
               }
               if (availableCol >= 0 && availableCol < dataRow.length) {
-                _availableCash = double.tryParse(dataRow[availableCol]?.value?.toString() ?? '0') ?? 0;
+                _availableCash = PortfolioAssetSummary.parseAmount(
+                  _parseCellValue(dataRow[availableCol]),
+                );
               }
               if (totalAssetsCol >= 0 && totalAssetsCol < dataRow.length) {
-                _totalAssets = double.tryParse(dataRow[totalAssetsCol]?.value?.toString() ?? '0') ?? 0;
+                _totalAssets = PortfolioAssetSummary.parseAmount(
+                  _parseCellValue(dataRow[totalAssetsCol]),
+                );
               }
             }
             break;
@@ -1619,7 +1821,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
       for (var i = 0; i < headerRow.length; i++) {
         final header = _parseCellValue(headerRow[i]);
         if (header.isEmpty) continue;
-        
+
         // 精确匹配优先
         if (header == '证券代码' || header == '代码') {
           codeCol = i;
@@ -1655,25 +1857,47 @@ class WatchlistScreenState extends State<WatchlistScreen>
         return;
       }
 
-      debugPrint('Excel导入: codeCol=$codeCol nameCol=$nameCol quantityCol=$quantityCol balanceCol=$balanceCol avgPriceCol=$avgPriceCol latestPriceCol=$latestPriceCol floatPnlCol=$floatPnlCol pnlPctCol=$pnlPctCol todayPnlCol=$todayPnlCol todayPnlPctCol=$todayPnlPctCol marketValueCol=$marketValueCol');
+      debugPrint(
+          'Excel导入: codeCol=$codeCol nameCol=$nameCol quantityCol=$quantityCol balanceCol=$balanceCol avgPriceCol=$avgPriceCol latestPriceCol=$latestPriceCol floatPnlCol=$floatPnlCol pnlPctCol=$pnlPctCol todayPnlCol=$todayPnlCol todayPnlPctCol=$todayPnlPctCol marketValueCol=$marketValueCol');
 
       // 从表头下一行开始读取数据
-      for (var rowIndex = headerRowIndex + 1; rowIndex < rows.length; rowIndex++) {
+      for (var rowIndex = headerRowIndex + 1;
+          rowIndex < rows.length;
+          rowIndex++) {
         final row = rows[rowIndex];
         if (row.isEmpty) continue;
 
         // 获取单元格值，处理不同类型
         final codeCell = codeCol < row.length ? row[codeCol] : null;
         final nameCell = nameCol < row.length ? row[nameCol] : null;
-        final balanceCell = balanceCol >= 0 && balanceCol < row.length ? row[balanceCol] : null;
-        final quantityCell = quantityCol >= 0 && quantityCol < row.length ? row[quantityCol] : null;
-        final avgPriceCell = avgPriceCol >= 0 && avgPriceCol < row.length ? row[avgPriceCol] : null;
-        final latestPriceCell = latestPriceCol >= 0 && latestPriceCol < row.length ? row[latestPriceCol] : null;
-        final floatPnlCell = floatPnlCol >= 0 && floatPnlCol < row.length ? row[floatPnlCol] : null;
-        final pnlPctCell = pnlPctCol >= 0 && pnlPctCol < row.length ? row[pnlPctCol] : null;
-        final todayPnlCell = todayPnlCol >= 0 && todayPnlCol < row.length ? row[todayPnlCol] : null;
-        final todayPnlPctCell = todayPnlPctCol >= 0 && todayPnlPctCol < row.length ? row[todayPnlPctCol] : null;
-        final marketValueCell = marketValueCol >= 0 && marketValueCol < row.length ? row[marketValueCol] : null;
+        final balanceCell =
+            balanceCol >= 0 && balanceCol < row.length ? row[balanceCol] : null;
+        final quantityCell = quantityCol >= 0 && quantityCol < row.length
+            ? row[quantityCol]
+            : null;
+        final avgPriceCell = avgPriceCol >= 0 && avgPriceCol < row.length
+            ? row[avgPriceCol]
+            : null;
+        final latestPriceCell =
+            latestPriceCol >= 0 && latestPriceCol < row.length
+                ? row[latestPriceCol]
+                : null;
+        final floatPnlCell = floatPnlCol >= 0 && floatPnlCol < row.length
+            ? row[floatPnlCol]
+            : null;
+        final pnlPctCell =
+            pnlPctCol >= 0 && pnlPctCol < row.length ? row[pnlPctCol] : null;
+        final todayPnlCell = todayPnlCol >= 0 && todayPnlCol < row.length
+            ? row[todayPnlCol]
+            : null;
+        final todayPnlPctCell =
+            todayPnlPctCol >= 0 && todayPnlPctCol < row.length
+                ? row[todayPnlPctCol]
+                : null;
+        final marketValueCell =
+            marketValueCol >= 0 && marketValueCol < row.length
+                ? row[marketValueCol]
+                : null;
 
         final code = _parseCellValue(codeCell);
         final name = _parseCellValue(nameCell);
@@ -1687,10 +1911,11 @@ class WatchlistScreenState extends State<WatchlistScreen>
         final todayPnlPctStr = _parseCellValue(todayPnlPctCell);
         final marketValueStr = _parseCellValue(marketValueCell);
 
-        debugPrint('Excel导入: 行$rowIndex code=$code name=$name balance=$balanceStr quantity=$quantityStr avgPrice=$avgPriceStr latestPrice=$latestPriceStr floatPnl=$floatPnlStr pnlPct=$pnlPctStr todayPnl=$todayPnlStr todayPnlPct=$todayPnlPctStr marketValue=$marketValueStr');
+        debugPrint(
+            'Excel导入: 行$rowIndex code=$code name=$name balance=$balanceStr quantity=$quantityStr avgPrice=$avgPriceStr latestPrice=$latestPriceStr floatPnl=$floatPnlStr pnlPct=$pnlPctStr todayPnl=$todayPnlStr todayPnlPct=$todayPnlPctStr marketValue=$marketValueStr');
 
         if (code.isEmpty || name.isEmpty) continue;
-        
+
         // 跳过合计行
         if (code.contains('合计') || name.contains('合计')) continue;
 
@@ -1712,7 +1937,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
         final floatPnlRaw = double.tryParse(floatPnlStr) ?? 0.0;
         if (avgPrice <= 0 && quantity > 0 && latestPrice > 0) {
           avgPrice = (latestPrice * quantity - floatPnlRaw) / quantity;
-          debugPrint('Excel导入: 行$rowIndex 反推成本价=$avgPrice (latestPrice=$latestPrice quantity=$quantity floatPnl=$floatPnlRaw)');
+          debugPrint(
+              'Excel导入: 行$rowIndex 反推成本价=$avgPrice (latestPrice=$latestPrice quantity=$quantity floatPnl=$floatPnlRaw)');
         }
 
         // 解析盈亏比例（去掉%号）
@@ -1727,9 +1953,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
         // 解析当日盈亏比例（去掉%号）
         double todayPnlPct = 0.0;
         if (todayPnlPctStr.isNotEmpty && todayPnlPctStr != '--') {
-          todayPnlPct = double.tryParse(todayPnlPctStr.replaceAll('%', '').trim()) ?? 0.0;
+          todayPnlPct =
+              double.tryParse(todayPnlPctStr.replaceAll('%', '').trim()) ?? 0.0;
         }
-        
+
         // 解析市值
         final marketValue = double.tryParse(marketValueStr) ?? 0.0;
 
@@ -1757,7 +1984,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
         }
         return;
       }
-      
+
       // 数据验证：检查关键字段
       final warnings = <String>[];
       int validCount = 0;
@@ -1803,13 +2030,18 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 const SizedBox(height: 12),
                 const Text(
                   '⚠️ 注意事项：',
-                  style: TextStyle(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                      color: Colors.orange,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 ...warnings.map((w) => Padding(
-                  padding: const EdgeInsets.only(left: 8, top: 2),
-                  child: Text('• $w', style: const TextStyle(color: Colors.orange, fontSize: 11)),
-                )),
+                      padding: const EdgeInsets.only(left: 8, top: 2),
+                      child: Text('• $w',
+                          style: const TextStyle(
+                              color: Colors.orange, fontSize: 11)),
+                    )),
               ],
             ],
           ),
@@ -1829,16 +2061,20 @@ class WatchlistScreenState extends State<WatchlistScreen>
       if (confirm != true) return;
 
       debugPrint('Excel导入: 确认导入，开始清空现有数据');
-      
+
       // 批量添加到数据库（先清除现有数据）
       await _dbService.deleteAllPositions();
       debugPrint('Excel导入: 已清空现有数据');
-      
+
       for (final pos in positions) {
         await _dbService.addPosition(pos);
-        debugPrint('Excel导入: 添加持仓 ${pos.code} ${pos.name} 数量=${pos.quantity} 成本=${pos.avgPrice}');
+        debugPrint(
+            'Excel导入: 添加持仓 ${pos.code} ${pos.name} 数量=${pos.quantity} 成本=${pos.avgPrice}');
       }
 
+      await _savePortfolioAssetSummary();
+      await _syncPositionsToPinnedWatchlist(positions);
+      await _loadWatchlist();
       await _loadPositions();
       debugPrint('Excel导入: 重新加载持仓，当前持仓数=${_positionMap.length}');
 
@@ -1885,7 +2121,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
     // 检查缓存（15分钟内不重复分析）
     if (_lastPortfolioAnalysisTime != null &&
-        DateTime.now().difference(_lastPortfolioAnalysisTime!) < const Duration(minutes: 15) &&
+        DateTime.now().difference(_lastPortfolioAnalysisTime!) <
+            const Duration(minutes: 15) &&
         _portfolioAnalysisResult != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('分析结果缓存中，15分钟内不重复分析')),
@@ -1974,7 +2211,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
       decoration: BoxDecoration(
         color: _cardColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isError ? Colors.red.withOpacity(0.3) : _borderColor),
+        border: Border.all(
+            color: isError ? Colors.red.withOpacity(0.3) : _borderColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2038,7 +2276,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
               child: SingleChildScrollView(
                 child: SelectableText(
                   result.answer,
-                  style: const TextStyle(color: _textPrimary, fontSize: 14, height: 1.6),
+                  style: const TextStyle(
+                      color: _textPrimary, fontSize: 14, height: 1.6),
                 ),
               ),
             ),
@@ -2224,7 +2463,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
     }
   }
 
-  void _showBacktestResults(String strategy, Map<String, BacktestResult> results) {
+  void _showBacktestResults(
+      String strategy, Map<String, BacktestResult> results) {
     if (results.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('无回测结果')),
@@ -2317,12 +2557,14 @@ class WatchlistScreenState extends State<WatchlistScreen>
                       ),
                       subtitle: Text(
                         '交易${result.totalSignals}次 | 胜率${(result.winRate * 100).toStringAsFixed(1)}%',
-                        style: const TextStyle(color: Colors.white60, fontSize: 12),
+                        style: const TextStyle(
+                            color: Colors.white60, fontSize: 12),
                       ),
                       trailing: Text(
                         '${result.totalReturn >= 0 ? '+' : ''}${result.totalReturn.toStringAsFixed(2)}%',
                         style: TextStyle(
-                          color: result.totalReturn >= 0 ? _upColor : _downColor,
+                          color:
+                              result.totalReturn >= 0 ? _upColor : _downColor,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -2389,8 +2631,11 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 children: [
                   ...AIProvider.values.map((provider) {
                     return RadioListTile<AIProvider>(
-                      title: Text(provider.label, style: const TextStyle(color: _textPrimary)),
-                      subtitle: Text(provider.defaultModel, style: TextStyle(color: _textSecondary, fontSize: 12)),
+                      title: Text(provider.label,
+                          style: const TextStyle(color: _textPrimary)),
+                      subtitle: Text(provider.defaultModel,
+                          style:
+                              TextStyle(color: _textSecondary, fontSize: 12)),
                       value: provider,
                       groupValue: selectedProvider,
                       onChanged: (value) {
@@ -2408,7 +2653,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
                       child: Text(
                         testResult!,
                         style: TextStyle(
-                          color: testResult!.contains('成功') ? Colors.green : Colors.red,
+                          color: testResult!.contains('成功')
+                              ? Colors.green
+                              : Colors.red,
                           fontSize: 12,
                         ),
                       ),
@@ -2425,14 +2672,18 @@ class WatchlistScreenState extends State<WatchlistScreen>
                             isTesting = true;
                             testResult = '正在测试${selectedProvider!.label}...';
                           });
-                          final result = await _testAPIConnection(selectedProvider!);
+                          final result =
+                              await _testAPIConnection(selectedProvider!);
                           setState(() {
                             isTesting = false;
                             testResult = result;
                           });
                         },
                   child: isTesting
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2))
                       : Text('测试连接', style: TextStyle(color: _textSecondary)),
                 ),
                 TextButton(
@@ -2442,9 +2693,11 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 TextButton(
                   onPressed: () async {
                     if (selectedProvider == null) return;
-                    await prefs.setString('ai_provider', selectedProvider!.name);
+                    await prefs.setString(
+                        'ai_provider', selectedProvider!.name);
                     // 重新初始化AILayerProvider
-                    final apiKey = AIConfig.getApiKeyForProvider(selectedProvider!);
+                    final apiKey =
+                        AIConfig.getApiKeyForProvider(selectedProvider!);
                     if (apiKey.isNotEmpty) {
                       AILayerProvider.set(
                         ChatCompletionLayer(
@@ -2456,11 +2709,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
                     if (mounted) {
                       Navigator.pop(context);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('已切换到${selectedProvider!.label}')),
+                        SnackBar(
+                            content: Text('已切换到${selectedProvider!.label}')),
                       );
                     }
                   },
-                  child: const Text('确定', style: TextStyle(color: _accentColor)),
+                  child:
+                      const Text('确定', style: TextStyle(color: _accentColor)),
                 ),
               ],
             );
@@ -2479,7 +2734,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
         ..headers.set('Content-Type', 'application/json')
         ..headers.set('Authorization', 'Bearer $apiKey');
       final request = await response;
-      final body = '{"model": "${provider.defaultModel}", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5}';
+      final body =
+          '{"model": "${provider.defaultModel}", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5}';
       request.write(body);
       final responseBody = await request.close();
       if (responseBody.statusCode == 200) {
@@ -2581,7 +2837,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 const SizedBox(height: 12),
                 TextField(
                   controller: avgPriceController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(
                     labelText: '成本价格',
@@ -2605,7 +2862,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 final quantityStr = quantityController.text.trim();
                 final avgPriceStr = avgPriceController.text.trim();
 
-                if (code.isEmpty || name.isEmpty || quantityStr.isEmpty || avgPriceStr.isEmpty) {
+                if (code.isEmpty ||
+                    name.isEmpty ||
+                    quantityStr.isEmpty ||
+                    avgPriceStr.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('请填写完整信息')),
                   );
@@ -2645,6 +2905,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 } else {
                   await _dbService.addPosition(position);
                 }
+                await _syncPositionsToPinnedWatchlist([position]);
+                await _loadWatchlist();
                 await _loadPositions();
 
                 if (mounted) {
@@ -2663,8 +2925,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   Future<void> _showEditPositionDialog(Position pos) async {
-    final quantityController = TextEditingController(text: pos.quantity.toString());
-    final avgPriceController = TextEditingController(text: pos.avgPrice.toStringAsFixed(3));
+    final quantityController =
+        TextEditingController(text: pos.quantity.toString());
+    final avgPriceController =
+        TextEditingController(text: pos.avgPrice.toStringAsFixed(3));
 
     return showDialog(
       context: context,
@@ -2714,7 +2978,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
               const SizedBox(height: 12),
               TextField(
                 controller: avgPriceController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
                   labelText: '成本价格',
@@ -2816,11 +3081,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
           // 第一行：筛选 + 排序
           Row(
             children: [
-              const Text('筛选', style: TextStyle(color: _textSecondary, fontSize: 12)),
+              const Text('筛选',
+                  style: TextStyle(color: _textSecondary, fontSize: 12)),
               const SizedBox(width: 4),
               Expanded(flex: 3, child: _buildFilterDropdown()),
               const SizedBox(width: 8),
-              const Text('排序', style: TextStyle(color: _textSecondary, fontSize: 12)),
+              const Text('排序',
+                  style: TextStyle(color: _textSecondary, fontSize: 12)),
               const SizedBox(width: 4),
               Expanded(flex: 2, child: _buildSortDropdown()),
             ],
@@ -2830,7 +3097,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _buildActionButton(Icons.auto_awesome, _accentColor, '精选', _runSectorPick),
+              _buildActionButton(
+                  Icons.auto_awesome, _accentColor, '精选', _runSectorPick),
               _buildActionButton(
                 _oppLoading ? Icons.hourglass_empty : Icons.refresh,
                 _oppLoading ? _textSecondary.withOpacity(0.4) : _accentColor,
@@ -2839,11 +3107,14 @@ class WatchlistScreenState extends State<WatchlistScreen>
               ),
               _buildActionButton(
                 Icons.archive_outlined,
-                _oppResults.isEmpty ? _textSecondary.withOpacity(0.4) : _accentColor,
+                _oppResults.isEmpty
+                    ? _textSecondary.withOpacity(0.4)
+                    : _accentColor,
                 '归档',
                 _oppResults.isEmpty ? null : _oneClickArchive,
               ),
-              _buildActionButton(Icons.info_outline, _textSecondary, '评分', _showScoringInfo),
+              _buildActionButton(
+                  Icons.info_outline, _textSecondary, '评分', _showScoringInfo),
             ],
           ),
         ],
@@ -2855,16 +3126,20 @@ class WatchlistScreenState extends State<WatchlistScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: _filterType != '全部' ? _accentColor.withOpacity(0.1) : _darkSurface,
+        color:
+            _filterType != '全部' ? _accentColor.withOpacity(0.1) : _darkSurface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _filterType != '全部' ? _accentColor : _borderColor),
+        border: Border.all(
+            color: _filterType != '全部' ? _accentColor : _borderColor),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: _filterType,
           isDense: true,
           dropdownColor: _darkSurface,
-          style: TextStyle(color: _filterType != '全部' ? _accentColor : _textPrimary, fontSize: 13),
+          style: TextStyle(
+              color: _filterType != '全部' ? _accentColor : _textPrimary,
+              fontSize: 13),
           items: const [
             DropdownMenuItem(value: '全部', child: Text('全部')),
             DropdownMenuItem(value: '强烈买入', child: Text('强烈买入')),
@@ -2876,7 +3151,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
             DropdownMenuItem(value: '卖出', child: Text('卖出')),
             DropdownMenuItem(value: '强烈卖出', child: Text('强烈卖出')),
           ],
-          onChanged: (v) { if (v != null) setState(() => _filterType = v); },
+          onChanged: (v) {
+            if (v != null) setState(() => _filterType = v);
+          },
         ),
       ),
     );
@@ -2886,18 +3163,26 @@ class WatchlistScreenState extends State<WatchlistScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: _sortBy != 'default' ? _accentColor.withOpacity(0.1) : _darkSurface,
+        color:
+            _sortBy != 'default' ? _accentColor.withOpacity(0.1) : _darkSurface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _sortBy != 'default' ? _accentColor : _borderColor),
+        border: Border.all(
+            color: _sortBy != 'default' ? _accentColor : _borderColor),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: _sortBy == 'change_pct' ? (_sortAscending ? '涨幅↑' : '涨幅↓')
-              : _sortBy == 'score' ? (_sortAscending ? '评分↑' : '评分↓')
-              : _sortBy == 'volume_ratio' ? (_sortAscending ? '量比↑' : '量比↓') : '默认',
+          value: _sortBy == 'change_pct'
+              ? (_sortAscending ? '涨幅↑' : '涨幅↓')
+              : _sortBy == 'score'
+                  ? (_sortAscending ? '评分↑' : '评分↓')
+                  : _sortBy == 'volume_ratio'
+                      ? (_sortAscending ? '量比↑' : '量比↓')
+                      : '默认',
           isDense: true,
           dropdownColor: _darkSurface,
-          style: TextStyle(color: _sortBy != 'default' ? _accentColor : _textPrimary, fontSize: 13),
+          style: TextStyle(
+              color: _sortBy != 'default' ? _accentColor : _textPrimary,
+              fontSize: 13),
           items: const [
             DropdownMenuItem(value: '默认', child: Text('默认排序')),
             DropdownMenuItem(value: '涨幅↓', child: Text('涨幅降序')),
@@ -2910,13 +3195,27 @@ class WatchlistScreenState extends State<WatchlistScreen>
           onChanged: (v) {
             if (v == null) return;
             setState(() {
-              if (v == '默认') { _sortBy = 'default'; }
-              else if (v == '涨幅↓') { _sortBy = 'change_pct'; _sortAscending = false; }
-              else if (v == '涨幅↑') { _sortBy = 'change_pct'; _sortAscending = true; }
-              else if (v == '评分↓') { _sortBy = 'score'; _sortAscending = false; }
-              else if (v == '评分↑') { _sortBy = 'score'; _sortAscending = true; }
-              else if (v == '量比↓') { _sortBy = 'volume_ratio'; _sortAscending = false; }
-              else { _sortBy = 'volume_ratio'; _sortAscending = true; }
+              if (v == '默认') {
+                _sortBy = 'default';
+              } else if (v == '涨幅↓') {
+                _sortBy = 'change_pct';
+                _sortAscending = false;
+              } else if (v == '涨幅↑') {
+                _sortBy = 'change_pct';
+                _sortAscending = true;
+              } else if (v == '评分↓') {
+                _sortBy = 'score';
+                _sortAscending = false;
+              } else if (v == '评分↑') {
+                _sortBy = 'score';
+                _sortAscending = true;
+              } else if (v == '量比↓') {
+                _sortBy = 'volume_ratio';
+                _sortAscending = false;
+              } else {
+                _sortBy = 'volume_ratio';
+                _sortAscending = true;
+              }
             });
           },
         ),
@@ -2924,7 +3223,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
     );
   }
 
-  Widget _buildActionButton(IconData icon, Color color, String label, VoidCallback? onTap) {
+  Widget _buildActionButton(
+      IconData icon, Color color, String label, VoidCallback? onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -2932,14 +3232,21 @@ class WatchlistScreenState extends State<WatchlistScreen>
         decoration: BoxDecoration(
           color: onTap != null ? color.withOpacity(0.1) : _darkSurface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: onTap != null ? color.withOpacity(0.3) : _borderColor),
+          border: Border.all(
+              color: onTap != null ? color.withOpacity(0.3) : _borderColor),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: onTap != null ? color : _textSecondary.withOpacity(0.4), size: 16),
+            Icon(icon,
+                color: onTap != null ? color : _textSecondary.withOpacity(0.4),
+                size: 16),
             const SizedBox(width: 4),
-            Text(label, style: TextStyle(color: onTap != null ? color : _textSecondary.withOpacity(0.4), fontSize: 12)),
+            Text(label,
+                style: TextStyle(
+                    color:
+                        onTap != null ? color : _textSecondary.withOpacity(0.4),
+                    fontSize: 12)),
           ],
         ),
       ),
@@ -3030,8 +3337,12 @@ class WatchlistScreenState extends State<WatchlistScreen>
       );
     }
 
-    final pinnedCount = items.where((d) => (d['item'] as WatchlistItem).isPinned).length;
-    final hasDivider = pinnedCount > 0 && pinnedCount < items.length;
+    final fixedCount = items.where((d) {
+      final item = d['item'] as WatchlistItem;
+      final position = _findPosition(item.code);
+      return item.isPinned || (position != null && position.quantity > 0);
+    }).length;
+    final hasDivider = fixedCount > 0 && fixedCount < items.length;
     final totalCount = items.length + (hasDivider ? 1 : 0);
 
     return RefreshIndicator(
@@ -3043,14 +3354,15 @@ class WatchlistScreenState extends State<WatchlistScreen>
         itemCount: totalCount,
         itemBuilder: (context, index) {
           // 置顶/普通分隔线
-          if (hasDivider && index == pinnedCount) {
+          if (hasDivider && index == fixedCount) {
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
               child: Divider(height: 1, color: _borderColor.withOpacity(0.5)),
             );
           }
 
-          final dataIndex = (hasDivider && index > pinnedCount) ? index - 1 : index;
+          final dataIndex =
+              (hasDivider && index > fixedCount) ? index - 1 : index;
           if (dataIndex >= items.length) return const SizedBox.shrink();
 
           final data = items[dataIndex];
@@ -3070,11 +3382,13 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   /// 合并卡片：同时显示行情 + 分析数据
-  Widget _buildMergedCard(
-      WatchlistItem item, QuoteData quote, String codeWithPrefix, OpportunityResult? opp) {
+  Widget _buildMergedCard(WatchlistItem item, QuoteData quote,
+      String codeWithPrefix, OpportunityResult? opp) {
     // 持仓查找 (v2.33) - 兼容 watchlist 中带 sh/sz/bj 前缀的 code
     final position = _findPosition(item.code);
     final hasPosition = position != null && position.quantity > 0;
+    final valuation =
+        hasPosition ? PositionValuation.fromQuote(position, quote) : null;
 
     // 信号标签
     final tags = <Widget>[];
@@ -3128,20 +3442,18 @@ class WatchlistScreenState extends State<WatchlistScreen>
           context: context,
           builder: (context) => AlertDialog(
             backgroundColor: _cardColor,
-            title: const Text('确认删除',
-                style: TextStyle(color: _textPrimary)),
+            title: const Text('确认删除', style: TextStyle(color: _textPrimary)),
             content: Text('确定要从自选股移除 ${item.name} 吗？',
                 style: const TextStyle(color: _textSecondary)),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消',
-                    style: TextStyle(color: _textSecondary)),
+                child:
+                    const Text('取消', style: TextStyle(color: _textSecondary)),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context, true),
-                child: const Text('删除',
-                    style: TextStyle(color: Colors.red)),
+                child: const Text('删除', style: TextStyle(color: Colors.red)),
               ),
             ],
           ),
@@ -3151,9 +3463,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
       child: GestureDetector(
         onLongPress: () => _showItemMenu(item, codeWithPrefix),
         child: StockCard(
-          name: item.isPinned
-              ? '📌 ${item.name}'
-              : item.name,
+          name: (item.isPinned || hasPosition) ? '📌 ${item.name}' : item.name,
           code: codeWithPrefix,
           price: quote.price,
           changePct: quote.changePct,
@@ -3169,20 +3479,25 @@ class WatchlistScreenState extends State<WatchlistScreen>
               ? PositionInfo(
                   quantity: position.quantity,
                   avgPrice: position.avgPrice,
-                  currentPrice: quote.price > 0 ? quote.price : position.latestPrice,
-                  floatPnl: position.floatPnl != 0 ? position.floatPnl : null,
-                  pnlPct: position.pnlPct != 0 ? position.pnlPct : null,
+                  currentPrice: valuation!.currentPrice,
+                  floatPnl: valuation.floatPnl,
+                  pnlPct: valuation.pnlPct,
                 )
               : null,
           onTap: () => _onStockTap(codeWithPrefix, item.name),
           trailing: IconButton(
             icon: Icon(
-              _alertCodes.contains(item.code) ? Icons.notifications_active : Icons.add_alert,
-              color: _alertCodes.contains(item.code) ? _accentColor : _textSecondary,
+              _alertCodes.contains(item.code)
+                  ? Icons.notifications_active
+                  : Icons.add_alert,
+              color: _alertCodes.contains(item.code)
+                  ? _accentColor
+                  : _textSecondary,
               size: 22,
             ),
             onPressed: () => _alertCodes.contains(item.code)
-                ? Navigator.push(context, MaterialPageRoute(builder: (_) => const AlertsScreen()))
+                ? Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const AlertsScreen()))
                 : _addAlert(item.code, item.name),
             tooltip: _alertCodes.contains(item.code) ? '查看预警' : '添加预警',
             padding: EdgeInsets.zero,
@@ -3209,13 +3524,18 @@ class WatchlistScreenState extends State<WatchlistScreen>
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: Text(
                 item.name,
-                style: const TextStyle(color: _textPrimary, fontSize: 16, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                    color: _textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600),
               ),
             ),
             const Divider(height: 1, color: _borderColor),
             ListTile(
-              leading: Icon(item.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                  color: _accentColor, size: 22),
+              leading: Icon(
+                  item.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                  color: _accentColor,
+                  size: 22),
               title: Text(item.isPinned ? '取消置顶' : '置顶',
                   style: const TextStyle(color: _textPrimary, fontSize: 15)),
               onTap: () async {
@@ -3225,7 +3545,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
               },
             ),
             ListTile(
-              leading: const Icon(Icons.add_alert_outlined, color: _accentColor, size: 22),
+              leading: const Icon(Icons.add_alert_outlined,
+                  color: _accentColor, size: 22),
               title: const Text('添加预警',
                   style: TextStyle(color: _textPrimary, fontSize: 15)),
               onTap: () {
@@ -3235,8 +3556,11 @@ class WatchlistScreenState extends State<WatchlistScreen>
             ),
             ListTile(
               leading: Icon(
-                _findPosition(item.code) != null ? Icons.edit_note : Icons.account_balance_wallet_outlined,
-                color: _accentColor, size: 22,
+                _findPosition(item.code) != null
+                    ? Icons.edit_note
+                    : Icons.account_balance_wallet_outlined,
+                color: _accentColor,
+                size: 22,
               ),
               title: Text(
                 _findPosition(item.code) != null ? '编辑持仓' : '添加持仓',
@@ -3248,7 +3572,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
               },
             ),
             ListTile(
-              leading: const Icon(Icons.checklist, color: _accentColor, size: 22),
+              leading:
+                  const Icon(Icons.checklist, color: _accentColor, size: 22),
               title: const Text('多选编辑',
                   style: TextStyle(color: _textPrimary, fontSize: 15)),
               onTap: () {
@@ -3260,7 +3585,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
               },
             ),
             ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.red, size: 22),
+              leading:
+                  const Icon(Icons.delete_outline, color: Colors.red, size: 22),
               title: const Text('移除自选',
                   style: TextStyle(color: Colors.red, fontSize: 15)),
               onTap: () async {
@@ -3269,17 +3595,20 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   context: this.context,
                   builder: (context) => AlertDialog(
                     backgroundColor: _cardColor,
-                    title: const Text('确认删除', style: TextStyle(color: _textPrimary)),
+                    title: const Text('确认删除',
+                        style: TextStyle(color: _textPrimary)),
                     content: Text('确定要从自选股移除 ${item.name} 吗？',
                         style: const TextStyle(color: _textSecondary)),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(context, false),
-                        child: const Text('取消', style: TextStyle(color: _textSecondary)),
+                        child: const Text('取消',
+                            style: TextStyle(color: _textSecondary)),
                       ),
                       TextButton(
                         onPressed: () => Navigator.pop(context, true),
-                        child: const Text('删除', style: TextStyle(color: Colors.red)),
+                        child: const Text('删除',
+                            style: TextStyle(color: Colors.red)),
                       ),
                     ],
                   ),
@@ -3298,8 +3627,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
 
   void _showPositionDialog(WatchlistItem item) {
     final existing = _findPosition(item.code);
-    final qtyCtrl = TextEditingController(text: existing?.quantity.toString() ?? '');
-    final priceCtrl = TextEditingController(text: existing?.avgPrice.toStringAsFixed(3) ?? '');
+    final qtyCtrl =
+        TextEditingController(text: existing?.quantity.toString() ?? '');
+    final priceCtrl = TextEditingController(
+        text: existing?.avgPrice.toStringAsFixed(3) ?? '');
     final notesCtrl = TextEditingController(text: existing?.notes ?? '');
 
     showDialog(
@@ -3324,22 +3655,27 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   labelStyle: TextStyle(color: _textSecondary),
                   hintText: '如 1000',
                   hintStyle: TextStyle(color: _textSecondary),
-                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _borderColor)),
-                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _accentColor)),
+                  enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: _borderColor)),
+                  focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: _accentColor)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: priceCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                 style: const TextStyle(color: _textPrimary),
                 decoration: const InputDecoration(
                   labelText: '持仓均价',
                   labelStyle: TextStyle(color: _textSecondary),
                   hintText: '如 10.50',
                   hintStyle: TextStyle(color: _textSecondary),
-                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _borderColor)),
-                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _accentColor)),
+                  enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: _borderColor)),
+                  focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: _accentColor)),
                 ),
               ),
               const SizedBox(height: 12),
@@ -3349,8 +3685,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 decoration: const InputDecoration(
                   labelText: '备注（可选）',
                   labelStyle: TextStyle(color: _textSecondary),
-                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _borderColor)),
-                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _accentColor)),
+                  enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: _borderColor)),
+                  focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: _accentColor)),
                 ),
                 maxLines: 2,
               ),
@@ -3366,8 +3704,10 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   Navigator.pop(ctx);
                   _loadPositions();
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('${item.name} 持仓已清空'),
-                        backgroundColor: Colors.red, duration: const Duration(seconds: 1)),
+                    SnackBar(
+                        content: Text('${item.name} 持仓已清空'),
+                        backgroundColor: Colors.red,
+                        duration: const Duration(seconds: 1)),
                   );
                 }
               },
@@ -3383,13 +3723,17 @@ class WatchlistScreenState extends State<WatchlistScreen>
               final price = double.tryParse(priceCtrl.text.trim());
               if (qty == null || qty <= 0) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('请输入有效的股数'), duration: Duration(seconds: 1)),
+                  const SnackBar(
+                      content: Text('请输入有效的股数'),
+                      duration: Duration(seconds: 1)),
                 );
                 return;
               }
               if (price == null || price <= 0) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('请输入有效的均价'), duration: Duration(seconds: 1)),
+                  const SnackBar(
+                      content: Text('请输入有效的均价'),
+                      duration: Duration(seconds: 1)),
                 );
                 return;
               }
@@ -3408,12 +3752,24 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   notes: notesCtrl.text.trim(),
                 ));
               }
+              await _syncPositionsToPinnedWatchlist([
+                Position(
+                  code: item.code,
+                  name: item.name,
+                  quantity: qty,
+                  avgPrice: price,
+                ),
+              ]);
+              await _loadWatchlist();
               if (mounted) {
                 Navigator.pop(ctx);
                 _loadPositions();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('${item.name} 持仓已${existing != null ? '更新' : '添加'}'),
-                      backgroundColor: _accentColor, duration: const Duration(seconds: 1)),
+                  SnackBar(
+                      content: Text(
+                          '${item.name} 持仓已${existing != null ? '更新' : '添加'}'),
+                      backgroundColor: _accentColor,
+                      duration: const Duration(seconds: 1)),
                 );
               }
             },
@@ -3425,8 +3781,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   /// 编辑模式下的卡片
-  Widget _buildEditItem(
-      WatchlistItem item, QuoteData quote, String codeWithPrefix, OpportunityResult? opp) {
+  Widget _buildEditItem(WatchlistItem item, QuoteData quote,
+      String codeWithPrefix, OpportunityResult? opp) {
     final isSelected = _selectedCodes.contains(item.code);
     return GestureDetector(
       onTap: () {
@@ -3480,7 +3836,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                       if (opp != null && opp.recommendation.isNotEmpty) ...[
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: (opp.recommendation.contains('买入')
                                     ? _upColor
@@ -3508,8 +3865,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   ),
                   const SizedBox(height: 2),
                   Text(codeWithPrefix,
-                      style: const TextStyle(
-                          color: _textSecondary, fontSize: 12)),
+                      style:
+                          const TextStyle(color: _textSecondary, fontSize: 12)),
                 ],
               ),
             ),
@@ -3517,9 +3874,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  quote.price > 0
-                      ? '¥${quote.price.toStringAsFixed(2)}'
-                      : '--',
+                  quote.price > 0 ? '¥${quote.price.toStringAsFixed(2)}' : '--',
                   style: TextStyle(
                     color: quote.changePct > 0
                         ? _upColor
@@ -3549,7 +3904,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                     if (opp != null) ...[
                       const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: _accentColor.withOpacity(0.15),
                           borderRadius: BorderRadius.circular(4),
@@ -3661,21 +4017,16 @@ class WatchlistScreenState extends State<WatchlistScreen>
                           backgroundColor: _cardColor,
                           title: const Text('确认删除',
                               style: TextStyle(color: _textPrimary)),
-                          content: Text(
-                              '确定要删除选中的${_selectedCodes.length}只股票吗？',
-                              style:
-                                  const TextStyle(color: _textSecondary)),
+                          content: Text('确定要删除选中的${_selectedCodes.length}只股票吗？',
+                              style: const TextStyle(color: _textSecondary)),
                           actions: [
                             TextButton(
-                              onPressed: () =>
-                                  Navigator.pop(context, false),
+                              onPressed: () => Navigator.pop(context, false),
                               child: const Text('取消',
-                                  style:
-                                      TextStyle(color: _textSecondary)),
+                                  style: TextStyle(color: _textSecondary)),
                             ),
                             TextButton(
-                              onPressed: () =>
-                                  Navigator.pop(context, true),
+                              onPressed: () => Navigator.pop(context, true),
                               child: const Text('删除',
                                   style: TextStyle(color: Colors.red)),
                             ),
@@ -3698,9 +4049,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
                 child: Text(
                   '删除(${_selectedCodes.length})',
                   style: TextStyle(
-                    color: _selectedCodes.isEmpty
-                        ? _textSecondary
-                        : _textPrimary,
+                    color:
+                        _selectedCodes.isEmpty ? _textSecondary : _textPrimary,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ),
@@ -3759,8 +4109,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
         context: context,
         builder: (context) => AlertDialog(
           backgroundColor: _cardColor,
-          title: const Text('选择股票',
-              style: TextStyle(color: _textPrimary)),
+          title: const Text('选择股票', style: TextStyle(color: _textPrimary)),
           content: SizedBox(
             width: double.maxFinite,
             height: 300,
@@ -3779,8 +4128,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
                     _loadWatchlist();
                     _searchController.clear();
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                          content: Text('已添加 ${stock.name} 到自选股')),
+                      SnackBar(content: Text('已添加 ${stock.name} 到自选股')),
                     );
                   },
                 );
@@ -3790,8 +4138,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('取消',
-                  style: TextStyle(color: _textSecondary)),
+              child: const Text('取消', style: TextStyle(color: _textSecondary)),
             ),
           ],
         ),

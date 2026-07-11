@@ -29,6 +29,8 @@ import 'pattern_recognizer.dart';
 import 'sector_rotation.dart';
 import 'momentum_persistence_analyzer.dart';
 import 'next_day_predictor.dart';
+import 'next_session_prediction.dart';
+import 'next_session_predictor.dart';
 import 'signal_detector.dart';
 
 /// 向后兼容：检测特有信号（量价背离、布林收口）
@@ -358,6 +360,7 @@ AnalysisResult generateAnalysis(
 
   // 1f. 次日涨跌概率预测（新增）
   final nextDayPrediction = NextDayPredictor.predict(data, quote);
+  final nextSessionPrediction = NextSessionPredictor.predict(data);
 
   final buySignals = signals.where((s) => s.type == 'buy').toList();
   final sellSignals = signals.where((s) => s.type == 'sell').toList();
@@ -428,6 +431,12 @@ AnalysisResult generateAnalysis(
   if (calibration.score < totalScore) {
     totalScore = calibration.score;
     recommendation = _recommendationFromScore(totalScore, quote);
+  }
+  final nextSessionAdjustment = _applyNextSessionRiskGate(
+      totalScore, recommendation, nextSessionPrediction, quote);
+  if (nextSessionAdjustment.score < totalScore) {
+    totalScore = nextSessionAdjustment.score;
+    recommendation = nextSessionAdjustment.recommendation;
   }
 
   // 6. 推荐理由（见下方步骤13，全部上下文就绪后生成）
@@ -560,6 +569,7 @@ AnalysisResult generateAnalysis(
     '短线交易': shortTermResult.score,
     '动量持续性': momentumPersistence.persistenceScore * 10,
     '次日预测': nextDayPrediction.upProbability * 10,
+    '次交易预测': nextSessionPrediction.nextCloseUpProbability * 10,
   };
   final reasons = _generateReasons(
     buySignals,
@@ -588,6 +598,10 @@ AnalysisResult generateAnalysis(
 
   // 13a. 历史决策反思注入（v2.53: 决策反馈闭环）
   // 异步获取历史反思，不阻塞主分析流程
+  if (nextSessionAdjustment.reason.isNotEmpty) {
+    reasons.add(nextSessionAdjustment.reason);
+  }
+
   List<Map<String, dynamic>> historicalReflections = [];
   if (enableAsyncSideEffects && quote != null) {
     RecommendationTracker()
@@ -674,6 +688,10 @@ AnalysisResult generateAnalysis(
         0, '短线交易分${shortTermResult.score.toStringAsFixed(1)}，可在分时承接确认后小仓位参与');
   }
 
+  if (nextSessionAdjustment.reason.isNotEmpty) {
+    suggestions.insert(0, nextSessionAdjustment.reason);
+  }
+
   final detailedReasons = <RecommendationReason>[];
   for (final signal in signals.take(5)) {
     if (signal.confidence != null) {
@@ -751,7 +769,8 @@ AnalysisResult generateAnalysis(
     limitUpAnalysis: limitUpAnalysis,
     dimensionScores: dimensionScores,
     momentumPersistence: momentumPersistence.toJson(),
-    nextDayPrediction: nextDayPrediction.toJson(),
+    nextDayPrediction:
+        _combinedPredictionJson(nextDayPrediction, nextSessionPrediction),
     earlyWarningSignals: earlyWarningSignals,
   );
 }
@@ -772,6 +791,80 @@ String _recommendationFromScore(int score, QuoteData? quote) {
   if (score >= 3) return '谨慎卖出';
   if (score >= 2) return '卖出';
   return '强烈卖出';
+}
+
+Map<String, dynamic> _combinedPredictionJson(
+  NextDayPredictionResult nextDayPrediction,
+  NextSessionPrediction nextSessionPrediction,
+) {
+  return {
+    ...nextDayPrediction.toJson(),
+    'next_session': _nextSessionPredictionToJson(nextSessionPrediction),
+  };
+}
+
+Map<String, dynamic> _nextSessionPredictionToJson(
+  NextSessionPrediction prediction,
+) {
+  return {
+    'next_open_up_probability': prediction.nextOpenUpProbability,
+    'next_close_up_probability': prediction.nextCloseUpProbability,
+    'expected_next_close_return': prediction.expectedNextCloseReturn,
+    'downside_risk_probability': prediction.downsideRiskProbability,
+    'confidence': prediction.confidence,
+    'sample_count': prediction.sampleCount,
+    'scenario_tags': prediction.scenarioTags,
+    'risk_warnings': prediction.riskWarnings,
+  };
+}
+
+_NextSessionRecommendationAdjustment _applyNextSessionRiskGate(
+  int score,
+  String recommendation,
+  NextSessionPrediction prediction,
+  QuoteData? quote,
+) {
+  final hasPullbackRisk = prediction.scenarioTags.contains('高位回调风险') ||
+      prediction.scenarioTags.contains('长上影分歧') ||
+      prediction.scenarioTags.contains('放量滞涨');
+  final isAggressiveBuy = recommendation == '强烈买入' || recommendation == '买入';
+  if (!hasPullbackRisk) {
+    return _NextSessionRecommendationAdjustment(
+      score: score,
+      recommendation: recommendation,
+      reason: '',
+    );
+  }
+
+  final probability = (prediction.downsideRiskProbability * 100).round();
+  final reason =
+      '次交易日回调风险：${prediction.scenarioTags.take(2).join('、')}，下跌风险约$probability%，不追高，等待回踩确认';
+  if (!isAggressiveBuy) {
+    return _NextSessionRecommendationAdjustment(
+      score: score,
+      recommendation: recommendation,
+      reason: reason,
+    );
+  }
+
+  final cappedScore = score.clamp(0, 6).toInt();
+  return _NextSessionRecommendationAdjustment(
+    score: cappedScore,
+    recommendation: _recommendationFromScore(cappedScore, quote),
+    reason: reason,
+  );
+}
+
+class _NextSessionRecommendationAdjustment {
+  final int score;
+  final String recommendation;
+  final String reason;
+
+  const _NextSessionRecommendationAdjustment({
+    required this.score,
+    required this.recommendation,
+    required this.reason,
+  });
 }
 
 List<String> _generateReasons(

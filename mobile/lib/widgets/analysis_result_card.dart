@@ -45,7 +45,8 @@ class AnalysisResultCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: _getRecommendationColor(),
                   borderRadius: BorderRadius.circular(4),
@@ -59,7 +60,8 @@ class AnalysisResultCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: _getRiskLevelColor(),
                   borderRadius: BorderRadius.circular(4),
@@ -79,6 +81,131 @@ class AnalysisResultCard extends StatelessWidget {
   }
 
   /// 10级评分可视化
+  Map<String, dynamic>? get _nextSessionPrediction {
+    final raw = analysis.nextDayPrediction?['next_session'];
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return analysis.nextDayPrediction;
+  }
+
+  Widget _buildNextSessionPrediction(
+    BuildContext context,
+    TextTheme textTheme,
+  ) {
+    final prediction = _nextSessionPrediction!;
+    final openUp = _asDouble(prediction['next_open_up_probability']);
+    final closeUp = _asDouble(prediction['next_close_up_probability']);
+    final downside = _asDouble(prediction['downside_risk_probability']);
+    final confidence = _asDouble(prediction['confidence']);
+    final sampleCount = _asInt(prediction['sample_count']);
+    final tags = _asStringList(prediction['scenario_tags']);
+    final warnings = _asStringList(prediction['risk_warnings']);
+    final color = downside >= 0.55
+        ? const Color(0xFFef5350)
+        : closeUp >= 0.6
+            ? const Color(0xFF26a69a)
+            : const Color(0xFFffb74d);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1117),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '\u6b21\u4ea4\u6613\u9884\u6d4b',
+                style: textTheme.titleMedium?.copyWith(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                '\u6837\u672c $sampleCount | \u7f6e\u4fe1 ${_formatPercent(confidence)}',
+                style: textTheme.bodySmall?.copyWith(color: Colors.white54),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              _buildPredictionChip(
+                textTheme,
+                '\u5f00\u76d8\u4e0a\u6da8 ${_formatPercent(openUp)}',
+                const Color(0xFF8bc34a),
+              ),
+              _buildPredictionChip(
+                textTheme,
+                '\u6536\u76d8\u4e0a\u6da8 ${_formatPercent(closeUp)}',
+                const Color(0xFF26a69a),
+              ),
+              _buildPredictionChip(
+                textTheme,
+                '\u4e0b\u8dcc\u98ce\u9669 ${_formatPercent(downside)}',
+                const Color(0xFFef5350),
+              ),
+            ],
+          ),
+          if (tags.isNotEmpty || warnings.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              [...tags, ...warnings].take(4).join(' / '),
+              style: textTheme.bodySmall?.copyWith(color: Colors.white60),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPredictionChip(
+    TextTheme textTheme,
+    String label,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: textTheme.bodySmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  double _asDouble(dynamic value) {
+    if (value is num) return value.toDouble().clamp(0.0, 1.0);
+    return 0;
+  }
+
+  int _asInt(dynamic value) {
+    if (value is num) return value.toInt();
+    return 0;
+  }
+
+  List<String> _asStringList(dynamic value) {
+    if (value is List) return value.map((e) => e.toString()).toList();
+    return const [];
+  }
+
+  String _formatPercent(double value) => '${(value * 100).round()}%';
+
   Widget _build10LevelScore(BuildContext context, TextTheme textTheme) {
     final score = analysis.score;
     final confidence = analysis.confidenceScore;
@@ -89,8 +216,10 @@ class AnalysisResultCard extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('10级评分', style: textTheme.titleMedium?.copyWith(color: Colors.white70)),
-            Text('$score/10', style: textTheme.titleLarge?.copyWith(color: Colors.white)),
+            Text('10级评分',
+                style: textTheme.titleMedium?.copyWith(color: Colors.white70)),
+            Text('$score/10',
+                style: textTheme.titleLarge?.copyWith(color: Colors.white)),
           ],
         ),
         const SizedBox(height: 8),
@@ -103,7 +232,8 @@ class AnalysisResultCard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        Text('推荐可信度：${(confidence * 100).toStringAsFixed(0)}%', style: textTheme.bodySmall?.copyWith(color: Colors.white70)),
+        Text('推荐可信度：${(confidence * 100).toStringAsFixed(0)}%',
+            style: textTheme.bodySmall?.copyWith(color: Colors.white70)),
       ],
     );
   }
@@ -116,7 +246,8 @@ class AnalysisResultCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('可信度评估', style: textTheme.titleMedium?.copyWith(color: Colors.white70)),
+        Text('可信度评估',
+            style: textTheme.titleMedium?.copyWith(color: Colors.white70)),
         const SizedBox(height: 8),
         Row(
           children: [
@@ -141,7 +272,12 @@ class AnalysisResultCard extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 4),
-        Text('综合考虑：共振信号、基本面、市场环境等因素', style: textTheme.bodySmall?.copyWith(color: Colors.white54)),
+        Text('综合考虑：共振信号、基本面、市场环境等因素',
+            style: textTheme.bodySmall?.copyWith(color: Colors.white54)),
+        if (analysis.nextDayPrediction != null) ...[
+          const SizedBox(height: 12),
+          _buildNextSessionPrediction(context, textTheme),
+        ],
       ],
     );
   }
@@ -151,7 +287,8 @@ class AnalysisResultCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('详细理由', style: textTheme.titleMedium?.copyWith(color: Colors.white70)),
+        Text('详细理由',
+            style: textTheme.titleMedium?.copyWith(color: Colors.white70)),
         const SizedBox(height: 12),
         ...List.generate(analysis.detailedReasons.length, (index) {
           final reason = analysis.detailedReasons[index];
@@ -162,11 +299,13 @@ class AnalysisResultCard extends StatelessWidget {
   }
 
   /// 单个理由项
-  Widget _buildReasonItem(BuildContext context, TextTheme textTheme, RecommendationReason reason, int index) {
+  Widget _buildReasonItem(BuildContext context, TextTheme textTheme,
+      RecommendationReason reason, int index) {
     final color = _getConfidenceColor(reason.confidence);
 
     return Container(
-      margin: EdgeInsets.only(bottom: index < analysis.detailedReasons.length - 1 ? 8 : 0),
+      margin: EdgeInsets.only(
+          bottom: index < analysis.detailedReasons.length - 1 ? 8 : 0),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF161B22),
@@ -199,9 +338,10 @@ class AnalysisResultCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: color.withOpacity(0.3),
+                        color: color.withValues(alpha: 0.3),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
@@ -222,7 +362,7 @@ class AnalysisResultCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.2),
+              color: color.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(

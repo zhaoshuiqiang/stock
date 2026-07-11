@@ -11,6 +11,17 @@ import '../validators/data_validator.dart';
 import '../core/stock_code_utils.dart';
 import 'timeshare_parser.dart';
 
+enum SectorCategory {
+  industry,
+  concept,
+}
+
+enum SectorSortMode {
+  gainers,
+  losers,
+  all,
+}
+
 class ApiClient {
   http.Client _client = http.Client();
   HttpClient? _fallbackClient;
@@ -1353,16 +1364,95 @@ class ApiClient {
     return _fetchSectors('concept_sectors', 'm:90+t:3', limit: limit);
   }
 
+  Future<List<SectorInfo>> getSectorRanking({
+    required SectorCategory category,
+    required SectorSortMode sortMode,
+    int page = 1,
+    int limit = 100,
+  }) async {
+    final fs = _sectorFs(category);
+    final categoryKey =
+        category == SectorCategory.industry ? 'industry' : 'concept';
+
+    if (sortMode == SectorSortMode.all) {
+      final gainers = await _fetchSectors(
+        'sector_ranking_${categoryKey}_gainers_p${page}_l$limit',
+        fs,
+        page: page,
+        limit: limit,
+        sortDescending: true,
+      );
+      final losers = await _fetchSectors(
+        'sector_ranking_${categoryKey}_losers_p${page}_l$limit',
+        fs,
+        page: page,
+        limit: limit,
+        sortDescending: false,
+      );
+      return _mergeSectors(gainers, losers);
+    }
+
+    final sortKey = sortMode == SectorSortMode.gainers ? 'gainers' : 'losers';
+    return _fetchSectors(
+      'sector_ranking_${categoryKey}_${sortKey}_p${page}_l$limit',
+      fs,
+      page: page,
+      limit: limit,
+      sortDescending: sortMode == SectorSortMode.gainers,
+    );
+  }
+
+  @visibleForTesting
+  static Uri buildSectorRankingUri({
+    required SectorCategory category,
+    int page = 1,
+    int limit = 30,
+    bool descending = true,
+    String sortField = 'f3',
+  }) {
+    return Uri.https('push2.eastmoney.com', '/api/qt/clist/get', {
+      'pn': page.toString(),
+      'pz': limit.toString(),
+      'po': descending ? '1' : '0',
+      'np': '1',
+      'fltt': '2',
+      'invl': '2',
+      'fid': sortField,
+      'fs': _sectorFs(category),
+      'fields': 'f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
+    });
+  }
+
+  static String _sectorFs(SectorCategory category) {
+    return category == SectorCategory.industry ? 'm:90+t:2' : 'm:90+t:3';
+  }
+
+  List<SectorInfo> _mergeSectors(
+    List<SectorInfo> primary,
+    List<SectorInfo> secondary,
+  ) {
+    final merged = <String, SectorInfo>{};
+    for (final sector in primary.followedBy(secondary)) {
+      final key = sector.code.isNotEmpty ? sector.code : sector.name;
+      merged.putIfAbsent(key, () => sector);
+    }
+    return merged.values.toList();
+  }
+
   /// 通用板块获取方法
   Future<List<SectorInfo>> _fetchSectors(String cacheKey, String fs,
-      {int limit = 30}) async {
+      {int page = 1, int limit = 30, bool sortDescending = true}) async {
     final cached = _getCached(cacheKey);
     if (cached != null) return cached as List<SectorInfo>;
 
     List<SectorInfo>? sectors;
     try {
-      final url = Uri.parse(
-        'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=$limit&po=1&np=1&fltt=2&invl=2&fid=f3&fs=$fs&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141',
+      final url = buildSectorRankingUri(
+        category:
+            fs == 'm:90+t:2' ? SectorCategory.industry : SectorCategory.concept,
+        page: page,
+        limit: limit,
+        descending: sortDescending,
       );
       final response = await _httpGet(url,
           headers: {
