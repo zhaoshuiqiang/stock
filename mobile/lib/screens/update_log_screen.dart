@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.7.20260711',
+        'date': '2026-07-11',
+        'changes': [
+          '发现页面打板梯队/主线龙头/全市场Tab股票卡片新增持仓标识，与持仓页数据关联',
+          '持有的股票在发现页面自动显示蓝色持仓徽章和盈亏信息行',
+          '切换回发现页面时自动刷新持仓状态，确保持仓数据实时同步',
+        ],
+      },
+      {
         'version': 'v3.6.20260711',
         'date': '2026-07-11',
         'changes': [

@@ -70,6 +70,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
   String _exploreSort = '评分'; // 评分 / 涨幅 / 名称
   String _exploreFilter = '全部'; // 全部 / 买入 / 观望
   Set<String> _watchlistCodes = {};
+  Map<String, Position> _positionMap = {}; // code -> Position, 持仓关联
   // 板块精选结果（主线龙头 Tab 数据源）
   List<Map<String, dynamic>> _sectorPickResults = [];
   bool _isPickingSectors = false; // 板块精选引擎运行中
@@ -110,6 +111,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
     });
     _loadExploreFromDb();
     _loadWatchlistCodes();
+    _loadPositions();
     _loadSectorPicks();
 
     // 如果DB无板块精选数据，自动触发一次分析
@@ -207,9 +209,10 @@ class DiscoverScreenState extends State<DiscoverScreen>
     super.dispose();
   }
 
-  /// 切回发现Tab时刷新自选状态
+  /// 切回发现Tab时刷新自选与持仓状态
   void onTabVisible() {
     _loadWatchlistCodes();
+    _loadPositions();
     _loadSectorPicks();
   }
 
@@ -299,6 +302,32 @@ class DiscoverScreenState extends State<DiscoverScreen>
     } catch (e) {
       debugPrint('_loadWatchlistCodes failed: $e');
     }
+  }
+
+  /// 加载持仓数据，用于发现页面展示持仓标识
+  Future<void> _loadPositions() async {
+    try {
+      final map = await _dbService.getPositionMap();
+      if (mounted) {
+        setState(() => _positionMap = map);
+      }
+    } catch (e) {
+      debugPrint('_loadPositions failed: $e');
+    }
+  }
+
+  /// 按 code 查找持仓，双向兼容带/不带 sh/sz/bj 前缀的记录
+  Position? _findPosition(String code) {
+    final exact = _positionMap[code];
+    if (exact != null) return exact;
+    final normalized = code.replaceFirst(RegExp(r'^(sh|sz|bj)', caseSensitive: false), '');
+    final byNormalized = _positionMap[normalized];
+    if (byNormalized != null) return byNormalized;
+    for (final p in _positionMap.values) {
+      final pNorm = p.code.replaceFirst(RegExp(r'^(sh|sz|bj)', caseSensitive: false), '');
+      if (pNorm == normalized) return p;
+    }
+    return null;
   }
 
   Future<void> _loadSectorPicks() async {
@@ -1520,6 +1549,9 @@ class DiscoverScreenState extends State<DiscoverScreen>
 
   Widget _buildExploreCard(ExploreResult r, int rank, {String? accentTag}) {
     final isInWatchlist = _watchlistCodes.contains(r.code);
+    // 持仓关联：检查该股票是否在持仓中
+    final position = _findPosition(r.code);
+    final hasPosition = position != null && position.quantity > 0;
 
     // 信号标签
     final tags = <Widget>[];
@@ -1561,6 +1593,17 @@ class DiscoverScreenState extends State<DiscoverScreen>
       score: r.score,
       recommendation: r.recommendation,
       rank: rank,
+      positionInfo: hasPosition
+          ? PositionInfo(
+              quantity: position.quantity,
+              avgPrice: position.avgPrice,
+              currentPrice: r.price,
+              floatPnl: (r.price - position.avgPrice) * position.quantity,
+              pnlPct: position.avgPrice > 0
+                  ? (r.price - position.avgPrice) / position.avgPrice * 100
+                  : 0.0,
+            )
+          : null,
       tags: tags.isNotEmpty ? tags : null,
       onTap: () {
         Navigator.push(
@@ -1592,6 +1635,9 @@ class DiscoverScreenState extends State<DiscoverScreen>
     final bonus = (p['bonus'] as num?)?.toDouble() ?? 1.0;
     final originalScore = (p['originalScore'] as num?)?.toInt() ?? score;
     final isInWatchlist = _watchlistCodes.contains(code);
+    // 持仓关联
+    final position = _findPosition(code);
+    final hasPosition = position != null && position.quantity > 0;
 
     final tags = <Widget>[
       SignalTag(text: sector, color: _kMainLineColor),
@@ -1604,14 +1650,28 @@ class DiscoverScreenState extends State<DiscoverScreen>
     // 主线龙头实时行情（从 _mainLineQuotes 缓存读取，异步补充）
     // key 统一用带前缀的 code，与 _fetchMainLineQuotes 的 map key 一致
     final quote = _mainLineQuotes[_apiClient.addMarketPrefix(code)];
+    final currentPrice = quote?.price ?? 0.0;
     return StockCard(
       name: name,
       code: code,
-      price: quote?.price ?? 0,
+      price: currentPrice,
       changePct: quote?.changePct ?? 0,
       score: score,
       recommendation: rec,
       rank: rank,
+      positionInfo: hasPosition
+          ? PositionInfo(
+              quantity: position.quantity,
+              avgPrice: position.avgPrice,
+              currentPrice: currentPrice,
+              floatPnl: currentPrice > 0
+                  ? (currentPrice - position.avgPrice) * position.quantity
+                  : null,
+              pnlPct: position.avgPrice > 0 && currentPrice > 0
+                  ? (currentPrice - position.avgPrice) / position.avgPrice * 100
+                  : null,
+            )
+          : null,
       tags: tags,
       onTap: () => _navigateToQuote(code, name),
       trailing: IconButton(
