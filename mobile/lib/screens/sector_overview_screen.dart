@@ -88,15 +88,15 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
         );
       },
       child: Container(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
           color: backgroundColor,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(6),
           border: Border.all(
             color: isUp
                 ? const Color(0xFFef5350).withValues(alpha: 0.3)
                 : const Color(0xFF26a69a).withValues(alpha: 0.3),
-            width: 1,
+            width: 0.8,
           ),
         ),
         child: Column(
@@ -106,37 +106,37 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
               sector.name,
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 13,
+                fontSize: 12,
                 fontWeight: FontWeight.w500,
               ),
               overflow: TextOverflow.ellipsis,
               maxLines: 1,
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 2),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
                   isUp ? Icons.trending_up : Icons.trending_down,
                   color: color,
-                  size: 13,
+                  size: 11,
                 ),
-                const SizedBox(width: 3),
+                const SizedBox(width: 2),
                 Text(
                   '${isUp ? '+' : ''}${sector.changePct.toStringAsFixed(2)}%',
                   style: TextStyle(
                     color: color,
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ],
             ),
             if (sector.leadStockName.isNotEmpty) ...[
-              const SizedBox(height: 3),
+              const SizedBox(height: 2),
               Text(
                 sector.leadStockName,
-                style: const TextStyle(color: Colors.white54, fontSize: 11),
+                style: const TextStyle(color: Colors.white54, fontSize: 10),
                 overflow: TextOverflow.ellipsis,
                 maxLines: 1,
               ),
@@ -371,15 +371,15 @@ class _SectorOverviewScreenState extends State<SectorOverviewScreen> {
                               final isWide = constraints.maxWidth >= 520;
                               return GridView.builder(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 6,
+                                  horizontal: 8,
+                                  vertical: 4,
                                 ),
                                 gridDelegate:
                                     SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: isWide ? 3 : 2,
-                                  crossAxisSpacing: 8,
-                                  mainAxisSpacing: 8,
-                                  childAspectRatio: isWide ? 2.25 : 1.9,
+                                  crossAxisCount: isWide ? 4 : 3,
+                                  crossAxisSpacing: 6,
+                                  mainAxisSpacing: 6,
+                                  childAspectRatio: isWide ? 2.8 : 2.4,
                                 ),
                                 itemCount: _sectors.length,
                                 itemBuilder: (context, index) {

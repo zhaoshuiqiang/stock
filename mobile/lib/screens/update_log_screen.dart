@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.9.20260711',
+        'date': '2026-07-11',
+        'changes': [
+          '板块概览页面布局优化：每行3列显示（原2列），卡片尺寸缩小，可视数据密度翻倍',
+          '减小板块卡片内边距、圆角和字体，间距更紧凑，同屏展示更多板块信息',
+          '板块卡片边框变细，视觉更清爽',
+        ],
+      },
+      {
         'version': 'v3.8.20260711',
         'date': '2026-07-11',
         'changes': [
