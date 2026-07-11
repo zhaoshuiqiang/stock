@@ -178,7 +178,7 @@ class IntradayLevelAnalyzer {
     rawSignals.addAll(_detectSpikeExhaustion(prices, volumes, offsets, preClose, baseAmplitude, currentOffset));
 
     // 5. 应用趋势过滤器
-    _applyTrendFilter(rawSignals, trend);
+    _applyTrendFilter(rawSignals, trend, trendScore);
 
     // 6. 应用多信号共振加成
     _applyMultiConfirm(rawSignals, baseAmplitude);
@@ -916,16 +916,26 @@ class IntradayLevelAnalyzer {
   }
 
   // ============================================================
-  // 5. 趋势过滤器
+  // 5. 趋势过滤器 (P1: 渐进式抑制)
   // ============================================================
+  /// 根据趋势方向与强度渐进抑制反向信号
+  /// - 弱趋势(score=2): 仅抑制15%
+  /// - 中等趋势(score=3): 抑制30%
+  /// - 强趋势(score=4-5): 抑制50%
+  /// - 中性趋势(score<2): 不抑制
+  static void _applyTrendFilter(List<IntradayLevelPoint> signals, IntradayTrend trend, double trendScore) {
+    if (trend == IntradayTrend.neutral) return;
 
-  static void _applyTrendFilter(List<IntradayLevelPoint> signals, IntradayTrend trend) {
-    const suppressionFactor = 0.6;
+    // 渐进式乘法系数：abs(trendScore)越大，抑制越强
+    // abs=2 → factor=0.85, abs=3 → 0.70, abs=5 → 0.50
+    final absScore = trendScore.abs();
+    final factor = (1.0 - (absScore - 1) * 0.15).clamp(0.5, 1.0);
+
     for (final signal in signals) {
       if (trend == IntradayTrend.bullish && signal.direction == IntradayDirection.sell) {
-        _updateConfidence(signal, signal.confidence * suppressionFactor);
+        _updateConfidence(signal, signal.confidence * factor);
       } else if (trend == IntradayTrend.bearish && signal.direction == IntradayDirection.buy) {
-        _updateConfidence(signal, signal.confidence * suppressionFactor);
+        _updateConfidence(signal, signal.confidence * factor);
       }
     }
   }

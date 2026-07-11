@@ -53,6 +53,21 @@ void main() {
           todayPool: today, yesterdayPool: yesterday, todayQuotePct: {});
         expect(r.continuationRate, 0.5);
       });
+
+      test('全高度晋级率：1→2(50%), 2→3(60%) → 加权52.5%', () {
+        final yesterday = <LimitUpAnalysis>[
+          ...List.generate(10, (i) => LimitUpAnalysis(code: '00$i', name: 'Y1$i', consecutiveDays: 1)),
+          ...List.generate(5, (i) => LimitUpAnalysis(code: '10$i', name: 'Y2$i', consecutiveDays: 2)),
+        ];
+        final today = <LimitUpAnalysis>[
+          ...List.generate(5, (i) => LimitUpAnalysis(code: '00$i', name: 'T1$i', consecutiveDays: 2)),
+          ...List.generate(3, (i) => LimitUpAnalysis(code: '10$i', name: 'T2$i', consecutiveDays: 3)),
+        ];
+        final r = SentimentThermometer.compute(
+          todayPool: today, yesterdayPool: yesterday, todayQuotePct: {});
+        // (0.5*10 + 0.6*5) / 15 = (5+3)/15 = 0.533
+        expect(r.continuationRate, closeTo(0.533, 0.01));
+      });
     });
 
     group('moneyMakingEffect', () {

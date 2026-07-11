@@ -72,17 +72,31 @@ class SentimentThermometer {
     return zhaban / pool.length;
   }
 
-  // === 维度 2: 连板晋级率（1板→2板）===
+  // === 维度 2: 连板晋级率（全高度加权平均，P1修复）===
+  /// 统计所有连板高度的晋级情况（1→2, 2→3, ..., N-1→N），按各级样本数加权
   static double _computeContinuationRate(
     List<LimitUpAnalysis> today,
     List<LimitUpAnalysis> yesterday,
   ) {
     if (yesterday.isEmpty) return 0.3;
-    final y1 = yesterday.where((a) => a.consecutiveDays == 1).length;
-    // 晋级率 = 1板→2板，分子只计今日 2板（即昨日 1板晋级而来）
-    final t2 = today.where((a) => a.consecutiveDays == 2).length;
-    if (y1 == 0) return 0.3;
-    return (t2 / y1).clamp(0.0, 1.0);
+
+    // 找出昨日最高连板数，确定需统计的层级数量
+    final maxLevel = yesterday.fold(0, (m, a) => a.consecutiveDays > m ? a.consecutiveDays : m);
+    double totalWeight = 0;
+    double weightedRate = 0;
+
+    for (int level = 1; level <= maxLevel; level++) {
+      final source = yesterday.where((a) => a.consecutiveDays == level).length;
+      if (source == 0) continue;
+      final advanced = today.where((a) => a.consecutiveDays == level + 1).length;
+      final rate = (advanced / source).clamp(0.0, 1.0);
+      // 按源样本数加权：样本越多，统计越可靠
+      weightedRate += rate * source;
+      totalWeight += source;
+    }
+
+    if (totalWeight == 0) return 0.3;
+    return (weightedRate / totalWeight).clamp(0.0, 1.0);
   }
 
   // === 维度 3: 涨停封板成功率 ===
