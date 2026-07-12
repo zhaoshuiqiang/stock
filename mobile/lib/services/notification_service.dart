@@ -93,7 +93,7 @@ class NotificationService {
       return;
     }
 
-    // 资讯/预警：payload 格式 "{url}|{title}"
+    // 资讯：payload 格式 "{url}|{title}"
     final parts = payload.split('|');
     final url = parts[0];
     final title = parts.length > 1 ? parts[1] : '';
@@ -329,7 +329,7 @@ class NotificationService {
               id: notificationId++,
               title: '${rule.name} 预警触发',
               body: desc,
-              payload: codeWithPrefix,
+              payload: 'quote|${rule.code}|${rule.name}',
             );
             // 更新触发时间
             await _dbService.updateAlertTriggerTime(rule.id, DateTime.now());
