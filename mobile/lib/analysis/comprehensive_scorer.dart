@@ -165,10 +165,26 @@ class ComprehensiveScorer {
       }
     }
 
-    // v3.2: 大盘下跌联动折扣 — 指数跌>1%时整体-1分，降低熊市日的虚假买入信号
-    if (marketContext != null && marketContext.avgChangePct < -1.0 &&
-        quote != null && !isSTStock(quote.name)) {
-      temperedScore = (temperedScore - 1.0).clamp(1.0, 10.0);
+    // v3.15: 大盘下跌联动折扣 — 渐进式扣分，跌幅越大扣分越重
+    // 注：此折扣与 getMarketAdjustmentFactor() 的乘数折扣是双重保险设计：
+    //   - 乘数折扣：市场环境对原始评分的系统性调节（combinedAdjustment 权重40%）
+    //   - 加法折扣：普跌日对所有个股的额外扣分，防止虚假买入信号
+    // 双重机制确保普跌日能有效降低买入推荐数量，在熊市日尤其重要
+    if (marketContext != null && quote != null && !isSTStock(quote.name)) {
+      final acp = marketContext.avgChangePct;
+      double declineDeduction = 0;
+      if (acp <= -3.0) {
+        declineDeduction = 2.5;
+      } else if (acp <= -2.0) {
+        declineDeduction = 1.8;
+      } else if (acp <= -1.0) {
+        declineDeduction = 1.0;
+      } else if (acp <= -0.5) {
+        declineDeduction = 0.5;
+      }
+      if (declineDeduction > 0) {
+        temperedScore = (temperedScore - declineDeduction).clamp(1.0, 10.0);
+      }
     }
 
     // v3.2: 金融板块Beta折扣 — 券商/银行/保险股评分×0.88（高Beta行业大盘联动风险大）

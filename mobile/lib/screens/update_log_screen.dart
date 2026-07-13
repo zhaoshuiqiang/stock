@@ -10,6 +10,16 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.15.20260713',
+        'date': '2026-07-13',
+        'changes': [
+          '修复avgChangePct数据源缺陷：东方财富返回的是板块数据，改用加权平均计算全市场平均涨跌幅',
+          '大盘下跌联动折扣从固定-1分改为渐进式扣分：<-3%扣2.5、<-2%扣1.8、<-1%扣1.0、<-0.5%扣0.5',
+          'getMarketAdjustmentFactor()改为渐进式调节：从2档下跌(-4%/-8%)扩展为5档(-2%/-5%/-10%/-15%/-20%)',
+          '修复熊市基本面权重提升、市场环境置信度、市场择时溢价评分等功能(依赖avgChangePct)',
+        ],
+      },
+      {
         'version': 'v3.14.20260711',
         'date': '2026-07-11',
         'changes': [

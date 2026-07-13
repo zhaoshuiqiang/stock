@@ -753,6 +753,7 @@ class MarketContext {
 
   /// 获取市场调节系数（大盘上涨时，个股评分适当提高；大盘下跌时，评分降低）
   /// 极端普涨日（市场宽度 >= 3:1 且涨幅 > 1%）：中性化，避免追涨式推荐
+  /// v3.15: 渐进式调节 — 上涨和下跌均采用多档渐进系数
   double getMarketAdjustmentFactor() {
     final total = upCount + downCount;
     final breadth = total > 0 ? upCount / total : 0.5;
@@ -762,11 +763,16 @@ class MarketContext {
       return 1.0;
     }
 
-    if (avgChangePct > 1.5) return 1.04; // 强势上涨：+4%（原+8%）
-    if (avgChangePct > 0.5) return 1.02; // 上涨：+2%（原+4%）
-    if (avgChangePct > -0.5) return 1.00; // 震荡：0%
-    if (avgChangePct > -1.5) return 0.96; // 下跌：-4%
-    return 0.92; // 强势下跌：-8%
+    // v3.15: 渐进式多档调节 — 上涨和下跌均采用渐进系数
+    if (avgChangePct > 2.0) return 1.05;     // 强势上涨：+5%
+    if (avgChangePct > 1.0) return 1.03;     // 上涨：+3%
+    if (avgChangePct > 0.3) return 1.01;     // 微涨：+1%
+    if (avgChangePct > -0.3) return 1.00;    // 震荡：0%
+    if (avgChangePct > -0.5) return 0.98;    // 微跌：-2%
+    if (avgChangePct > -1.0) return 0.95;    // 下跌：-5%
+    if (avgChangePct > -2.0) return 0.90;    // 明显下跌：-10%
+    if (avgChangePct > -3.0) return 0.85;    // 大跌：-15%
+    return 0.80;                              // 暴跌：-20%
   }
 
   Map<String, dynamic> toJson() {

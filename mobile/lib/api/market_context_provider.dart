@@ -158,6 +158,8 @@ class MarketContextProvider {
           double szIndexPct = 0;
           int upCount = 0;
           int downCount = 0;
+          double weightedSum = 0;
+          int totalStocks = 0;
 
           for (final item in diff) {
             final m = item as Map<String, dynamic>;
@@ -174,7 +176,14 @@ class MarketContextProvider {
 
             upCount += riseCount;
             downCount += fallCount;
+
+            // v3.15: 加权平均计算全市场平均涨跌幅
+            final sectorStocks = riseCount + fallCount;
+            weightedSum += changePct * sectorStocks;
+            totalStocks += sectorStocks;
           }
+
+          final avgChangePct = totalStocks > 0 ? weightedSum / totalStocks : 0.0;
 
           return MarketContext(
             shIndexPct: shIndexPct,
@@ -183,7 +192,7 @@ class MarketContextProvider {
             marketTrend: _classifyMarketTrend(shIndexPct),
             upCount: upCount,
             downCount: downCount,
-            avgChangePct: 0,
+            avgChangePct: avgChangePct,
             updateTime: DateTime.now(),
           );
         }

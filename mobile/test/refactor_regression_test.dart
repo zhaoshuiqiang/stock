@@ -730,6 +730,37 @@ void main() {
       expect(result.score, lessThanOrEqualTo(5));
       expect(result.recommendation, anyOf('偏空观望', '谨慎卖出', '卖出', '强烈卖出'));
     });
+
+    // v3.15: 大盘下跌联动折扣 — 渐进式扣分测试
+    test('中度下跌市场(-1.58%)应触发-1.0扣分', () {
+      final data = _uptrendData(count: 80);
+      final quote = _sampleQuote(changePct: 2.0, mainNetFlowRate: 3.0);
+      final mc = _sampleMarketContext(
+          avgChangePct: -1.58, shIndexPct: -1.5, szIndexPct: -1.3);
+      final result = generateAnalysis(data, quote, marketContext: mc);
+      // 大盘下跌联动折扣应降低评分
+      expect(result.score, lessThanOrEqualTo(7));
+    });
+
+    test('大跌市场(<-3%)应触发-2.5扣分', () {
+      final data = _uptrendData(count: 80);
+      final quote = _sampleQuote(changePct: 2.0, mainNetFlowRate: 3.0);
+      final mc = _sampleMarketContext(
+          avgChangePct: -3.5, shIndexPct: -3.0, szIndexPct: -3.2);
+      final result = generateAnalysis(data, quote, marketContext: mc);
+      // -3.5% 应触发最重扣分，评分应更低
+      expect(result.score, lessThanOrEqualTo(6));
+    });
+
+    test('微跌市场(-0.5~-1.0%)应触发-0.5扣分', () {
+      final data = _uptrendData(count: 80);
+      final quote = _sampleQuote(changePct: 1.0, mainNetFlowRate: 2.0);
+      final mc = _sampleMarketContext(
+          avgChangePct: -0.7, shIndexPct: -0.5, szIndexPct: -0.3);
+      final result = generateAnalysis(data, quote, marketContext: mc);
+      // 微跌下仍可能偏多，但评分不应过高
+      expect(result.score, lessThanOrEqualTo(8));
+    });
   });
 
   // ============================================================
