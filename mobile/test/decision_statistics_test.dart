@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stock_analyzer/analysis/decision_statistics.dart';
-import 'package:stock_analyzer/models/short_term_decision.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 
 void main() {

@@ -1,6 +1,6 @@
 name: stock_analyzer
 description: 增强型股票分析系统 - Android客户端
-version: 3.15.20260713
+version: 3.16.20260715
 publish_to: 'none'
 
 environment:

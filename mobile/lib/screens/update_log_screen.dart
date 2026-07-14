@@ -10,6 +10,17 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.16.20260715',
+        'date': '2026-07-15',
+        'changes': [
+          '短线决策升级为方向、交易质量、风险和证据置信四维独立评分',
+          '新增1/3/5交易日前复权收益、Alpha、MFE/MAE和可执行性追踪',
+          '新增防数据泄漏的历史概率校准、Wilson区间、Brier和ECE信用指标',
+          '归档与推荐统计支持新模型/历史口径切换，新旧样本不再混合',
+          '新增版本化决策CSV导出，保留原历史归档18列导出格式',
+        ],
+      },
+      {
         'version': 'v3.15.20260713',
         'date': '2026-07-13',
         'changes': [
