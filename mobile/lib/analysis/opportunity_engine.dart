@@ -2,13 +2,36 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../api/api_client.dart';
+import '../api/market_context_provider.dart';
 import '../core/stock_code_utils.dart';
+import '../models/short_term_decision.dart';
 import '../models/stock_models.dart';
 import 'base_analysis_engine.dart';
 import 'indicators.dart';
 import 'signal_engine.dart';
 import 'market_timing.dart';
 import '../storage/database_service.dart';
+
+typedef OpportunityAnalysisGenerator = AnalysisResult Function(
+  List<HistoryKline> data,
+  QuoteData? quote, {
+  MarketContext? marketContext,
+  bool enableAsyncSideEffects,
+});
+
+AnalysisResult generateOpportunityAnalysisForTesting({
+  required List<HistoryKline> calculated,
+  required QuoteData? quote,
+  required MarketContext? marketContext,
+  required OpportunityAnalysisGenerator generator,
+}) {
+  return generator(
+    calculated,
+    quote,
+    marketContext: marketContext,
+    enableAsyncSideEffects: false,
+  );
+}
 
 /// 机会分析结果
 class OpportunityResult {
@@ -24,6 +47,7 @@ class OpportunityResult {
   final int activeStrategyCount;
   final int confluenceScore;
   final Map<String, dynamic>? tradeLevels;
+  final ShortTermDecision? shortTermDecision;
   final List<String> topSignals;
 
   OpportunityResult({
@@ -39,6 +63,7 @@ class OpportunityResult {
     required this.activeStrategyCount,
     required this.confluenceScore,
     this.tradeLevels,
+    this.shortTermDecision,
     this.topSignals = const [],
   });
 
@@ -63,14 +88,19 @@ class OpportunityResult {
 
   static OpportunityResult fromMap(Map<String, dynamic> map) {
     Map<String, dynamic>? tradeLevels;
-    if (map['trade_levels_json'] != null && (map['trade_levels_json'] as String).isNotEmpty) {
+    if (map['trade_levels_json'] != null &&
+        (map['trade_levels_json'] as String).isNotEmpty) {
       try {
         tradeLevels = jsonDecode(map['trade_levels_json'] as String);
       } catch (_) {}
     }
     List<String> topSignals = [];
-    if (map['top_signals'] != null && (map['top_signals'] as String).isNotEmpty) {
-      topSignals = (map['top_signals'] as String).split('  ').where((s) => s.isNotEmpty).toList();
+    if (map['top_signals'] != null &&
+        (map['top_signals'] as String).isNotEmpty) {
+      topSignals = (map['top_signals'] as String)
+          .split('  ')
+          .where((s) => s.isNotEmpty)
+          .toList();
     }
     return OpportunityResult(
       code: map['code'] as String,
@@ -91,7 +121,15 @@ class OpportunityResult {
 }
 
 /// 机会分析进度状态
-enum OpportunityStatus { idle, fetching, analyzing, saving, complete, error, alreadyRunning }
+enum OpportunityStatus {
+  idle,
+  fetching,
+  analyzing,
+  saving,
+  complete,
+  error,
+  alreadyRunning
+}
 
 /// 机会分析进度信息
 class OpportunityProgress {
@@ -126,35 +164,50 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
 
   /// 执行机会分析（优化版：MarketTiming仅计算一次，并发度提升，K线天数缩减）
   Future<void> analyze() async {
-    if (!tryStart(OpportunityProgress(status: OpportunityStatus.alreadyRunning))) return;
+    if (!tryStart(
+        OpportunityProgress(status: OpportunityStatus.alreadyRunning))) {
+      return;
+    }
 
     try {
       // 1. 获取自选列表
       emit(OpportunityProgress(status: OpportunityStatus.fetching));
       final watchlist = await _dbService.getWatchlist();
       if (watchlist.isEmpty) {
-        emit(OpportunityProgress(status: OpportunityStatus.complete, results: [], totalCount: 0));
+        emit(OpportunityProgress(
+            status: OpportunityStatus.complete, results: [], totalCount: 0));
         return;
       }
       final totalCount = watchlist.length;
 
       // 2. 批量获取行情 + 市场环境（并行）
-      final prefixedCodes = watchlist.map((item) => _apiClient.addMarketPrefix(item.code)).toList();
+      final prefixedCodes = watchlist
+          .map((item) => _apiClient.addMarketPrefix(item.code))
+          .toList();
       final futures = <Future>[
-        _apiClient.getBatchRealtimeQuotes(prefixedCodes).catchError((_) => <QuoteData>[]),
+        _apiClient
+            .getBatchRealtimeQuotes(prefixedCodes)
+            .catchError((_) => <QuoteData>[]),
         MarketTiming.fetchTiming(),
+        MarketContextProvider.getMarketContext()
+            .then<MarketContext?>((value) => value)
+            .catchError((_) => null),
       ];
-      final results_futures = await Future.wait(futures);
-      final batchQuotes = results_futures[0] as List<QuoteData>;
+      final futureResults = await Future.wait(futures);
+      final batchQuotes = futureResults[0] as List<QuoteData>;
 
       final quoteMap = <String, QuoteData>{};
       for (final q in batchQuotes) {
         quoteMap[q.code] = q;
       }
 
-      final marketTimingResult = results_futures[1] as MarketTimingResult?;
+      final marketTimingResult = futureResults[1] as MarketTimingResult?;
+      final marketContext = futureResults[2] as MarketContext?;
 
-      emit(OpportunityProgress(status: OpportunityStatus.analyzing, totalCount: totalCount, completedCount: 0));
+      emit(OpportunityProgress(
+          status: OpportunityStatus.analyzing,
+          totalCount: totalCount,
+          completedCount: 0));
 
       // 3. 分批分析，并发10（与发现页一致使用120天K线）
       const batchSize = 10;
@@ -163,31 +216,44 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       int completedCount = 0;
 
       for (int i = 0; i < watchlist.length; i += batchSize) {
-        final batch = watchlist.sublist(i, (i + batchSize).clamp(0, watchlist.length));
+        final batch =
+            watchlist.sublist(i, (i + batchSize).clamp(0, watchlist.length));
         final batchResults = await Future.wait(batch.map((item) async {
           try {
             final prefixedCode = _apiClient.addMarketPrefix(item.code);
             QuoteData? quote = quoteMap[prefixedCode];
             if (quote == null) {
-              try { quote = await _apiClient.getRealtimeQuote(prefixedCode); } catch (_) {}
+              try {
+                quote = await _apiClient.getRealtimeQuote(prefixedCode);
+              } catch (_) {}
             }
 
-            final klines = await _apiClient.getStockHistory(prefixedCode, days: klineDays);
+            final klines =
+                await _apiClient.getStockHistory(prefixedCode, days: klineDays);
             if (klines.isEmpty) return null;
 
             final calculated = calcAllIndicators(klines);
-            final analysis = generateAnalysis(calculated, quote);
+            final analysis = generateOpportunityAnalysisForTesting(
+              calculated: calculated,
+              quote: quote,
+              marketContext: marketContext,
+              generator: generateAnalysis,
+            );
 
             final signals = analysis.signals;
             final last = calculated.last;
-            final topSignals = signals.take(2).map((s) =>
-                '${s.type == 'buy' ? '▲' : '▼'}${s.signal}').toList();
+            final topSignals = signals
+                .take(2)
+                .map((s) => '${s.type == 'buy' ? '▲' : '▼'}${s.signal}')
+                .toList();
 
             return OpportunityResult(
-              code: StockCodeUtils.normalizeForArchive(item.code), name: item.name,
+              code: StockCodeUtils.normalizeForArchive(item.code),
+              name: item.name,
               price: quote?.price ?? last.close,
               changePct: quote?.changePct ?? last.changePct,
-              score: analysis.score, recommendation: analysis.recommendation,
+              score: analysis.score,
+              recommendation: analysis.recommendation,
               riskLevel: analysis.riskLevel,
               buySignalCount: signals.where((s) => s.type == 'buy').length,
               sellSignalCount: signals.where((s) => s.type == 'sell').length,
@@ -197,15 +263,20 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
               ].where((s) => s.isActive).length,
               confluenceScore: analysis.confluenceScore,
               tradeLevels: analysis.tradeLevels,
+              shortTermDecision: analysis.shortTermDecision,
               topSignals: topSignals,
             );
-          } catch (_) { return null; }
+          } catch (_) {
+            return null;
+          }
         }));
 
         results.addAll(batchResults);
         completedCount += batch.length;
-        emit(OpportunityProgress(status: OpportunityStatus.analyzing,
-            totalCount: totalCount, completedCount: completedCount.clamp(0, totalCount)));
+        emit(OpportunityProgress(
+            status: OpportunityStatus.analyzing,
+            totalCount: totalCount,
+            completedCount: completedCount.clamp(0, totalCount)));
       }
 
       // 4. 排序并保存
@@ -224,11 +295,15 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       await _dbService.replaceOpportunityResults(
           opportunities.map((o) => o.toMap(DateTime.now())).toList());
 
-      emit(OpportunityProgress(status: OpportunityStatus.complete,
-          results: opportunities, totalCount: totalCount, completedCount: totalCount,
+      emit(OpportunityProgress(
+          status: OpportunityStatus.complete,
+          results: opportunities,
+          totalCount: totalCount,
+          completedCount: totalCount,
           marketTiming: marketTimingResult));
     } catch (e) {
-      emit(OpportunityProgress(status: OpportunityStatus.error, message: '分析出错：$e'));
+      emit(OpportunityProgress(
+          status: OpportunityStatus.error, message: '分析出错：$e'));
     } finally {
       markFinished();
     }
