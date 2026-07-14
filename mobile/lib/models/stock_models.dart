@@ -4,6 +4,7 @@ import '../analysis/backtest_engine.dart';
 import '../analysis/market_structure_analyzer.dart';
 import '../analysis/percentile_analyzer.dart';
 import '../analysis/limit_up_analyzer.dart';
+import 'short_term_decision.dart';
 
 enum DataConfidence { high, medium, low }
 
@@ -917,6 +918,7 @@ class AnalysisResult {
   final Map<String, dynamic>? momentumPersistence;
   final Map<String, dynamic>? nextDayPrediction;
   final List<SignalItem>? earlyWarningSignals;
+  final ShortTermDecision? shortTermDecision;
 
   AnalysisResult({
     this.quote,
@@ -951,6 +953,7 @@ class AnalysisResult {
     this.momentumPersistence,
     this.nextDayPrediction,
     this.earlyWarningSignals,
+    this.shortTermDecision,
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {
@@ -1082,6 +1085,13 @@ class AnalysisResult {
           ? Map<String, dynamic>.from(json['next_day_prediction'] as Map)
           : null,
       earlyWarningSignals: earlyWarningSignals,
+      shortTermDecision: json['short_term_decision'] is Map
+          ? ShortTermDecision.fromJson(
+              Map<String, dynamic>.from(
+                json['short_term_decision'] as Map,
+              ),
+            )
+          : null,
     );
   }
 
@@ -1129,6 +1139,7 @@ class AnalysisResult {
       'next_day_prediction': nextDayPrediction,
       'early_warning_signals':
           earlyWarningSignals?.map((s) => s.toJson()).toList(),
+      'short_term_decision': shortTermDecision?.toJson(),
     };
   }
 
@@ -1165,6 +1176,7 @@ class AnalysisResult {
     Map<String, dynamic>? momentumPersistence,
     Map<String, dynamic>? nextDayPrediction,
     List<SignalItem>? earlyWarningSignals,
+    ShortTermDecision? shortTermDecision,
   }) {
     return AnalysisResult(
       quote: quote ?? this.quote,
@@ -1199,6 +1211,7 @@ class AnalysisResult {
       momentumPersistence: momentumPersistence ?? this.momentumPersistence,
       nextDayPrediction: nextDayPrediction ?? this.nextDayPrediction,
       earlyWarningSignals: earlyWarningSignals ?? this.earlyWarningSignals,
+      shortTermDecision: shortTermDecision ?? this.shortTermDecision,
     );
   }
 }
