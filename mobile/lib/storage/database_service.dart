@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import '../models/stock_models.dart';
+import '../models/short_term_decision.dart';
 import '../analysis/limit_up_analyzer.dart';
 import 'decision_tracking_schema.dart';
 
@@ -1434,6 +1435,125 @@ class DatabaseService {
     final rows = await db.query('sentiment', limit: 1);
     if (rows.isEmpty) return null;
     return SentimentResult.fromMap(rows.first);
+  }
+
+  Future<int> saveDecisionSnapshotWithOutcomes(
+    DecisionSnapshotRecord snapshot, {
+    Map<int, CalibrationEstimate> calibrations = const {},
+  }) async {
+    final db = await database;
+    return db.transaction((txn) async {
+      final snapshotMap = Map<String, dynamic>.from(snapshot.toMap())
+        ..remove('id');
+      var snapshotId = await txn.insert(
+        'decision_snapshots',
+        snapshotMap,
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      if (snapshotId == 0) {
+        final existing = await txn.query(
+          'decision_snapshots',
+          columns: const ['id'],
+          where:
+              'code = ? AND source = ? AND signal_trade_date = ? AND model_version = ?',
+          whereArgs: [
+            snapshot.code,
+            snapshot.source,
+            snapshotMap['signal_trade_date'],
+            snapshot.modelVersion,
+          ],
+          limit: 1,
+        );
+        if (existing.isEmpty) {
+          throw StateError('Decision snapshot conflict could not be resolved');
+        }
+        snapshotId = (existing.first['id'] as num).toInt();
+      }
+
+      final predictionCreatedAt = snapshot.createdAt.millisecondsSinceEpoch;
+      for (final horizon in const [1, 3, 5]) {
+        final estimate = calibrations[horizon];
+        await txn.insert(
+          'decision_outcomes',
+          {
+            'snapshot_id': snapshotId,
+            'horizon': horizon,
+            if (estimate != null) ...{
+              'predicted_probability': estimate.probability,
+              'predicted_sample_count': estimate.sampleCount,
+              'predicted_wilson_lower': estimate.wilsonLower,
+              'predicted_wilson_upper': estimate.wilsonUpper,
+              'prediction_created_at': predictionCreatedAt,
+            },
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+      return snapshotId;
+    });
+  }
+
+  Future<DecisionSnapshotRecord?> getDecisionSnapshot(int id) async {
+    final db = await database;
+    final rows = await db.query(
+      'decision_snapshots',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : DecisionSnapshotRecord.fromMap(rows.first);
+  }
+
+  Future<List<DecisionOutcomeRecord>> getDecisionOutcomes(
+      int snapshotId) async {
+    final db = await database;
+    final rows = await db.query(
+      'decision_outcomes',
+      where: 'snapshot_id = ?',
+      whereArgs: [snapshotId],
+      orderBy: 'horizon ASC',
+    );
+    return rows.map(DecisionOutcomeRecord.fromMap).toList(growable: false);
+  }
+
+  Future<List<DecisionEvaluationWorkItem>> getPendingDecisionWorkItems({
+    int limit = 100,
+  }) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT o.*
+      FROM decision_outcomes o
+      JOIN decision_snapshots s ON s.id = o.snapshot_id
+      WHERE o.status = 'pending'
+      ORDER BY s.signal_trade_date ASC, o.horizon ASC
+      LIMIT ?
+    ''', [limit]);
+    final result = <DecisionEvaluationWorkItem>[];
+    for (final row in rows) {
+      final outcome = DecisionOutcomeRecord.fromMap(row);
+      final snapshot = await getDecisionSnapshot(outcome.snapshotId);
+      if (snapshot != null) {
+        result.add(DecisionEvaluationWorkItem(
+          snapshot: snapshot,
+          outcome: outcome,
+        ));
+      }
+    }
+    return result;
+  }
+
+  Future<void> saveDecisionOutcome(DecisionOutcomeRecord outcome) async {
+    if (outcome.id == null) {
+      throw ArgumentError('Decision outcome id is required for updates');
+    }
+    final db = await database;
+    final map = Map<String, dynamic>.from(outcome.toMap())..remove('id');
+    await db.update(
+      'decision_outcomes',
+      map,
+      where: 'id = ?',
+      whereArgs: [outcome.id],
+    );
   }
 
   static String _formatSnapshotDate(DateTime date) =>

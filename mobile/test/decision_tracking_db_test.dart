@@ -1,6 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:stock_analyzer/storage/database_service.dart';
+import 'package:stock_analyzer/storage/decision_tracking_schema.dart';
+import 'package:stock_analyzer/models/short_term_decision.dart';
+import 'package:stock_analyzer/models/stock_models.dart';
 
 void main() {
   setUpAll(() {
@@ -63,7 +66,72 @@ void main() {
     expect(await db.query('decision_outcomes'), isEmpty);
     await db.close();
   });
+
+  test('atomic save is idempotent and creates calibrated 1/3/5 outcomes',
+      () async {
+    final db = await _openTrackingDb();
+    final service = DatabaseService();
+    service.resetForTesting();
+    await service.setDatabaseForTesting(db);
+    final snapshot = DecisionSnapshotRecord.minimalForTesting(
+      code: '000001',
+      signalTradeDate: DateTime(2026, 7, 14),
+    );
+    final calibration = CalibrationEstimate(
+      horizon: 3,
+      probability: 0.67,
+      sampleCount: 30,
+      wilsonLower: 0.49,
+      wilsonUpper: 0.81,
+    );
+
+    final firstId = await service.saveDecisionSnapshotWithOutcomes(
+      snapshot,
+      calibrations: {3: calibration},
+    );
+    final secondId = await service.saveDecisionSnapshotWithOutcomes(snapshot);
+
+    expect(secondId, firstId);
+    expect(await db.query('decision_snapshots'), hasLength(1));
+    final outcomes = await service.getDecisionOutcomes(firstId);
+    expect(outcomes.map((item) => item.horizon), [1, 3, 5]);
+    expect(
+        outcomes.singleWhere((item) => item.horizon == 3).predictedProbability,
+        0.67);
+    expect(
+        outcomes.singleWhere((item) => item.horizon == 1).predictedProbability,
+        isNull);
+    await db.close();
+  });
+
+  test('pending work is typed and ordered by signal date', () async {
+    final db = await _openTrackingDb();
+    final service = DatabaseService();
+    service.resetForTesting();
+    await service.setDatabaseForTesting(db);
+    for (final date in [DateTime(2026, 7, 15), DateTime(2026, 7, 14)]) {
+      await service.saveDecisionSnapshotWithOutcomes(
+        DecisionSnapshotRecord.minimalForTesting(
+          code: date.day == 14 ? '000001' : '000002',
+          signalTradeDate: date,
+        ),
+      );
+    }
+
+    final work = await service.getPendingDecisionWorkItems(limit: 2);
+    expect(work, hasLength(2));
+    expect(work.first.snapshot.signalTradeDate, DateTime(2026, 7, 14));
+    expect(work.first.outcome.status, DecisionOutcomeStatus.pending);
+    await db.close();
+  });
 }
+
+Future<Database> _openTrackingDb() => openDatabase(
+      inMemoryDatabasePath,
+      version: 1,
+      onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+      onCreate: (db, version) => createDecisionTrackingSchema(db),
+    );
 
 Map<String, Object?> _snapshotMap({required double directionScore}) => {
       'code': '000001',
