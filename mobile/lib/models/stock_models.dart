@@ -441,6 +441,16 @@ class DecisionCalibrationRow {
       );
 }
 
+class DecisionStatisticsRow {
+  final DecisionSnapshotRecord snapshot;
+  final DecisionOutcomeRecord outcome;
+
+  const DecisionStatisticsRow({
+    required this.snapshot,
+    required this.outcome,
+  });
+}
+
 enum DataConfidence { high, medium, low }
 
 enum SignalDuration {

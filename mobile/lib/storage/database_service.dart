@@ -1556,6 +1556,90 @@ class DatabaseService {
     );
   }
 
+  Future<List<DecisionCalibrationRow>> getDecisionCalibrationRows({
+    required String modelVersion,
+    required DateTime asOfTradeDate,
+  }) async {
+    final rows = await getDecisionStatisticsRows(modelVersion: modelVersion);
+    final cutoff = _formatSnapshotDate(asOfTradeDate);
+    return rows
+        .where((row) {
+          final target = row.outcome.targetTradeDate;
+          return target != null &&
+              _formatSnapshotDate(target).compareTo(cutoff) < 0;
+        })
+        .map((row) => DecisionCalibrationRow(
+              modelVersion: row.snapshot.modelVersion,
+              horizon: row.outcome.horizon,
+              direction: row.snapshot.direction,
+              directionScore: row.snapshot.directionScore,
+              marketRegime: row.snapshot.marketRegime,
+              signalTradeDate: row.snapshot.signalTradeDate,
+              targetTradeDate: row.outcome.targetTradeDate,
+              status: row.outcome.status,
+              effectiveDirectionHit: row.outcome.effectiveDirectionHit,
+            ))
+        .toList(growable: false);
+  }
+
+  Future<List<DecisionStatisticsRow>> getDecisionStatisticsRows({
+    int? horizon,
+    RecommendationDirection? direction,
+    MarketRegime? marketRegime,
+    String? modelVersion,
+    String? source,
+    String? primaryStrategyId,
+    double? minDirectionScore,
+    double? maxDirectionScore,
+  }) async {
+    final db = await database;
+    final where = <String>[];
+    final args = <Object?>[];
+    void add(String clause, Object? value) {
+      where.add(clause);
+      args.add(value);
+    }
+
+    if (direction != null) add('direction = ?', direction.name);
+    if (marketRegime != null) add('market_regime = ?', marketRegime.name);
+    if (modelVersion != null) add('model_version = ?', modelVersion);
+    if (source != null) add('source = ?', source);
+    if (primaryStrategyId != null) {
+      add('primary_strategy_id = ?', primaryStrategyId);
+    }
+    if (minDirectionScore != null) {
+      add('direction_score >= ?', minDirectionScore);
+    }
+    if (maxDirectionScore != null) {
+      add('direction_score <= ?', maxDirectionScore);
+    }
+    final snapshotRows = await db.query(
+      'decision_snapshots',
+      where: where.isEmpty ? null : where.join(' AND '),
+      whereArgs: args.isEmpty ? null : args,
+      orderBy: 'signal_trade_date DESC, id DESC',
+    );
+    final result = <DecisionStatisticsRow>[];
+    for (final snapshotMap in snapshotRows) {
+      final snapshot = DecisionSnapshotRecord.fromMap(snapshotMap);
+      final outcomeRows = await db.query(
+        'decision_outcomes',
+        where: horizon == null
+            ? 'snapshot_id = ?'
+            : 'snapshot_id = ? AND horizon = ?',
+        whereArgs: horizon == null ? [snapshot.id] : [snapshot.id, horizon],
+        orderBy: 'horizon ASC',
+      );
+      for (final outcomeMap in outcomeRows) {
+        result.add(DecisionStatisticsRow(
+          snapshot: snapshot,
+          outcome: DecisionOutcomeRecord.fromMap(outcomeMap),
+        ));
+      }
+    }
+    return result;
+  }
+
   static String _formatSnapshotDate(DateTime date) =>
       '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 }
