@@ -132,17 +132,22 @@ class ShortTermDecision {
   final double tradeQualityScore;    // 0..100
   final double riskScore;            // 0..100, 越高风险越高
   final double evidenceConfidence;   // 0..100, 非概率
-  final double? calibratedProbability;
-  final int calibratedSampleCount;
+  final Map<int, CalibrationEstimate> calibrationByHorizon; // 1/3/5日
   final RecommendationDirection direction;
   final MarketRegime marketRegime;
   final Map<String, double> directionComponents;
   final Map<String, double> qualityComponents;
   final Map<String, double> riskComponents;
+  final String? primaryStrategyId;
+  final String? primaryStrategyName;
+  final List<String> supportingStrategyIds;
   final List<String> dataQualityFlags;
   final String modelVersion;
 }
 ```
+
+`CalibrationEstimate` 包含 `horizon`、`probability`、`sampleCount`、
+`wilsonLower` 和 `wilsonUpper`。未达到门槛的周期不出现在 Map 中。
 
 `directionScore` 只表达方向，风险变化不得直接改变其正负号。
 
@@ -268,6 +273,15 @@ directionScore = clamp(stockEvidence * 0.80 + marketBias * 0.20, -100, 100)
 
 风险只能改变 `actionable`、仓位级别和推荐强度，不能把看多方向直接改成看空。
 
+### 8.3 主战法选择与归因
+
+每条决策最多选择一个主战法。候选战法必须处于激活状态、属于短线或通用类型、
+方向与最终决策一致，并满足自身 `minConfidence`。按信号强度、盈亏比和方向证据
+排序选择主战法，其余兼容战法只记录为伴随战法。
+
+防守/减仓战法必须明确使用 `type='sell'`。统计时收益只归因给主战法，伴随战法
+仅用于共现分析，不能把同一笔收益重复计入多个战法胜率。
+
 ## 9. 推荐策略
 
 ### 9.1 方向区间
@@ -350,7 +364,8 @@ directionScore = clamp(stockEvidence * 0.80 + marketBias * 0.20, -100, 100)
 posteriorProbability = (hits + globalBaseRate * 20) / (sampleCount + 20)
 ```
 
-`calibratedProbability` 表示对应周期的“有效方向命中”概率，不表示预期收益率。
+每个 `CalibrationEstimate.probability` 表示对应周期的“有效方向命中”概率，
+不表示预期收益率。
 输出同时包含样本数和 Wilson 区间。概率必须在信号生成时写入快照，历史快照不得
 根据已知结果反向补写概率。Brier 使用逐条、信号时已保存的概率计算，ECE 使用
 10 个等宽概率区间计算；空区间不进入加权汇总。冷启动阶段达到样本门槛后可以为
@@ -369,9 +384,10 @@ posteriorProbability = (hits + globalBaseRate * 20) / (sampleCount + 20)
 id, code, name, source, signal_time, signal_trade_date,
 signal_price, adjusted_signal_price, benchmark_code, sector_name,
 direction, direction_score, trade_quality_score, risk_score,
-evidence_confidence, calibrated_probability, calibrated_sample_count,
+evidence_confidence,
 recommendation_level, recommendation_label, legacy_score,
 market_regime, market_change_pct, model_version,
+primary_strategy_id, primary_strategy_name, supporting_strategy_ids_json,
 direction_components_json, quality_components_json,
 risk_components_json, data_quality_flags_json, created_at
 ```
@@ -385,6 +401,8 @@ risk_components_json, data_quality_flags_json, created_at
 
 ```text
 id, snapshot_id, horizon, status, due_trade_date, evaluated_at,
+predicted_probability, predicted_sample_count,
+predicted_wilson_lower, predicted_wilson_upper, prediction_created_at,
 entry_open_price, target_close_price, adjusted_target_close_price,
 forecast_return, executable_return, benchmark_return, alpha_return,
 mfe, mae, raw_direction_hit, effective_direction_hit, alpha_hit,
@@ -460,7 +478,8 @@ corporate_action_detected, invalid_reason
 - 风险；
 - 证据一致性。
 
-达到校准门槛时额外显示校准概率、样本数和周期。未达门槛时不显示百分比占位值。
+达到校准门槛时按当前选择的 1/3/5 日周期显示对应概率、样本数和区间。未达门槛
+的周期不显示百分比占位值。
 
 ### 14.2 留档页
 
@@ -481,6 +500,7 @@ corporate_action_detected, invalid_reason
 - MFE、MAE；
 - Brier、ECE；
 - 分数桶单调性。
+- 主战法独立表现；伴随战法仅展示共现次数。
 
 ### 14.4 CSV 导出
 
@@ -489,6 +509,7 @@ corporate_action_detected, invalid_reason
 ```text
 模型版本, 来源, 信号交易日, 方向, 方向分, 交易质量分, 风险分,
 证据一致性, 校准概率, 校准样本数, 市场状态, 基准指数,
+主战法, 伴随战法,
 趋势证据, 反转动量证据, 量价资金证据, 相对强弱证据, 次日预测证据,
 1日状态, 1日收益, 1日Alpha, 1日MFE, 1日MAE,
 3日状态, 3日收益, 3日Alpha, 3日MFE, 3日MAE,
@@ -581,6 +602,7 @@ corporate_action_detected, invalid_reason
 9. 新统计同时提供绝对收益、Alpha、MFE、MAE 和覆盖率。
 10. 旧数据可读取但不与新口径混算。
 11. 新增测试、相关回归测试和完整测试通过。
+12. 每条新决策最多一个主战法，收益不会重复归因给伴随战法。
 
 ## 19. 后续权重调整准入条件
 
