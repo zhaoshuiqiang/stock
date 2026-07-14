@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import '../analysis/recommendation_tracker.dart';
 import '../analysis/weight_optimizer.dart';
+import '../analysis/decision_statistics.dart';
+import '../storage/database_service.dart';
+import '../models/stock_models.dart';
+import '../widgets/decision_archive_summary.dart';
 
 /// 推荐命中率统计页
 ///
@@ -17,9 +21,13 @@ class RecommendationStatsScreen extends StatefulWidget {
 class _RecommendationStatsScreenState extends State<RecommendationStatsScreen> {
   final RecommendationTracker _tracker = RecommendationTracker();
   final WeightOptimizer _weightOptimizer = WeightOptimizer();
+  final DatabaseService _database = DatabaseService();
   List<Map<String, dynamic>> _allRecords = [];
   List<Map<String, dynamic>> _dimensionReport = [];
+  List<DecisionStatisticsRow> _decisionRows = [];
   bool _isLoading = true;
+  bool _showNewModel = true;
+  int _horizon = 3;
   int _periodDays = 0; // 0=全部, 30/60/90
 
   @override
@@ -32,12 +40,16 @@ class _RecommendationStatsScreenState extends State<RecommendationStatsScreen> {
     try {
       final recordsFuture = _tracker.getMarketWideReflections(limit: 500);
       final reportFuture = _loadDimensionReport();
+      final decisionsFuture =
+          _database.getDecisionStatisticsRows(horizon: _horizon);
       final records = await recordsFuture;
       final dimensionReport = await reportFuture;
+      final decisions = await decisionsFuture;
       if (!mounted) return;
       setState(() {
         _allRecords = records;
         _dimensionReport = dimensionReport;
+        _decisionRows = decisions;
         _isLoading = false;
       });
     } catch (e) {
@@ -77,26 +89,91 @@ class _RecommendationStatsScreenState extends State<RecommendationStatsScreen> {
       body: _isLoading
           ? const Center(
               child: CircularProgressIndicator(color: Color(0xFF58A6FF)))
-          : _allRecords.isEmpty
-              ? _buildEmptyState()
-              : RefreshIndicator(
-                  onRefresh: _loadData,
-                  color: const Color(0xFF58A6FF),
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      _buildPeriodFilter(),
-                      const SizedBox(height: 16),
-                      _buildSummaryCards(),
-                      const SizedBox(height: 16),
-                      _buildDimensionPerformance(),
-                      const SizedBox(height: 16),
-                      _buildStrategyStats(),
-                      const SizedBox(height: 16),
-                      _buildRecentRecords(),
-                    ],
-                  ),
-                ),
+          : _showNewModel
+              ? _buildNewModelBody()
+              : _allRecords.isEmpty
+                  ? _buildEmptyState()
+                  : RefreshIndicator(
+                      onRefresh: _loadData,
+                      color: const Color(0xFF58A6FF),
+                      child: ListView(
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          _modeSwitch(),
+                          const SizedBox(height: 16),
+                          _buildPeriodFilter(),
+                          const SizedBox(height: 16),
+                          _buildSummaryCards(),
+                          const SizedBox(height: 16),
+                          _buildDimensionPerformance(),
+                          const SizedBox(height: 16),
+                          _buildStrategyStats(),
+                          const SizedBox(height: 16),
+                          _buildRecentRecords(),
+                        ],
+                      ),
+                    ),
+    );
+  }
+
+  Widget _modeSwitch() => SegmentedButton<bool>(
+        segments: const [
+          ButtonSegment(value: true, label: Text('新模型')),
+          ButtonSegment(value: false, label: Text('历史口径')),
+        ],
+        selected: {_showNewModel},
+        showSelectedIcon: false,
+        onSelectionChanged: (value) =>
+            setState(() => _showNewModel = value.first),
+      );
+
+  Widget _buildNewModelBody() {
+    final summary = DecisionStatistics.summarize(_decisionRows);
+    return RefreshIndicator(
+      onRefresh: _loadData,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _modeSwitch(),
+          const SizedBox(height: 16),
+          DecisionArchiveSummary(
+            summary: summary,
+            horizon: _horizon,
+            onHorizonChanged: (value) {
+              setState(() => _horizon = value);
+              _loadData();
+            },
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF161B22),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF30363D)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('校准质量',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                Text(
+                    'Brier: ${summary.calibration.brier?.toStringAsFixed(4) ?? '--'}'),
+                Text(
+                    'ECE: ${summary.calibration.ece?.toStringAsFixed(4) ?? '--'}'),
+                Text('概率样本 ${summary.calibration.sampleCount}  '
+                    '信号日 ${summary.calibration.signalDateCount}'),
+              ],
+            ),
+          ),
+          if (_decisionRows.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 60),
+              child: Center(child: Text('暂无成熟的新模型结果')),
+            ),
+        ],
+      ),
     );
   }
 
