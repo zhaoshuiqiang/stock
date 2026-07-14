@@ -11,6 +11,7 @@ import '../analysis/signal_engine.dart';
 import '../storage/database_service.dart';
 import '../analysis/sector_rotation.dart';
 import '../analysis/archive_reliability_evaluator.dart';
+import '../services/legacy_archive_csv_exporter.dart';
 
 const _kVeryReasonableColor = Color(0xFF4CAF50);
 const _kReasonableColor = Colors.orange;
@@ -525,7 +526,11 @@ class ArchiveScreenState extends State<ArchiveScreen>
       }
 
       // 添加 BOM 防止 Excel 打开 CSV 时中文乱码
-      final csvContent = '\uFEFF${lines.join('\n')}';
+      final csvContent = buildLegacyArchiveCsv(
+        records: _archives,
+        quoteOf: (code) => _currentQuotes[code],
+        now: now,
+      );
 
       final stamp = DateFormat('yyyyMMdd_HHmmss').format(now);
       final fileName = 'archive_export_$stamp.csv';
