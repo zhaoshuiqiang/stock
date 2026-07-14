@@ -6,6 +6,393 @@ import '../analysis/percentile_analyzer.dart';
 import '../analysis/limit_up_analyzer.dart';
 import 'short_term_decision.dart';
 
+enum DecisionOutcomeStatus { pending, evaluated, invalid }
+
+const Set<int> _decisionHorizons = <int>{1, 3, 5};
+
+String? _dateOnly(DateTime? value) => value == null
+    ? null
+    : '${value.year.toString().padLeft(4, '0')}-'
+        '${value.month.toString().padLeft(2, '0')}-'
+        '${value.day.toString().padLeft(2, '0')}';
+
+DateTime? _parseDateOnly(dynamic value) =>
+    value is String && value.isNotEmpty ? DateTime.tryParse(value) : null;
+
+bool? _nullableBool(dynamic value) => value == null ? null : value == 1;
+
+dynamic _boolInt(bool? value) => value == null ? null : (value ? 1 : 0);
+
+Map<String, double> _trackingDoubleMap(dynamic value) {
+  final decoded = value is String ? jsonDecode(value) : value;
+  if (decoded is! Map) return const {};
+  return decoded.map(
+    (key, item) => MapEntry(key.toString(), (item as num).toDouble()),
+  );
+}
+
+List<String> _trackingStringList(dynamic value) {
+  final decoded = value is String ? jsonDecode(value) : value;
+  if (decoded is! List) return const [];
+  return decoded.map((item) => item.toString()).toList(growable: false);
+}
+
+class DecisionSnapshotRecord {
+  final int? id;
+  final String code;
+  final String name;
+  final String source;
+  final DateTime signalTime;
+  final DateTime signalTradeDate;
+  final double signalPrice;
+  final double? adjustedSignalPrice;
+  final String benchmarkCode;
+  final String sectorName;
+  final RecommendationDirection direction;
+  final double directionScore;
+  final double tradeQualityScore;
+  final double riskScore;
+  final double evidenceConfidence;
+  final String recommendationLevel;
+  final String recommendationLabel;
+  final int legacyScore;
+  final MarketRegime marketRegime;
+  final double? marketChangePct;
+  final String modelVersion;
+  final String? primaryStrategyId;
+  final String? primaryStrategyName;
+  final List<String> supportingStrategyIds;
+  final Map<String, double> directionComponents;
+  final Map<String, double> qualityComponents;
+  final Map<String, double> riskComponents;
+  final List<String> dataQualityFlags;
+  final DateTime createdAt;
+
+  const DecisionSnapshotRecord({
+    this.id,
+    required this.code,
+    this.name = '',
+    required this.source,
+    required this.signalTime,
+    required this.signalTradeDate,
+    required this.signalPrice,
+    this.adjustedSignalPrice,
+    required this.benchmarkCode,
+    this.sectorName = '',
+    required this.direction,
+    required this.directionScore,
+    required this.tradeQualityScore,
+    required this.riskScore,
+    required this.evidenceConfidence,
+    required this.recommendationLevel,
+    required this.recommendationLabel,
+    required this.legacyScore,
+    required this.marketRegime,
+    this.marketChangePct,
+    required this.modelVersion,
+    this.primaryStrategyId,
+    this.primaryStrategyName,
+    this.supportingStrategyIds = const [],
+    this.directionComponents = const {},
+    this.qualityComponents = const {},
+    this.riskComponents = const {},
+    this.dataQualityFlags = const [],
+    required this.createdAt,
+  });
+
+  factory DecisionSnapshotRecord.minimalForTesting({
+    int? id,
+    required String code,
+    required DateTime signalTradeDate,
+  }) =>
+      DecisionSnapshotRecord(
+        id: id,
+        code: code,
+        source: 'test',
+        signalTime: signalTradeDate,
+        signalTradeDate: signalTradeDate,
+        signalPrice: 1,
+        benchmarkCode: '000300',
+        direction: RecommendationDirection.neutral,
+        directionScore: 0,
+        tradeQualityScore: 0,
+        riskScore: 0,
+        evidenceConfidence: 0,
+        recommendationLevel: 'neutralWatch',
+        recommendationLabel: '中性',
+        legacyScore: 5,
+        marketRegime: MarketRegime.unknown,
+        modelVersion: 'test',
+        createdAt: signalTradeDate,
+      );
+
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        if (id != null) 'id': id,
+        'code': code,
+        'name': name,
+        'source': source,
+        'signal_time': signalTime.millisecondsSinceEpoch,
+        'signal_trade_date': _dateOnly(signalTradeDate),
+        'signal_price': signalPrice,
+        'adjusted_signal_price': adjustedSignalPrice,
+        'benchmark_code': benchmarkCode,
+        'sector_name': sectorName,
+        'direction': direction.name,
+        'direction_score': directionScore,
+        'trade_quality_score': tradeQualityScore,
+        'risk_score': riskScore,
+        'evidence_confidence': evidenceConfidence,
+        'recommendation_level': recommendationLevel,
+        'recommendation_label': recommendationLabel,
+        'legacy_score': legacyScore,
+        'market_regime': marketRegime.name,
+        'market_change_pct': marketChangePct,
+        'model_version': modelVersion,
+        'primary_strategy_id': primaryStrategyId,
+        'primary_strategy_name': primaryStrategyName,
+        'supporting_strategy_ids_json': jsonEncode(supportingStrategyIds),
+        'direction_components_json': jsonEncode(directionComponents),
+        'quality_components_json': jsonEncode(qualityComponents),
+        'risk_components_json': jsonEncode(riskComponents),
+        'data_quality_flags_json': jsonEncode(dataQualityFlags),
+        'created_at': createdAt.millisecondsSinceEpoch,
+      };
+
+  factory DecisionSnapshotRecord.fromMap(Map<String, dynamic> map) =>
+      DecisionSnapshotRecord(
+        id: (map['id'] as num?)?.toInt(),
+        code: map['code'] as String,
+        name: map['name'] as String? ?? '',
+        source: map['source'] as String,
+        signalTime: DateTime.fromMillisecondsSinceEpoch(
+          (map['signal_time'] as num).toInt(),
+        ),
+        signalTradeDate: _parseDateOnly(map['signal_trade_date'])!,
+        signalPrice: (map['signal_price'] as num).toDouble(),
+        adjustedSignalPrice: (map['adjusted_signal_price'] as num?)?.toDouble(),
+        benchmarkCode: map['benchmark_code'] as String,
+        sectorName: map['sector_name'] as String? ?? '',
+        direction: RecommendationDirection.values.byName(
+          map['direction'] as String,
+        ),
+        directionScore: (map['direction_score'] as num).toDouble(),
+        tradeQualityScore: (map['trade_quality_score'] as num).toDouble(),
+        riskScore: (map['risk_score'] as num).toDouble(),
+        evidenceConfidence: (map['evidence_confidence'] as num).toDouble(),
+        recommendationLevel: map['recommendation_level'] as String,
+        recommendationLabel: map['recommendation_label'] as String,
+        legacyScore: (map['legacy_score'] as num).toInt(),
+        marketRegime: MarketRegime.values.byName(
+          map['market_regime'] as String,
+        ),
+        marketChangePct: (map['market_change_pct'] as num?)?.toDouble(),
+        modelVersion: map['model_version'] as String,
+        primaryStrategyId: map['primary_strategy_id'] as String?,
+        primaryStrategyName: map['primary_strategy_name'] as String?,
+        supportingStrategyIds:
+            _trackingStringList(map['supporting_strategy_ids_json']),
+        directionComponents:
+            _trackingDoubleMap(map['direction_components_json']),
+        qualityComponents: _trackingDoubleMap(map['quality_components_json']),
+        riskComponents: _trackingDoubleMap(map['risk_components_json']),
+        dataQualityFlags: _trackingStringList(map['data_quality_flags_json']),
+        createdAt: DateTime.fromMillisecondsSinceEpoch(
+          (map['created_at'] as num).toInt(),
+        ),
+      );
+}
+
+class DecisionOutcomeRecord {
+  final int? id;
+  final int snapshotId;
+  final int horizon;
+  final DecisionOutcomeStatus status;
+  final DateTime? dueTradeDate;
+  final DateTime? entryTradeDate;
+  final DateTime? targetTradeDate;
+  final int deferredTradeDays;
+  final DateTime? evaluatedAt;
+  final double? adjustedSignalPriceUsed;
+  final double? entryOpenPrice;
+  final double? targetClosePrice;
+  final double? adjustedTargetClosePrice;
+  final double? benchmarkSignalClose;
+  final double? benchmarkTargetClose;
+  final double? forecastReturn;
+  final double? executableReturn;
+  final double? benchmarkReturn;
+  final double? alphaReturn;
+  final double? mfe;
+  final double? mae;
+  final bool? rawDirectionHit;
+  final bool? effectiveDirectionHit;
+  final bool? alphaHit;
+  final bool? corporateActionDetected;
+  final bool? executableValid;
+  final String executableInvalidReason;
+  final String invalidReason;
+  final DateTime? lastAttemptedAt;
+  final int attemptCount;
+  final double? predictedProbability;
+  final int predictedSampleCount;
+  final double? predictedWilsonLower;
+  final double? predictedWilsonUpper;
+  final DateTime? predictionCreatedAt;
+
+  DecisionOutcomeRecord({
+    this.id,
+    required this.snapshotId,
+    required this.horizon,
+    this.status = DecisionOutcomeStatus.pending,
+    this.dueTradeDate,
+    this.entryTradeDate,
+    this.targetTradeDate,
+    this.deferredTradeDays = 0,
+    this.evaluatedAt,
+    this.adjustedSignalPriceUsed,
+    this.entryOpenPrice,
+    this.targetClosePrice,
+    this.adjustedTargetClosePrice,
+    this.benchmarkSignalClose,
+    this.benchmarkTargetClose,
+    this.forecastReturn,
+    this.executableReturn,
+    this.benchmarkReturn,
+    this.alphaReturn,
+    this.mfe,
+    this.mae,
+    this.rawDirectionHit,
+    this.effectiveDirectionHit,
+    this.alphaHit,
+    this.corporateActionDetected,
+    this.executableValid,
+    this.executableInvalidReason = '',
+    this.invalidReason = '',
+    this.lastAttemptedAt,
+    this.attemptCount = 0,
+    this.predictedProbability,
+    this.predictedSampleCount = 0,
+    this.predictedWilsonLower,
+    this.predictedWilsonUpper,
+    this.predictionCreatedAt,
+  }) {
+    if (!_decisionHorizons.contains(horizon)) {
+      throw ArgumentError.value(horizon, 'horizon', 'must be 1, 3, or 5');
+    }
+  }
+
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        if (id != null) 'id': id,
+        'snapshot_id': snapshotId,
+        'horizon': horizon,
+        'status': status.name,
+        'due_trade_date': _dateOnly(dueTradeDate),
+        'entry_trade_date': _dateOnly(entryTradeDate),
+        'target_trade_date': _dateOnly(targetTradeDate),
+        'deferred_trade_days': deferredTradeDays,
+        'evaluated_at': evaluatedAt?.millisecondsSinceEpoch,
+        'adjusted_signal_price_used': adjustedSignalPriceUsed,
+        'entry_open_price': entryOpenPrice,
+        'target_close_price': targetClosePrice,
+        'adjusted_target_close_price': adjustedTargetClosePrice,
+        'benchmark_signal_close': benchmarkSignalClose,
+        'benchmark_target_close': benchmarkTargetClose,
+        'forecast_return': forecastReturn,
+        'executable_return': executableReturn,
+        'benchmark_return': benchmarkReturn,
+        'alpha_return': alphaReturn,
+        'mfe': mfe,
+        'mae': mae,
+        'raw_direction_hit': _boolInt(rawDirectionHit),
+        'effective_direction_hit': _boolInt(effectiveDirectionHit),
+        'alpha_hit': _boolInt(alphaHit),
+        'corporate_action_detected': _boolInt(corporateActionDetected),
+        'executable_valid': _boolInt(executableValid),
+        'executable_invalid_reason': executableInvalidReason,
+        'invalid_reason': invalidReason,
+        'last_attempted_at': lastAttemptedAt?.millisecondsSinceEpoch,
+        'attempt_count': attemptCount,
+        'predicted_probability': predictedProbability,
+        'predicted_sample_count': predictedSampleCount,
+        'predicted_wilson_lower': predictedWilsonLower,
+        'predicted_wilson_upper': predictedWilsonUpper,
+        'prediction_created_at': predictionCreatedAt?.millisecondsSinceEpoch,
+      };
+
+  factory DecisionOutcomeRecord.fromMap(Map<String, dynamic> map) =>
+      DecisionOutcomeRecord(
+        id: (map['id'] as num?)?.toInt(),
+        snapshotId: (map['snapshot_id'] as num).toInt(),
+        horizon: (map['horizon'] as num).toInt(),
+        status: DecisionOutcomeStatus.values.byName(
+          map['status'] as String? ?? 'pending',
+        ),
+        dueTradeDate: _parseDateOnly(map['due_trade_date']),
+        entryTradeDate: _parseDateOnly(map['entry_trade_date']),
+        targetTradeDate: _parseDateOnly(map['target_trade_date']),
+        deferredTradeDays: (map['deferred_trade_days'] as num?)?.toInt() ?? 0,
+        evaluatedAt: map['evaluated_at'] == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                (map['evaluated_at'] as num).toInt(),
+              ),
+        adjustedSignalPriceUsed:
+            (map['adjusted_signal_price_used'] as num?)?.toDouble(),
+        entryOpenPrice: (map['entry_open_price'] as num?)?.toDouble(),
+        targetClosePrice: (map['target_close_price'] as num?)?.toDouble(),
+        adjustedTargetClosePrice:
+            (map['adjusted_target_close_price'] as num?)?.toDouble(),
+        benchmarkSignalClose:
+            (map['benchmark_signal_close'] as num?)?.toDouble(),
+        benchmarkTargetClose:
+            (map['benchmark_target_close'] as num?)?.toDouble(),
+        forecastReturn: (map['forecast_return'] as num?)?.toDouble(),
+        executableReturn: (map['executable_return'] as num?)?.toDouble(),
+        benchmarkReturn: (map['benchmark_return'] as num?)?.toDouble(),
+        alphaReturn: (map['alpha_return'] as num?)?.toDouble(),
+        mfe: (map['mfe'] as num?)?.toDouble(),
+        mae: (map['mae'] as num?)?.toDouble(),
+        rawDirectionHit: _nullableBool(map['raw_direction_hit']),
+        effectiveDirectionHit: _nullableBool(map['effective_direction_hit']),
+        alphaHit: _nullableBool(map['alpha_hit']),
+        corporateActionDetected:
+            _nullableBool(map['corporate_action_detected']),
+        executableValid: _nullableBool(map['executable_valid']),
+        executableInvalidReason:
+            map['executable_invalid_reason'] as String? ?? '',
+        invalidReason: map['invalid_reason'] as String? ?? '',
+        lastAttemptedAt: map['last_attempted_at'] == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                (map['last_attempted_at'] as num).toInt(),
+              ),
+        attemptCount: (map['attempt_count'] as num?)?.toInt() ?? 0,
+        predictedProbability:
+            (map['predicted_probability'] as num?)?.toDouble(),
+        predictedSampleCount:
+            (map['predicted_sample_count'] as num?)?.toInt() ?? 0,
+        predictedWilsonLower:
+            (map['predicted_wilson_lower'] as num?)?.toDouble(),
+        predictedWilsonUpper:
+            (map['predicted_wilson_upper'] as num?)?.toDouble(),
+        predictionCreatedAt: map['prediction_created_at'] == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                (map['prediction_created_at'] as num).toInt(),
+              ),
+      );
+}
+
+class DecisionEvaluationWorkItem {
+  final DecisionSnapshotRecord snapshot;
+  final DecisionOutcomeRecord outcome;
+
+  const DecisionEvaluationWorkItem({
+    required this.snapshot,
+    required this.outcome,
+  });
+}
+
 enum DataConfidence { high, medium, low }
 
 enum SignalDuration {
@@ -765,15 +1152,15 @@ class MarketContext {
     }
 
     // v3.15: 渐进式多档调节 — 上涨和下跌均采用渐进系数
-    if (avgChangePct > 2.0) return 1.05;     // 强势上涨：+5%
-    if (avgChangePct > 1.0) return 1.03;     // 上涨：+3%
-    if (avgChangePct > 0.3) return 1.01;     // 微涨：+1%
-    if (avgChangePct > -0.3) return 1.00;    // 震荡：0%
-    if (avgChangePct > -0.5) return 0.98;    // 微跌：-2%
-    if (avgChangePct > -1.0) return 0.95;    // 下跌：-5%
-    if (avgChangePct > -2.0) return 0.90;    // 明显下跌：-10%
-    if (avgChangePct > -3.0) return 0.85;    // 大跌：-15%
-    return 0.80;                              // 暴跌：-20%
+    if (avgChangePct > 2.0) return 1.05; // 强势上涨：+5%
+    if (avgChangePct > 1.0) return 1.03; // 上涨：+3%
+    if (avgChangePct > 0.3) return 1.01; // 微涨：+1%
+    if (avgChangePct > -0.3) return 1.00; // 震荡：0%
+    if (avgChangePct > -0.5) return 0.98; // 微跌：-2%
+    if (avgChangePct > -1.0) return 0.95; // 下跌：-5%
+    if (avgChangePct > -2.0) return 0.90; // 明显下跌：-10%
+    if (avgChangePct > -3.0) return 0.85; // 大跌：-15%
+    return 0.80; // 暴跌：-20%
   }
 
   Map<String, dynamic> toJson() {
