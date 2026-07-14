@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import '../api/api_client.dart';
+import '../api/market_context_provider.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
 import '../data/concept_tag_provider.dart';
@@ -11,6 +12,7 @@ import 'signal_engine.dart';
 import 'market_timing.dart';
 import 'market_structure_analyzer.dart';
 import 'recommendation_tracker.dart';
+import 'decision_tracker.dart';
 
 /// 探索引擎：后台批量分析沪深主板股票，筛选买入级别以上标的
 /// 使用全局单例 + BroadcastStream，确保切换Tab不中断分析
@@ -40,9 +42,13 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       final sectorAndTiming = await Future.wait<dynamic>([
         _apiClient.getHotSectors(),
         MarketTiming.fetchTiming(),
+        MarketContextProvider.getMarketContext()
+            .then<MarketContext?>((value) => value)
+            .catchError((_) => null),
       ]);
       final sectors = sectorAndTiming[0] as List<SectorInfo>;
       final marketTiming = sectorAndTiming[1] as MarketTimingResult?;
+      final marketContext = sectorAndTiming[2] as MarketContext?;
       final topSectors = sectors.take(20).toList();
 
       if (topSectors.isEmpty) {
@@ -177,7 +183,13 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
           final stock = batch[j];
           final klineData = klineCache[stock.code] ?? <HistoryKline>[];
           final quote = quoteCache[stock.code] ?? stock;
-          final result = _analyzeCached(stock, klineData, quote, analysisList);
+          final result = _analyzeCached(
+            stock,
+            klineData,
+            quote,
+            analysisList,
+            marketContext,
+          );
           if (result != null) {
             results.add(result);
           }
@@ -200,6 +212,18 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       // 7. 持久化到数据库
       emit(ExploreProgress(status: ExploreStatus.saving));
       await _dbService.replaceExploreResults(results);
+
+      try {
+        await captureDecisionBatchForTesting(
+          analyses: analysisList,
+          source: 'explore',
+          tracker: DecisionTracker(),
+          signalTradeDate: DateTime.now(),
+          benchmarkCode: '000300',
+        );
+      } catch (e) {
+        debugPrint('ExploreEngine.decisionTracking: $e');
+      }
 
       // Phase 3: 批量记录推荐快照（事务内一次性写入，避免逐只 track 的并发开销）
       try {
@@ -245,6 +269,7 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
     List<HistoryKline> klineData,
     QuoteData quote,
     List<AnalysisResult> analysisList,
+    MarketContext? marketContext,
   ) {
     try {
       if (klineData.length < 20) return null;
@@ -255,7 +280,14 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         return null;
       }
 
-      final analysis = generateAnalysis(indicators, quote);
+      final analysis = generateAnalysis(
+        indicators,
+        quote,
+        marketContext: marketContext,
+        enableAsyncSideEffects: false,
+      );
+
+      analysisList.add(analysis);
 
       if (!_isBuyRecommendation(analysis.recommendation)) {
         return null;
@@ -271,8 +303,6 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       }
 
       // Phase 3: 推荐追踪（收集到列表，循环结束后批量写入）
-      analysisList.add(analysis);
-
       // Phase 1: 市场结构
       final structureLabel = analysis.marketStructure != null
           ? MarketStructureAnalyzer.getLabel(

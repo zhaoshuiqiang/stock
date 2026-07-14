@@ -10,6 +10,7 @@ import 'base_analysis_engine.dart';
 import 'indicators.dart';
 import 'signal_engine.dart';
 import 'market_timing.dart';
+import 'decision_tracker.dart';
 import '../storage/database_service.dart';
 
 typedef OpportunityAnalysisGenerator = AnalysisResult Function(
@@ -213,6 +214,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       const batchSize = 10;
       const klineDays = 120;
       final results = <OpportunityResult?>[];
+      final analysisList = <AnalysisResult>[];
       int completedCount = 0;
 
       for (int i = 0; i < watchlist.length; i += batchSize) {
@@ -239,6 +241,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
               marketContext: marketContext,
               generator: generateAnalysis,
             );
+            analysisList.add(analysis);
 
             final signals = analysis.signals;
             final last = calculated.last;
@@ -294,6 +297,16 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       emit(OpportunityProgress(status: OpportunityStatus.saving));
       await _dbService.replaceOpportunityResults(
           opportunities.map((o) => o.toMap(DateTime.now())).toList());
+
+      try {
+        await captureDecisionBatchForTesting(
+          analyses: analysisList,
+          source: 'opportunity',
+          tracker: DecisionTracker(),
+          signalTradeDate: DateTime.now(),
+          benchmarkCode: '000300',
+        );
+      } catch (_) {}
 
       emit(OpportunityProgress(
           status: OpportunityStatus.complete,

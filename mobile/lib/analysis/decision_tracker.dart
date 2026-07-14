@@ -5,6 +5,24 @@ import '../storage/database_service.dart';
 import 'decision_market_data_provider.dart';
 import 'decision_outcome_evaluator.dart';
 
+Future<void> captureDecisionBatchForTesting({
+  required List<AnalysisResult> analyses,
+  required String source,
+  required DecisionTracker tracker,
+  required DateTime signalTradeDate,
+  required String benchmarkCode,
+}) async {
+  for (final analysis in analyses) {
+    if (analysis.shortTermDecision == null || analysis.quote == null) continue;
+    await tracker.capture(
+      analysis: analysis,
+      source: source,
+      signalTradeDate: signalTradeDate,
+      benchmarkCode: benchmarkCode,
+    );
+  }
+}
+
 class DecisionTracker {
   final DatabaseService storage;
   final DecisionMarketDataSource marketData;
