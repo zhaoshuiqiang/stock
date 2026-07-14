@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stock_analyzer/analysis/confidence_calculator.dart';
+import 'package:stock_analyzer/models/short_term_decision.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 
 void main() {
@@ -46,7 +47,7 @@ void main() {
         buySignals: buySignals,
         sellSignals: sellSignals,
         signals: allSignals,
-        totalScore: 7,
+        direction: RecommendationDirection.bullish,
         last: last,
         quote: null,
       );
@@ -64,7 +65,7 @@ void main() {
       final bd = ConfidenceCalculator.breakdown(
         buySignals: buySignals,
         sellSignals: sellSignals,
-        totalScore: 5,
+        direction: RecommendationDirection.neutral,
       );
 
       expect(bd.containsKey('signal_consistency'), isTrue);
@@ -88,7 +89,7 @@ void main() {
         buySignals: buySignals,
         sellSignals: sellSignals,
         signals: allSignals,
-        totalScore: 5,
+        direction: RecommendationDirection.neutral,
         last: last,
         quote: null,
       );
@@ -100,6 +101,17 @@ void main() {
       // clamp(0.3, 0.95) → 0.44
       expect(result.confidenceScore, greaterThanOrEqualTo(0.3));
       expect(result.confidenceScore, lessThanOrEqualTo(0.6));
+    });
+
+    test('neutral direction does not treat sell signals as aligned freshness',
+        () {
+      final bd = ConfidenceCalculator.breakdown(
+        buySignals: const [],
+        sellSignals: makeSellSignals(3),
+        direction: RecommendationDirection.neutral,
+      );
+
+      expect(bd['signal_freshness'], 0.5);
     });
   });
 }

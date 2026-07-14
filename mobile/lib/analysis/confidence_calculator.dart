@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../models/short_term_decision.dart';
 import '../models/stock_models.dart';
 import 'signal_validator.dart';
 import 'market_structure_analyzer.dart';
@@ -24,7 +25,8 @@ class ConfidenceCalculator {
     required List<SignalItem> buySignals,
     required List<SignalItem> sellSignals,
     required List<SignalItem> signals,
-    required int totalScore,
+    RecommendationDirection? direction,
+    int? totalScore,
     required HistoryKline last,
     required QuoteData? quote,
     FundamentalScore? fundamentalScore,
@@ -34,8 +36,13 @@ class ConfidenceCalculator {
     Map<String, BacktestResult>? backtestResults,
     double? predictionAccuracy,
   }) {
+    final resolvedDirection = direction ?? _legacyDirection(totalScore);
     final buyCount = buySignals.length;
     final sellCount = sellSignals.length;
+    final isBullishDirection =
+        resolvedDirection == RecommendationDirection.bullish;
+    final isBearishDirection =
+        resolvedDirection == RecommendationDirection.bearish;
 
     // 1. 信号一致性(35%): 买卖信号比例偏离度，且方向与推荐对齐时加分
     double signalConsistency = 0.5;
@@ -44,8 +51,8 @@ class ConfidenceCalculator {
       final dominantDirection = buyCount >= sellCount ? 'buy' : 'sell';
       final dominantCount = buyCount >= sellCount ? buyCount : sellCount;
       final concentration = dominantCount / signalCount;
-      final alignment = (totalScore >= 6 && dominantDirection == 'buy') ||
-          (totalScore <= 5 && dominantDirection == 'sell');
+      final alignment = (isBullishDirection && dominantDirection == 'buy') ||
+          (isBearishDirection && dominantDirection == 'sell');
       signalConsistency = alignment
           ? 0.3 + concentration * 0.7
           : 0.3 + (1 - concentration) * 0.4;
@@ -54,15 +61,15 @@ class ConfidenceCalculator {
     // 2. 基本面支撑(13%): 缩减权重，短线交易PE/PB参考价值有限
     double fundamentalSupport = 0.5;
     if (fundamentalScore != null) {
-      if (totalScore >= 6 && fundamentalScore.totalScore >= 6) {
+      if (isBullishDirection && fundamentalScore.totalScore >= 6) {
         fundamentalSupport =
             (0.7 + (fundamentalScore.totalScore - 6) * 0.1).clamp(0.0, 1.0);
-      } else if (totalScore <= 4 && fundamentalScore.totalScore <= 4) {
+      } else if (isBearishDirection && fundamentalScore.totalScore <= 4) {
         fundamentalSupport =
             (0.7 + (4 - fundamentalScore.totalScore) * 0.1).clamp(0.0, 1.0);
-      } else if (totalScore >= 6 && fundamentalScore.totalScore < 4) {
+      } else if (isBullishDirection && fundamentalScore.totalScore < 4) {
         fundamentalSupport = 0.3; // 技术面看多但基本面差，降低置信度
-      } else if (totalScore <= 4 && fundamentalScore.totalScore > 6) {
+      } else if (isBearishDirection && fundamentalScore.totalScore > 6) {
         fundamentalSupport = 0.3; // 技术面看空但基本面好，降低置信度
       } else if (fundamentalScore.totalScore >= 5) {
         fundamentalSupport = 0.5;
@@ -76,13 +83,13 @@ class ConfidenceCalculator {
     // 3. 情绪面确认(13%): 新闻情绪与推荐方向一致时加分
     double sentimentConfirm = 0.5;
     if (newsSentiment != null) {
-      if (totalScore >= 6 && newsSentiment.score > 2) {
+      if (isBullishDirection && newsSentiment.score > 2) {
         sentimentConfirm = 0.7 + (newsSentiment.score - 2) * 0.03;
-      } else if (totalScore <= 4 && newsSentiment.score < -2) {
+      } else if (isBearishDirection && newsSentiment.score < -2) {
         sentimentConfirm = 0.7 + (-2 - newsSentiment.score) * 0.03;
-      } else if (totalScore >= 6 && newsSentiment.score < -2) {
+      } else if (isBullishDirection && newsSentiment.score < -2) {
         sentimentConfirm = 0.3; // 技术面看多但新闻利空
-      } else if (totalScore <= 4 && newsSentiment.score > 2) {
+      } else if (isBearishDirection && newsSentiment.score > 2) {
         sentimentConfirm = 0.3; // 技术面看空但新闻利好
       }
     }
@@ -90,13 +97,13 @@ class ConfidenceCalculator {
     // 4. 市场环境(13%): 大盘趋势确认
     double marketConfirm = 0.5;
     if (marketContext != null) {
-      if (totalScore >= 6 && marketContext.avgChangePct > 0.5) {
+      if (isBullishDirection && marketContext.avgChangePct > 0.5) {
         marketConfirm = 0.7;
-      } else if (totalScore <= 4 && marketContext.avgChangePct < -0.5) {
+      } else if (isBearishDirection && marketContext.avgChangePct < -0.5) {
         marketConfirm = 0.7;
-      } else if (totalScore >= 6 && marketContext.avgChangePct < -1) {
+      } else if (isBullishDirection && marketContext.avgChangePct < -1) {
         marketConfirm = 0.3;
-      } else if (totalScore <= 4 && marketContext.avgChangePct > 1) {
+      } else if (isBearishDirection && marketContext.avgChangePct > 1) {
         marketConfirm = 0.3;
       }
     }
@@ -111,13 +118,13 @@ class ConfidenceCalculator {
           marketStructure.structure == MarketStructure.bearTrend ||
               marketStructure.structure == MarketStructure.distribution;
       final structureConfidence = marketStructure.confidence.clamp(0.3, 1.0);
-      if (totalScore >= 6 && isBullish) {
+      if (isBullishDirection && isBullish) {
         structureConfirm = 0.3 + structureConfidence * 0.7;
-      } else if (totalScore <= 4 && isBearish) {
+      } else if (isBearishDirection && isBearish) {
         structureConfirm = 0.3 + structureConfidence * 0.7;
-      } else if (totalScore >= 6 && isBearish) {
+      } else if (isBullishDirection && isBearish) {
         structureConfirm = 1.0 - (0.3 + structureConfidence * 0.7);
-      } else if (totalScore <= 4 && isBullish) {
+      } else if (isBearishDirection && isBullish) {
         structureConfirm = 1.0 - (0.3 + structureConfidence * 0.7);
       } else {
         structureConfirm = 0.5;
@@ -127,13 +134,16 @@ class ConfidenceCalculator {
     // 6. 信号时效性(12%): 短中期信号权重高于长期（短线交易核心维度）
     // P0-6修复：按推荐方向过滤，买入推荐只计近期买入信号，卖出推荐只计近期卖出信号
     double signalFreshness = 0.5;
-    final isBuyRecommendation = totalScore >= 6;
-    final directionalRecentSignals =
-        (isBuyRecommendation ? buySignals : sellSignals)
-            .where((s) =>
-                s.duration == SignalDuration.shortTerm ||
-                s.duration == SignalDuration.mediumTerm)
-            .length;
+    final directionalSignals = switch (resolvedDirection) {
+      RecommendationDirection.bullish => buySignals,
+      RecommendationDirection.bearish => sellSignals,
+      RecommendationDirection.neutral => const <SignalItem>[],
+    };
+    final directionalRecentSignals = directionalSignals
+        .where((s) =>
+            s.duration == SignalDuration.shortTerm ||
+            s.duration == SignalDuration.mediumTerm)
+        .length;
     if (signalCount > 0 && directionalRecentSignals > 0) {
       signalFreshness = 0.3 + directionalRecentSignals / signalCount * 0.7;
     }
@@ -202,7 +212,8 @@ class ConfidenceCalculator {
   static Map<String, double> breakdown({
     required List<SignalItem> buySignals,
     required List<SignalItem> sellSignals,
-    required int totalScore,
+    RecommendationDirection? direction,
+    int? totalScore,
     FundamentalScore? fundamentalScore,
     NewsSentiment? newsSentiment,
     MarketContext? marketContext,
@@ -210,9 +221,14 @@ class ConfidenceCalculator {
     Map<String, BacktestResult>? backtestResults,
     double? predictionSupport,
   }) {
+    final resolvedDirection = direction ?? _legacyDirection(totalScore);
     final buyCount = buySignals.length;
     final sellCount = sellSignals.length;
     final signalCount = buyCount + sellCount;
+    final isBullishDirection =
+        resolvedDirection == RecommendationDirection.bullish;
+    final isBearishDirection =
+        resolvedDirection == RecommendationDirection.bearish;
 
     // 1. 信号一致性(32%): 与calculate方法保持一致
     double signalConsistency = 0.5;
@@ -220,8 +236,8 @@ class ConfidenceCalculator {
       final dominantDirection = buyCount >= sellCount ? 'buy' : 'sell';
       final dominantCount = buyCount >= sellCount ? buyCount : sellCount;
       final concentration = dominantCount / signalCount;
-      final alignment = (totalScore >= 6 && dominantDirection == 'buy') ||
-          (totalScore <= 5 && dominantDirection == 'sell');
+      final alignment = (isBullishDirection && dominantDirection == 'buy') ||
+          (isBearishDirection && dominantDirection == 'sell');
       signalConsistency = alignment
           ? 0.3 + concentration * 0.7
           : 0.3 + (1 - concentration) * 0.4;
@@ -230,15 +246,15 @@ class ConfidenceCalculator {
     // 2. 基本面支撑(12%): 缩减权重，短线交易PE/PB参考价值有限
     double fundamentalSupport = 0.5;
     if (fundamentalScore != null) {
-      if (totalScore >= 6 && fundamentalScore.totalScore >= 6) {
+      if (isBullishDirection && fundamentalScore.totalScore >= 6) {
         fundamentalSupport =
             (0.7 + (fundamentalScore.totalScore - 6) * 0.1).clamp(0.0, 1.0);
-      } else if (totalScore <= 4 && fundamentalScore.totalScore <= 4) {
+      } else if (isBearishDirection && fundamentalScore.totalScore <= 4) {
         fundamentalSupport =
             (0.7 + (4 - fundamentalScore.totalScore) * 0.1).clamp(0.0, 1.0);
-      } else if (totalScore >= 6 && fundamentalScore.totalScore < 4) {
+      } else if (isBullishDirection && fundamentalScore.totalScore < 4) {
         fundamentalSupport = 0.3;
-      } else if (totalScore <= 4 && fundamentalScore.totalScore > 6) {
+      } else if (isBearishDirection && fundamentalScore.totalScore > 6) {
         fundamentalSupport = 0.3;
       } else if (fundamentalScore.totalScore >= 5) {
         fundamentalSupport = 0.5;
@@ -252,13 +268,13 @@ class ConfidenceCalculator {
     // 3. 情绪面确认(12%)
     double sentimentConfirm = 0.5;
     if (newsSentiment != null) {
-      if (totalScore >= 6 && newsSentiment.score > 2) {
+      if (isBullishDirection && newsSentiment.score > 2) {
         sentimentConfirm = 0.7 + (newsSentiment.score - 2) * 0.03;
-      } else if (totalScore <= 4 && newsSentiment.score < -2) {
+      } else if (isBearishDirection && newsSentiment.score < -2) {
         sentimentConfirm = 0.7 + (-2 - newsSentiment.score) * 0.03;
-      } else if (totalScore >= 6 && newsSentiment.score < -2) {
+      } else if (isBullishDirection && newsSentiment.score < -2) {
         sentimentConfirm = 0.3;
-      } else if (totalScore <= 4 && newsSentiment.score > 2) {
+      } else if (isBearishDirection && newsSentiment.score > 2) {
         sentimentConfirm = 0.3;
       }
     }
@@ -266,13 +282,13 @@ class ConfidenceCalculator {
     // 4. 市场环境(12%): 大盘趋势权重，短线需顺势操作
     double marketConfirm = 0.5;
     if (marketContext != null) {
-      if (totalScore >= 6 && marketContext.avgChangePct > 0.5) {
+      if (isBullishDirection && marketContext.avgChangePct > 0.5) {
         marketConfirm = 0.7;
-      } else if (totalScore <= 4 && marketContext.avgChangePct < -0.5) {
+      } else if (isBearishDirection && marketContext.avgChangePct < -0.5) {
         marketConfirm = 0.7;
-      } else if (totalScore >= 6 && marketContext.avgChangePct < -1) {
+      } else if (isBullishDirection && marketContext.avgChangePct < -1) {
         marketConfirm = 0.3;
-      } else if (totalScore <= 4 && marketContext.avgChangePct > 1) {
+      } else if (isBearishDirection && marketContext.avgChangePct > 1) {
         marketConfirm = 0.3;
       }
     }
@@ -287,13 +303,13 @@ class ConfidenceCalculator {
           marketStructure.structure == MarketStructure.bearTrend ||
               marketStructure.structure == MarketStructure.distribution;
       final structureConfidence = marketStructure.confidence.clamp(0.3, 1.0);
-      if (totalScore >= 6 && isBullish) {
+      if (isBullishDirection && isBullish) {
         structureConfirm = 0.3 + structureConfidence * 0.7;
-      } else if (totalScore <= 4 && isBearish) {
+      } else if (isBearishDirection && isBearish) {
         structureConfirm = 0.3 + structureConfidence * 0.7;
-      } else if (totalScore >= 6 && isBearish) {
+      } else if (isBullishDirection && isBearish) {
         structureConfirm = 1.0 - (0.3 + structureConfidence * 0.7);
-      } else if (totalScore <= 4 && isBullish) {
+      } else if (isBearishDirection && isBullish) {
         structureConfirm = 1.0 - (0.3 + structureConfidence * 0.7);
       } else {
         structureConfirm = 0.5;
@@ -302,8 +318,12 @@ class ConfidenceCalculator {
 
     // 6. 信号时效性(12%) — P0-6修复：按方向过滤
     double signalFreshness = 0.5;
-    final isBuyRec = totalScore >= 6;
-    final directionalRecent = (isBuyRec ? buySignals : sellSignals)
+    final directionalSignals = switch (resolvedDirection) {
+      RecommendationDirection.bullish => buySignals,
+      RecommendationDirection.bearish => sellSignals,
+      RecommendationDirection.neutral => const <SignalItem>[],
+    };
+    final directionalRecent = directionalSignals
         .where((s) =>
             s.duration == SignalDuration.shortTerm ||
             s.duration == SignalDuration.mediumTerm)
@@ -337,5 +357,15 @@ class ConfidenceCalculator {
       'historical_winrate': backtestWinRate,
       'prediction_support': predictionSupportValue,
     };
+  }
+
+  static RecommendationDirection _legacyDirection(int? totalScore) {
+    if (totalScore != null && totalScore >= 6) {
+      return RecommendationDirection.bullish;
+    }
+    if (totalScore != null && totalScore <= 4) {
+      return RecommendationDirection.bearish;
+    }
+    return RecommendationDirection.neutral;
   }
 }
