@@ -138,6 +138,31 @@ void main() {
         expect(build, throwsArgumentError);
       }
     });
+
+    test('rejects non-finite raw scores and component values', () {
+      final invalidBuilders = <ShortTermDecision Function()>[
+        () => _sampleDecision(rawComprehensiveScore: double.nan),
+        () => _sampleDecision(rawComprehensiveScore: double.infinity),
+        () => _sampleDecision(rawComprehensiveScore: double.negativeInfinity),
+        () => _sampleDecision(
+              directionComponents: <String, double>{'technical': double.nan},
+            ),
+        () => _sampleDecision(
+              qualityComponents: <String, double>{
+                'confluence': double.infinity,
+              },
+            ),
+        () => _sampleDecision(
+              riskComponents: <String, double>{
+                'volatility': double.negativeInfinity,
+              },
+            ),
+      ];
+
+      for (final build in invalidBuilders) {
+        expect(build, throwsArgumentError);
+      }
+    });
   });
 
   group('CalibrationEstimate', () {
@@ -190,6 +215,19 @@ void main() {
       for (final build in invalidBuilders) {
         expect(build, throwsArgumentError);
       }
+    });
+
+    test('rejects Wilson intervals whose lower bound exceeds upper', () {
+      expect(
+        () => CalibrationEstimate(
+          horizon: 3,
+          probability: 0.5,
+          sampleCount: 20,
+          wilsonLower: 0.7,
+          wilsonUpper: 0.4,
+        ),
+        throwsArgumentError,
+      );
     });
   });
 
@@ -290,6 +328,10 @@ ShortTermDecision _sampleDecision({
   double tradeQualityScore = 71.0,
   double riskScore = 34.0,
   double evidenceConfidence = 82.5,
+  double rawComprehensiveScore = 7.4,
+  Map<String, double>? directionComponents,
+  Map<String, double>? qualityComponents,
+  Map<String, double>? riskComponents,
   List<String>? supportingStrategyIds,
 }) {
   return ShortTermDecision(
@@ -322,24 +364,27 @@ ShortTermDecision _sampleDecision({
     },
     direction: RecommendationDirection.bullish,
     marketRegime: MarketRegime.bullishTrend,
-    directionComponents: <String, double>{
-      'technical': 42.0,
-      'capitalFlow': 6.0,
-    },
-    qualityComponents: <String, double>{
-      'confluence': 45.0,
-      'structure': 26.0,
-    },
-    riskComponents: <String, double>{
-      'volatility': 20.0,
-      'liquidity': 14.0,
-    },
+    directionComponents: directionComponents ??
+        <String, double>{
+          'technical': 42.0,
+          'capitalFlow': 6.0,
+        },
+    qualityComponents: qualityComponents ??
+        <String, double>{
+          'confluence': 45.0,
+          'structure': 26.0,
+        },
+    riskComponents: riskComponents ??
+        <String, double>{
+          'volatility': 20.0,
+          'liquidity': 14.0,
+        },
     primaryStrategyId: 'momentum_breakout',
     primaryStrategyName: 'Momentum breakout',
     supportingStrategyIds: supportingStrategyIds ??
         <String>['volume_confirmation', 'trend_alignment'],
     dataQualityFlags: <String>['stale_fundamentals'],
     modelVersion: 'short-term-v2',
-    rawComprehensiveScore: 7.4,
+    rawComprehensiveScore: rawComprehensiveScore,
   );
 }

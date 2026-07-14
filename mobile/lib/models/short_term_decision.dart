@@ -55,6 +55,13 @@ class CalibrationEstimate {
     }
     _validateRange(wilsonLower, 'wilsonLower', 0.0, 1.0);
     _validateRange(wilsonUpper, 'wilsonUpper', 0.0, 1.0);
+    if (wilsonLower > wilsonUpper) {
+      throw ArgumentError.value(
+        wilsonLower,
+        'wilsonLower',
+        'must be less than or equal to wilsonUpper',
+      );
+    }
   }
 
   factory CalibrationEstimate.fromJson(Map<String, dynamic> json) {
@@ -129,6 +136,10 @@ class ShortTermDecision {
     _validateRange(tradeQualityScore, 'tradeQualityScore', 0.0, 100.0);
     _validateRange(riskScore, 'riskScore', 0.0, 100.0);
     _validateRange(evidenceConfidence, 'evidenceConfidence', 0.0, 100.0);
+    _validateFinite(rawComprehensiveScore, 'rawComprehensiveScore');
+    _validateFiniteMap(this.directionComponents, 'directionComponents');
+    _validateFiniteMap(this.qualityComponents, 'qualityComponents');
+    _validateFiniteMap(this.riskComponents, 'riskComponents');
 
     for (final entry in this.calibrationByHorizon.entries) {
       if (!_supportedCalibrationHorizons.contains(entry.key)) {
@@ -332,6 +343,18 @@ void _validateRange(
       name,
       'must be between $minimum and $maximum inclusive',
     );
+  }
+}
+
+void _validateFinite(double value, String name) {
+  if (!value.isFinite) {
+    throw ArgumentError.value(value, name, 'must be finite');
+  }
+}
+
+void _validateFiniteMap(Map<String, double> values, String name) {
+  for (final entry in values.entries) {
+    _validateFinite(entry.value, '$name.${entry.key}');
   }
 }
 
