@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import '../models/stock_models.dart';
 import '../analysis/limit_up_analyzer.dart';
+import 'decision_tracking_schema.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -31,13 +32,27 @@ class DatabaseService {
     _dbFuture = null;
   }
 
+  @visibleForTesting
+  static Future<void> upgradeDatabaseForTesting(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (oldVersion < 21 && newVersion >= 21) {
+      await db.transaction(createDecisionTrackingSchema);
+    }
+  }
+
   Future<Database> _initDatabase() async {
     final documentsDirectory = await getApplicationDocumentsDirectory();
     final dbPath = path.join(documentsDirectory.path, 'stock_analysis.db');
 
     return await openDatabase(
       dbPath,
-      version: 20,
+      version: 21,
+      onConfigure: (db) async {
+        await db.execute('PRAGMA foreign_keys = ON');
+      },
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -372,6 +387,9 @@ class DatabaseService {
             await txn.execute(
                 "ALTER TABLE recommendation_tracking ADD COLUMN score REAL");
           }
+          if (oldVersion < 21) {
+            await createDecisionTrackingSchema(txn);
+          }
           // 索引补建（幂等，保证升级路径和新装路径都有）
           await txn.execute(
               'CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
@@ -477,6 +495,8 @@ class DatabaseService {
         analyzed_at INTEGER NOT NULL
       )
     ''');
+
+    await createDecisionTrackingSchema(db);
 
     await db.execute('''
       CREATE TABLE sector_pick_results (
@@ -1219,7 +1239,12 @@ class DatabaseService {
     final db = await database;
     final rows = await db.query(
       'recommendation_tracking',
-      columns: ['signal_date', 'score', 'dimension_scores_json', 'signal_price'],
+      columns: [
+        'signal_date',
+        'score',
+        'dimension_scores_json',
+        'signal_price'
+      ],
       where: 'code = ?',
       whereArgs: [code],
       orderBy: 'signal_date ASC',
@@ -1233,9 +1258,8 @@ class DatabaseService {
         if (dimJson != null && dimJson.isNotEmpty) {
           try {
             final dims = jsonDecode(dimJson) as Map<String, dynamic>;
-            final total = dims.values
-                .whereType<double>()
-                .fold(0.0, (a, b) => a + b);
+            final total =
+                dims.values.whereType<double>().fold(0.0, (a, b) => a + b);
             score = (total / dims.length).clamp(0, 10).toDouble();
           } catch (_) {}
         }
