@@ -96,6 +96,190 @@ void main() {
     }
   });
 
+  group('RecommendationPolicy threshold probes', () {
+    const cases = <_ProbeCase>[
+      _ProbeCase(
+        score: -55.01,
+        level: RecommendationLevel.strongBearish,
+        direction: RecommendationDirection.bearish,
+        legacyScore: 1,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: -55,
+        level: RecommendationLevel.strongBearish,
+        direction: RecommendationDirection.bearish,
+        legacyScore: 1,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: -54.99,
+        level: RecommendationLevel.bearish,
+        direction: RecommendationDirection.bearish,
+        legacyScore: 2,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: -35.01,
+        level: RecommendationLevel.bearish,
+        direction: RecommendationDirection.bearish,
+        legacyScore: 2,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: -35,
+        level: RecommendationLevel.bearish,
+        direction: RecommendationDirection.bearish,
+        legacyScore: 2,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: -34.99,
+        level: RecommendationLevel.cautiousBearish,
+        direction: RecommendationDirection.bearish,
+        legacyScore: 3,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: -20.01,
+        level: RecommendationLevel.cautiousBearish,
+        direction: RecommendationDirection.bearish,
+        legacyScore: 3,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: -20,
+        level: RecommendationLevel.cautiousBearish,
+        direction: RecommendationDirection.bearish,
+        legacyScore: 3,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: -19.99,
+        level: RecommendationLevel.bearishWatch,
+        direction: RecommendationDirection.bearish,
+        legacyScore: 4,
+        actionable: false,
+      ),
+      _ProbeCase(
+        score: -12.01,
+        level: RecommendationLevel.bearishWatch,
+        direction: RecommendationDirection.bearish,
+        legacyScore: 4,
+        actionable: false,
+      ),
+      _ProbeCase(
+        score: -12,
+        level: RecommendationLevel.bearishWatch,
+        direction: RecommendationDirection.bearish,
+        legacyScore: 4,
+        actionable: false,
+      ),
+      _ProbeCase(
+        score: -11.99,
+        level: RecommendationLevel.neutralWatch,
+        direction: RecommendationDirection.neutral,
+        legacyScore: 5,
+        actionable: false,
+      ),
+      _ProbeCase(
+        score: 11.99,
+        level: RecommendationLevel.neutralWatch,
+        direction: RecommendationDirection.neutral,
+        legacyScore: 5,
+        actionable: false,
+      ),
+      _ProbeCase(
+        score: 12,
+        level: RecommendationLevel.bullishWatch,
+        direction: RecommendationDirection.bullish,
+        legacyScore: 6,
+        actionable: false,
+      ),
+      _ProbeCase(
+        score: 12.01,
+        level: RecommendationLevel.bullishWatch,
+        direction: RecommendationDirection.bullish,
+        legacyScore: 6,
+        actionable: false,
+      ),
+      _ProbeCase(
+        score: 19.99,
+        level: RecommendationLevel.bullishWatch,
+        direction: RecommendationDirection.bullish,
+        legacyScore: 6,
+        actionable: false,
+      ),
+      _ProbeCase(
+        score: 20,
+        level: RecommendationLevel.cautiousBullish,
+        direction: RecommendationDirection.bullish,
+        legacyScore: 7,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: 20.01,
+        level: RecommendationLevel.cautiousBullish,
+        direction: RecommendationDirection.bullish,
+        legacyScore: 7,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: 34.99,
+        level: RecommendationLevel.cautiousBullish,
+        direction: RecommendationDirection.bullish,
+        legacyScore: 7,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: 35,
+        level: RecommendationLevel.bullish,
+        direction: RecommendationDirection.bullish,
+        legacyScore: 8,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: 35.01,
+        level: RecommendationLevel.bullish,
+        direction: RecommendationDirection.bullish,
+        legacyScore: 8,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: 54.99,
+        level: RecommendationLevel.bullish,
+        direction: RecommendationDirection.bullish,
+        legacyScore: 8,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: 55,
+        level: RecommendationLevel.strongBullish,
+        direction: RecommendationDirection.bullish,
+        legacyScore: 9,
+        actionable: true,
+      ),
+      _ProbeCase(
+        score: 55.01,
+        level: RecommendationLevel.strongBullish,
+        direction: RecommendationDirection.bullish,
+        legacyScore: 9,
+        actionable: true,
+      ),
+    ];
+
+    for (final caseData in cases) {
+      test('maps score ${caseData.score} to ${caseData.level.name}', () {
+        final result = RecommendationPolicy.evaluate(
+          _decision(directionScore: caseData.score),
+        );
+
+        _expectDecision(result, caseData);
+        expect(result.gates, isEmpty);
+      });
+    }
+  });
+
   group('RecommendationPolicy execution gates', () {
     test(
         'downgrades insufficient-quality bullish decisions without changing direction',
@@ -207,6 +391,271 @@ void main() {
       expect(result.actionable, isTrue);
       expect(result.gates, isEmpty);
     });
+  });
+
+  group('RecommendationPolicy bullish gate boundaries', () {
+    const cases = <_GateCase>[
+      _GateCase(
+        name: 'strong bullish quality just fails',
+        directionScore: 55,
+        tradeQualityScore: 69.99,
+        riskScore: 45,
+        evidenceConfidence: 65,
+        expectedLevel: RecommendationLevel.bullishWatch,
+        expectedLegacyScore: 6,
+        expectedActionable: false,
+        expectedGates: <String>['trade_quality_below_threshold'],
+      ),
+      _GateCase(
+        name: 'strong bullish quality just passes',
+        directionScore: 55,
+        tradeQualityScore: 70,
+        riskScore: 45,
+        evidenceConfidence: 65,
+        expectedLevel: RecommendationLevel.strongBullish,
+        expectedLegacyScore: 9,
+        expectedActionable: true,
+      ),
+      _GateCase(
+        name: 'strong bullish risk just fails',
+        directionScore: 55,
+        tradeQualityScore: 70,
+        riskScore: 45.01,
+        evidenceConfidence: 65,
+        expectedLevel: RecommendationLevel.bullishWatch,
+        expectedLegacyScore: 6,
+        expectedActionable: false,
+        expectedGates: <String>['risk_above_threshold'],
+      ),
+      _GateCase(
+        name: 'strong bullish risk just passes',
+        directionScore: 55,
+        tradeQualityScore: 70,
+        riskScore: 45,
+        evidenceConfidence: 65,
+        expectedLevel: RecommendationLevel.strongBullish,
+        expectedLegacyScore: 9,
+        expectedActionable: true,
+      ),
+      _GateCase(
+        name: 'strong bullish evidence just fails',
+        directionScore: 55,
+        tradeQualityScore: 70,
+        riskScore: 45,
+        evidenceConfidence: 64.99,
+        expectedLevel: RecommendationLevel.bullishWatch,
+        expectedLegacyScore: 6,
+        expectedActionable: false,
+        expectedGates: <String>['evidence_confidence_below_threshold'],
+      ),
+      _GateCase(
+        name: 'strong bullish evidence just passes',
+        directionScore: 55,
+        tradeQualityScore: 70,
+        riskScore: 45,
+        evidenceConfidence: 65,
+        expectedLevel: RecommendationLevel.strongBullish,
+        expectedLegacyScore: 9,
+        expectedActionable: true,
+      ),
+      _GateCase(
+        name: 'bullish quality just fails',
+        directionScore: 35,
+        tradeQualityScore: 59.99,
+        riskScore: 60,
+        evidenceConfidence: 55,
+        expectedLevel: RecommendationLevel.bullishWatch,
+        expectedLegacyScore: 6,
+        expectedActionable: false,
+        expectedGates: <String>['trade_quality_below_threshold'],
+      ),
+      _GateCase(
+        name: 'bullish quality just passes',
+        directionScore: 35,
+        tradeQualityScore: 60,
+        riskScore: 60,
+        evidenceConfidence: 55,
+        expectedLevel: RecommendationLevel.bullish,
+        expectedLegacyScore: 8,
+        expectedActionable: true,
+      ),
+      _GateCase(
+        name: 'bullish risk just fails',
+        directionScore: 35,
+        tradeQualityScore: 60,
+        riskScore: 60.01,
+        evidenceConfidence: 55,
+        expectedLevel: RecommendationLevel.bullishWatch,
+        expectedLegacyScore: 6,
+        expectedActionable: false,
+        expectedGates: <String>['risk_above_threshold'],
+      ),
+      _GateCase(
+        name: 'bullish risk just passes',
+        directionScore: 35,
+        tradeQualityScore: 60,
+        riskScore: 60,
+        evidenceConfidence: 55,
+        expectedLevel: RecommendationLevel.bullish,
+        expectedLegacyScore: 8,
+        expectedActionable: true,
+      ),
+      _GateCase(
+        name: 'bullish evidence just fails',
+        directionScore: 35,
+        tradeQualityScore: 60,
+        riskScore: 60,
+        evidenceConfidence: 54.99,
+        expectedLevel: RecommendationLevel.bullishWatch,
+        expectedLegacyScore: 6,
+        expectedActionable: false,
+        expectedGates: <String>['evidence_confidence_below_threshold'],
+      ),
+      _GateCase(
+        name: 'bullish evidence just passes',
+        directionScore: 35,
+        tradeQualityScore: 60,
+        riskScore: 60,
+        evidenceConfidence: 55,
+        expectedLevel: RecommendationLevel.bullish,
+        expectedLegacyScore: 8,
+        expectedActionable: true,
+      ),
+      _GateCase(
+        name: 'cautious bullish quality just fails',
+        directionScore: 20,
+        tradeQualityScore: 54.99,
+        riskScore: 70,
+        evidenceConfidence: 0,
+        expectedLevel: RecommendationLevel.bullishWatch,
+        expectedLegacyScore: 6,
+        expectedActionable: false,
+        expectedGates: <String>['trade_quality_below_threshold'],
+      ),
+      _GateCase(
+        name: 'cautious bullish quality just passes',
+        directionScore: 20,
+        tradeQualityScore: 55,
+        riskScore: 70,
+        evidenceConfidence: 0,
+        expectedLevel: RecommendationLevel.cautiousBullish,
+        expectedLegacyScore: 7,
+        expectedActionable: true,
+      ),
+      _GateCase(
+        name: 'cautious bullish risk just fails',
+        directionScore: 20,
+        tradeQualityScore: 55,
+        riskScore: 70.01,
+        evidenceConfidence: 0,
+        expectedLevel: RecommendationLevel.bullishWatch,
+        expectedLegacyScore: 6,
+        expectedActionable: false,
+        expectedGates: <String>['risk_above_threshold'],
+      ),
+      _GateCase(
+        name: 'cautious bullish risk just passes',
+        directionScore: 20,
+        tradeQualityScore: 55,
+        riskScore: 70,
+        evidenceConfidence: 0,
+        expectedLevel: RecommendationLevel.cautiousBullish,
+        expectedLegacyScore: 7,
+        expectedActionable: true,
+      ),
+    ];
+
+    for (final caseData in cases) {
+      test(caseData.name, () {
+        final result = RecommendationPolicy.evaluate(
+          _decision(
+            directionScore: caseData.directionScore,
+            tradeQualityScore: caseData.tradeQualityScore,
+            riskScore: caseData.riskScore,
+            evidenceConfidence: caseData.evidenceConfidence,
+          ),
+        );
+
+        expect(result.direction, RecommendationDirection.bullish);
+        expect(result.level, caseData.expectedLevel);
+        expect(result.legacyScore, caseData.expectedLegacyScore);
+        expect(result.actionable, caseData.expectedActionable);
+        expect(result.gates, caseData.expectedGates);
+      });
+    }
+  });
+
+  group('RecommendationPolicy bearish evidence boundaries', () {
+    const cases = <_BearishEvidenceCase>[
+      _BearishEvidenceCase(
+        name: 'strong bearish evidence just fails',
+        directionScore: -55,
+        evidenceConfidence: 54.99,
+        expectedLevel: RecommendationLevel.bearishWatch,
+        expectedLegacyScore: 4,
+        expectedActionable: false,
+        expectedGates: <String>['evidence_confidence_below_threshold'],
+      ),
+      _BearishEvidenceCase(
+        name: 'strong bearish evidence just passes',
+        directionScore: -55,
+        evidenceConfidence: 55,
+        expectedLevel: RecommendationLevel.strongBearish,
+        expectedLegacyScore: 1,
+        expectedActionable: true,
+      ),
+      _BearishEvidenceCase(
+        name: 'bearish evidence just fails',
+        directionScore: -35,
+        evidenceConfidence: 54.99,
+        expectedLevel: RecommendationLevel.bearishWatch,
+        expectedLegacyScore: 4,
+        expectedActionable: false,
+        expectedGates: <String>['evidence_confidence_below_threshold'],
+      ),
+      _BearishEvidenceCase(
+        name: 'bearish evidence just passes',
+        directionScore: -35,
+        evidenceConfidence: 55,
+        expectedLevel: RecommendationLevel.bearish,
+        expectedLegacyScore: 2,
+        expectedActionable: true,
+      ),
+      _BearishEvidenceCase(
+        name: 'cautious bearish evidence just fails',
+        directionScore: -20,
+        evidenceConfidence: 54.99,
+        expectedLevel: RecommendationLevel.bearishWatch,
+        expectedLegacyScore: 4,
+        expectedActionable: false,
+        expectedGates: <String>['evidence_confidence_below_threshold'],
+      ),
+      _BearishEvidenceCase(
+        name: 'cautious bearish evidence just passes',
+        directionScore: -20,
+        evidenceConfidence: 55,
+        expectedLevel: RecommendationLevel.cautiousBearish,
+        expectedLegacyScore: 3,
+        expectedActionable: true,
+      ),
+    ];
+
+    for (final caseData in cases) {
+      test(caseData.name, () {
+        final result = RecommendationPolicy.evaluate(
+          _decision(
+            directionScore: caseData.directionScore,
+            evidenceConfidence: caseData.evidenceConfidence,
+          ),
+        );
+
+        expect(result.direction, RecommendationDirection.bearish);
+        expect(result.level, caseData.expectedLevel);
+        expect(result.legacyScore, caseData.expectedLegacyScore);
+        expect(result.actionable, caseData.expectedActionable);
+        expect(result.gates, caseData.expectedGates);
+      });
+    }
   });
 
   group('RecommendationPolicy exceptional legacy score', () {
@@ -345,6 +794,22 @@ class _BoundaryCase {
   });
 }
 
+class _ProbeCase {
+  final double score;
+  final RecommendationLevel level;
+  final RecommendationDirection direction;
+  final int legacyScore;
+  final bool actionable;
+
+  const _ProbeCase({
+    required this.score,
+    required this.level,
+    required this.direction,
+    required this.legacyScore,
+    required this.actionable,
+  });
+}
+
 class _ExceptionalCase {
   final String name;
   final ShortTermDecision decision;
@@ -357,4 +822,58 @@ class _ExceptionalCase {
     required this.expectedLevel,
     required this.expectedLegacyScore,
   });
+}
+
+class _GateCase {
+  final String name;
+  final double directionScore;
+  final double tradeQualityScore;
+  final double riskScore;
+  final double evidenceConfidence;
+  final RecommendationLevel expectedLevel;
+  final int expectedLegacyScore;
+  final bool expectedActionable;
+  final List<String> expectedGates;
+
+  const _GateCase({
+    required this.name,
+    required this.directionScore,
+    required this.tradeQualityScore,
+    required this.riskScore,
+    required this.evidenceConfidence,
+    required this.expectedLevel,
+    required this.expectedLegacyScore,
+    required this.expectedActionable,
+    this.expectedGates = const <String>[],
+  });
+}
+
+class _BearishEvidenceCase {
+  final String name;
+  final double directionScore;
+  final double evidenceConfidence;
+  final RecommendationLevel expectedLevel;
+  final int expectedLegacyScore;
+  final bool expectedActionable;
+  final List<String> expectedGates;
+
+  const _BearishEvidenceCase({
+    required this.name,
+    required this.directionScore,
+    required this.evidenceConfidence,
+    required this.expectedLevel,
+    required this.expectedLegacyScore,
+    required this.expectedActionable,
+    this.expectedGates = const <String>[],
+  });
+}
+
+void _expectDecision(
+  RecommendationDecision result,
+  _ProbeCase expected,
+) {
+  expect(result.level, expected.level);
+  expect(result.direction, expected.direction);
+  expect(result.legacyScore, expected.legacyScore);
+  expect(result.actionable, expected.actionable);
 }
