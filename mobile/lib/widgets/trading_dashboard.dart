@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/stock_models.dart';
 import 'score_trend_chart.dart';
+import 'short_term_decision_panel.dart';
+import '../models/short_term_decision.dart';
 
 /// 交易仪表盘：聚合短线交易关键决策信息
 /// 替代传统多Tab翻页模式，一屏展示全部决策要点
@@ -35,7 +37,19 @@ class TradingDashboard extends StatelessWidget {
         children: [
           _buildQuoteHeader(),
           const SizedBox(height: 8),
-          _buildScoreRow(),
+          if (analysis!.shortTermDecision != null)
+            ShortTermDecisionPanel(
+              decision: analysis!.shortTermDecision!,
+              recommendation: RecommendationDecision(
+                direction: analysis!.shortTermDecision!.direction,
+                level: RecommendationLevel.neutralWatch,
+                label: analysis!.recommendation,
+                legacyScore: analysis!.score.clamp(1, 10),
+                actionable: analysis!.score >= 6,
+              ),
+            )
+          else
+            _buildScoreRow(),
           const SizedBox(height: 10),
           _buildKeySignals(),
           if (analysis!.tradeLevels != null) ...[
@@ -64,7 +78,8 @@ class TradingDashboard extends StatelessWidget {
             const SizedBox(height: 10),
             _buildScoreTrendCard(),
           ],
-          if (analysis!.earlyWarningSignals != null && analysis!.earlyWarningSignals!.isNotEmpty) ...[
+          if (analysis!.earlyWarningSignals != null &&
+              analysis!.earlyWarningSignals!.isNotEmpty) ...[
             const SizedBox(height: 10),
             _buildEarlyWarningSignalsCard(),
           ],
@@ -108,7 +123,8 @@ class TradingDashboard extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       q.code,
-                      style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
+                      style: const TextStyle(
+                          color: Color(0xFF8B949E), fontSize: 12),
                     ),
                     const Spacer(),
                     if (onRefresh != null)
@@ -144,7 +160,8 @@ class TradingDashboard extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       '$sign${q.change.toStringAsFixed(2)}',
-                      style: TextStyle(color: color.withOpacity(0.8), fontSize: 12),
+                      style: TextStyle(
+                          color: color.withOpacity(0.8), fontSize: 12),
                     ),
                   ],
                 ),
@@ -314,14 +331,16 @@ class TradingDashboard extends StatelessWidget {
                     ),
                     const SizedBox(width: 4),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 3, vertical: 1),
                       decoration: BoxDecoration(
                         color: color.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(3),
                       ),
                       child: Text(
                         durStr,
-                        style: TextStyle(color: color.withOpacity(0.8), fontSize: 9),
+                        style: TextStyle(
+                            color: color.withOpacity(0.8), fontSize: 9),
                       ),
                     ),
                   ],
@@ -329,7 +348,8 @@ class TradingDashboard extends StatelessWidget {
                 if (s.description.isNotEmpty)
                   Text(
                     s.description,
-                    style: const TextStyle(color: Color(0xFF8B949E), fontSize: 10),
+                    style:
+                        const TextStyle(color: Color(0xFF8B949E), fontSize: 10),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -342,7 +362,8 @@ class TradingDashboard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(confPct,
-                    style: TextStyle(color: color.withOpacity(0.7), fontSize: 10)),
+                    style:
+                        TextStyle(color: color.withOpacity(0.7), fontSize: 10)),
                 const SizedBox(height: 2),
                 Container(
                   width: 50,
@@ -561,7 +582,8 @@ class TradingDashboard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.warning_amber, size: 16, color: Color(0xFF58A6FF)),
+              const Icon(Icons.warning_amber,
+                  size: 16, color: Color(0xFF58A6FF)),
               const SizedBox(width: 4),
               const Text(
                 '风险分析',
@@ -591,14 +613,10 @@ class TradingDashboard extends StatelessWidget {
               Wrap(
                 spacing: 6,
                 runSpacing: 4,
-                children: factors
-                    .map((f) => _buildRiskChip(f))
-                    .toList(),
+                children: factors.map((f) => _buildRiskChip(f)).toList(),
               )
             else
-              ...factors
-                  .take(3)
-                  .map((f) => _buildRiskChip(f)),
+              ...factors.take(3).map((f) => _buildRiskChip(f)),
           ],
         ],
       ),
@@ -638,7 +656,9 @@ class TradingDashboard extends StatelessWidget {
           Text(
             '上证${mc.shIndexPct.toStringAsFixed(2)}%',
             style: TextStyle(
-              color: mc.shIndexPct >= 0 ? const Color(0xFFE74C3C) : const Color(0xFF2ECC71),
+              color: mc.shIndexPct >= 0
+                  ? const Color(0xFFE74C3C)
+                  : const Color(0xFF2ECC71),
               fontSize: 12,
             ),
           ),
@@ -646,7 +666,9 @@ class TradingDashboard extends StatelessWidget {
           Text(
             '深证${mc.szIndexPct.toStringAsFixed(2)}%',
             style: TextStyle(
-              color: mc.szIndexPct >= 0 ? const Color(0xFFE74C3C) : const Color(0xFF2ECC71),
+              color: mc.szIndexPct >= 0
+                  ? const Color(0xFFE74C3C)
+                  : const Color(0xFF2ECC71),
               fontSize: 12,
             ),
           ),
@@ -723,15 +745,18 @@ class TradingDashboard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: _buildFactorBar('趋势速率', adxTrendScore, const Color(0xFFE74C3C)),
+                child: _buildFactorBar(
+                    '趋势速率', adxTrendScore, const Color(0xFFE74C3C)),
               ),
               const SizedBox(width: 6),
               Expanded(
-                child: _buildFactorBar('量能确认', volumeConfirmScore, const Color(0xFF58A6FF)),
+                child: _buildFactorBar(
+                    '量能确认', volumeConfirmScore, const Color(0xFF58A6FF)),
               ),
               const SizedBox(width: 6),
               Expanded(
-                child: _buildFactorBar('价格偏离', priceDeviationScore, const Color(0xFF2ECC71)),
+                child: _buildFactorBar(
+                    '价格偏离', priceDeviationScore, const Color(0xFF2ECC71)),
               ),
             ],
           ),
@@ -803,7 +828,8 @@ class TradingDashboard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.calendar_today, size: 16, color: Color(0xFF58A6FF)),
+              const Icon(Icons.calendar_today,
+                  size: 16, color: Color(0xFF58A6FF)),
               const SizedBox(width: 4),
               const Text(
                 '次日预测',
@@ -841,7 +867,9 @@ class TradingDashboard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 2),
-                      const Text('上涨', style: TextStyle(color: Color(0xFF8B949E), fontSize: 10)),
+                      const Text('上涨',
+                          style: TextStyle(
+                              color: Color(0xFF8B949E), fontSize: 10)),
                     ],
                   ),
                 ),
@@ -865,7 +893,9 @@ class TradingDashboard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 2),
-                      const Text('下跌', style: TextStyle(color: Color(0xFF8B949E), fontSize: 10)),
+                      const Text('下跌',
+                          style: TextStyle(
+                              color: Color(0xFF8B949E), fontSize: 10)),
                     ],
                   ),
                 ),
@@ -889,7 +919,9 @@ class TradingDashboard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 2),
-                      const Text('震荡', style: TextStyle(color: Color(0xFF8B949E), fontSize: 10)),
+                      const Text('震荡',
+                          style: TextStyle(
+                              color: Color(0xFF8B949E), fontSize: 10)),
                     ],
                   ),
                 ),
@@ -987,12 +1019,11 @@ class TradingDashboard extends StatelessWidget {
 
   Widget _buildScoreTrendCard() {
     final avgScore = scoreTrend!
-        .map((d) => (d['score'] as num).toDouble())
-        .reduce((a, b) => a + b) / scoreTrend!.length;
-    final firstScore =
-        (scoreTrend!.first['score'] as num).toDouble();
-    final lastScore =
-        (scoreTrend!.last['score'] as num).toDouble();
+            .map((d) => (d['score'] as num).toDouble())
+            .reduce((a, b) => a + b) /
+        scoreTrend!.length;
+    final firstScore = (scoreTrend!.first['score'] as num).toDouble();
+    final lastScore = (scoreTrend!.last['score'] as num).toDouble();
     final trend = lastScore - firstScore;
     final trendIcon = trend > 0.5
         ? Icons.trending_up
@@ -1020,17 +1051,26 @@ class TradingDashboard extends StatelessWidget {
         tilePadding: const EdgeInsets.symmetric(horizontal: 12),
         childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         initiallyExpanded: false,
-        leading: const Icon(Icons.show_chart, color: Color(0xFF58A6FF), size: 20),
+        leading:
+            const Icon(Icons.show_chart, color: Color(0xFF58A6FF), size: 20),
         title: Row(
           children: [
             const Text('评分趋势',
-                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600)),
             const SizedBox(width: 8),
-            Text('${scoreTrend!.length}条', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            Text('${scoreTrend!.length}条',
+                style: const TextStyle(color: Colors.white54, fontSize: 11)),
             const SizedBox(width: 8),
             Icon(trendIcon, color: trendColor, size: 14),
             const SizedBox(width: 2),
-            Text('$trendLabel', style: TextStyle(color: trendColor, fontSize: 11, fontWeight: FontWeight.w500)),
+            Text('$trendLabel',
+                style: TextStyle(
+                    color: trendColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500)),
             const Spacer(),
             Text('均${avgScore.toStringAsFixed(1)}分',
                 style: const TextStyle(color: Colors.white38, fontSize: 11)),
@@ -1060,9 +1100,13 @@ class TradingDashboard extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
         const SizedBox(width: 4),
-        Text(label, style: const TextStyle(color: Colors.white38, fontSize: 10)),
+        Text(label,
+            style: const TextStyle(color: Colors.white38, fontSize: 10)),
       ],
     );
   }
