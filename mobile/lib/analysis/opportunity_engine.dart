@@ -11,6 +11,7 @@ import 'indicators.dart';
 import 'signal_engine.dart';
 import 'market_timing.dart';
 import 'decision_tracker.dart';
+import 'decision_calibration_service.dart';
 import '../storage/database_service.dart';
 
 typedef OpportunityAnalysisGenerator = AnalysisResult Function(
@@ -158,10 +159,12 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
 
   final ApiClient _apiClient;
   final DatabaseService _dbService;
+  final DecisionCalibrationService _calibrationService;
 
   OpportunityEngine._()
       : _apiClient = ApiClient(),
-        _dbService = DatabaseService();
+        _dbService = DatabaseService(),
+        _calibrationService = DecisionCalibrationService();
 
   /// 执行机会分析（优化版：MarketTiming仅计算一次，并发度提升，K线天数缩减）
   Future<void> analyze() async {
@@ -235,12 +238,18 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
             if (klines.isEmpty) return null;
 
             final calculated = calcAllIndicators(klines);
-            final analysis = generateOpportunityAnalysisForTesting(
+            var analysis = generateOpportunityAnalysisForTesting(
               calculated: calculated,
               quote: quote,
               marketContext: marketContext,
               generator: generateAnalysis,
             );
+            try {
+              analysis = await _calibrationService.enrich(
+                analysis,
+                asOfTradeDate: calculated.last.date,
+              );
+            } catch (_) {}
             analysisList.add(analysis);
 
             final signals = analysis.signals;

@@ -13,6 +13,7 @@ import 'market_timing.dart';
 import 'market_structure_analyzer.dart';
 import 'recommendation_tracker.dart';
 import 'decision_tracker.dart';
+import 'decision_calibration_service.dart';
 
 /// 探索引擎：后台批量分析沪深主板股票，筛选买入级别以上标的
 /// 使用全局单例 + BroadcastStream，确保切换Tab不中断分析
@@ -23,10 +24,12 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
 
   final ApiClient _apiClient;
   final DatabaseService _dbService;
+  final DecisionCalibrationService _calibrationService;
 
   ExploreEngine._()
       : _apiClient = ApiClient(),
-        _dbService = DatabaseService();
+        _dbService = DatabaseService(),
+        _calibrationService = DecisionCalibrationService();
 
   /// 执行探索分析（异步，通过 progressStream 广播进度）
   Future<void> explore() async {
@@ -183,7 +186,7 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
           final stock = batch[j];
           final klineData = klineCache[stock.code] ?? <HistoryKline>[];
           final quote = quoteCache[stock.code] ?? stock;
-          final result = _analyzeCached(
+          final result = await _analyzeCached(
             stock,
             klineData,
             quote,
@@ -264,13 +267,13 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
   }
 
   /// 使用缓存数据同步分析（无网络IO）
-  ExploreResult? _analyzeCached(
+  Future<ExploreResult?> _analyzeCached(
     QuoteData stock,
     List<HistoryKline> klineData,
     QuoteData quote,
     List<AnalysisResult> analysisList,
     MarketContext? marketContext,
-  ) {
+  ) async {
     try {
       if (klineData.length < 20) return null;
 
@@ -280,12 +283,20 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         return null;
       }
 
-      final analysis = generateAnalysis(
+      var analysis = generateAnalysis(
         indicators,
         quote,
         marketContext: marketContext,
         enableAsyncSideEffects: false,
       );
+      try {
+        analysis = await _calibrationService.enrich(
+          analysis,
+          asOfTradeDate: indicators.last.date,
+        );
+      } catch (e) {
+        debugPrint('ExploreEngine.calibration: $e');
+      }
 
       analysisList.add(analysis);
 
