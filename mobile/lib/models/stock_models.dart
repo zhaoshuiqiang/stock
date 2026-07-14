@@ -393,6 +393,54 @@ class DecisionEvaluationWorkItem {
   });
 }
 
+class DecisionCalibrationRow {
+  final String modelVersion;
+  final int horizon;
+  final RecommendationDirection direction;
+  final double directionScore;
+  final MarketRegime marketRegime;
+  final DateTime signalTradeDate;
+  final DateTime? targetTradeDate;
+  final DecisionOutcomeStatus status;
+  final bool? effectiveDirectionHit;
+
+  const DecisionCalibrationRow({
+    required this.modelVersion,
+    required this.horizon,
+    required this.direction,
+    required this.directionScore,
+    required this.marketRegime,
+    required this.signalTradeDate,
+    this.targetTradeDate,
+    required this.status,
+    this.effectiveDirectionHit,
+  });
+
+  DecisionCalibrationRow copyWith({
+    String? modelVersion,
+    int? horizon,
+    RecommendationDirection? direction,
+    double? directionScore,
+    MarketRegime? marketRegime,
+    DateTime? signalTradeDate,
+    DateTime? targetTradeDate,
+    DecisionOutcomeStatus? status,
+    bool? effectiveDirectionHit,
+  }) =>
+      DecisionCalibrationRow(
+        modelVersion: modelVersion ?? this.modelVersion,
+        horizon: horizon ?? this.horizon,
+        direction: direction ?? this.direction,
+        directionScore: directionScore ?? this.directionScore,
+        marketRegime: marketRegime ?? this.marketRegime,
+        signalTradeDate: signalTradeDate ?? this.signalTradeDate,
+        targetTradeDate: targetTradeDate ?? this.targetTradeDate,
+        status: status ?? this.status,
+        effectiveDirectionHit:
+            effectiveDirectionHit ?? this.effectiveDirectionHit,
+      );
+}
+
 enum DataConfidence { high, medium, low }
 
 enum SignalDuration {
