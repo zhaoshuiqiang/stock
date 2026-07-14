@@ -11,6 +11,9 @@ import '../analysis/signal_engine.dart';
 import '../storage/database_service.dart';
 import '../analysis/sector_rotation.dart';
 import '../analysis/archive_reliability_evaluator.dart';
+import '../services/legacy_archive_csv_exporter.dart';
+import '../analysis/decision_statistics.dart';
+import '../widgets/decision_archive_summary.dart';
 
 const _kVeryReasonableColor = Color(0xFF4CAF50);
 const _kReasonableColor = Colors.orange;
@@ -46,6 +49,9 @@ class ArchiveScreenState extends State<ArchiveScreen>
   Timer? _refreshTimer;
   String _sortBy = 'time'; // 'time', 'score', 'change'
   bool _sortAscending = false;
+  bool _showNewModel = true;
+  int _decisionHorizon = 3;
+  List<DecisionStatisticsRow> _decisionRows = [];
   String _filterType = '全部'; // '全部', '看多', '看空', '观望'
   String _filterReliability = '全部'; // '全部', '非常合理', '合理', '偏差', '非常偏差'
 
@@ -54,7 +60,95 @@ class ArchiveScreenState extends State<ArchiveScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadArchives();
+    _loadDecisionRows();
     _startAutoRefresh();
+  }
+
+  Future<void> _loadDecisionRows() async {
+    final rows = await _dbService.getDecisionStatisticsRows(
+      horizon: _decisionHorizon,
+    );
+    if (mounted) setState(() => _decisionRows = rows);
+  }
+
+  Widget _buildModeSwitch() => SegmentedButton<bool>(
+        segments: const [
+          ButtonSegment(value: true, label: Text('新模型')),
+          ButtonSegment(value: false, label: Text('历史口径')),
+        ],
+        selected: {_showNewModel},
+        showSelectedIcon: false,
+        onSelectionChanged: (value) =>
+            setState(() => _showNewModel = value.first),
+      );
+
+  Widget _buildDecisionMode() {
+    final summary = DecisionStatistics.summarize(_decisionRows);
+    return RefreshIndicator(
+      onRefresh: _loadDecisionRows,
+      child: ListView(
+        padding: const EdgeInsets.all(12),
+        children: [
+          _buildModeSwitch(),
+          const SizedBox(height: 12),
+          DecisionArchiveSummary(
+            summary: summary,
+            horizon: _decisionHorizon,
+            onHorizonChanged: (horizon) {
+              setState(() => _decisionHorizon = horizon);
+              _loadDecisionRows();
+            },
+          ),
+          const SizedBox(height: 12),
+          if (_decisionRows.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 80),
+              child: Center(child: Text('暂无新模型评估数据')),
+            )
+          else
+            ..._decisionRows.map(_buildDecisionRow),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDecisionRow(DecisionStatisticsRow row) {
+    final snapshot = row.snapshot;
+    final outcome = row.outcome;
+    String value(double? number) =>
+        number == null ? '--' : '${number.toStringAsFixed(2)}%';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFF30363D)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(child: Text('${snapshot.name} ${snapshot.code}')),
+          Text(outcome.status.name),
+        ]),
+        const SizedBox(height: 6),
+        Text('${snapshot.source}  ${snapshot.modelVersion}',
+            style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        const SizedBox(height: 6),
+        Text(
+          '${snapshot.direction.name}  方向 ${snapshot.directionScore.toStringAsFixed(0)}  '
+          '质量 ${snapshot.tradeQualityScore.toStringAsFixed(0)}  '
+          '风险 ${snapshot.riskScore.toStringAsFixed(0)}  '
+          '证据 ${snapshot.evidenceConfidence.toStringAsFixed(0)}',
+          style: const TextStyle(fontSize: 12),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '收益 ${value(outcome.forecastReturn)}  Alpha ${value(outcome.alphaReturn)}  '
+          'MFE ${value(outcome.mfe)}  MAE ${value(outcome.mae)}',
+          style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
+        ),
+      ]),
+    );
   }
 
   void _startAutoRefresh() {
@@ -525,7 +619,11 @@ class ArchiveScreenState extends State<ArchiveScreen>
       }
 
       // 添加 BOM 防止 Excel 打开 CSV 时中文乱码
-      final csvContent = '\uFEFF${lines.join('\n')}';
+      final csvContent = buildLegacyArchiveCsv(
+        records: _archives,
+        quoteOf: (code) => _currentQuotes[code],
+        now: now,
+      );
 
       final stamp = DateFormat('yyyyMMdd_HHmmss').format(now);
       final fileName = 'archive_export_$stamp.csv';
@@ -590,6 +688,8 @@ class ArchiveScreenState extends State<ArchiveScreen>
       return const Center(child: CircularProgressIndicator());
     }
 
+    if (_showNewModel) return _buildDecisionMode();
+
     if (_archives.isEmpty) {
       return Center(
         child: Column(
@@ -631,6 +731,12 @@ class ArchiveScreenState extends State<ArchiveScreen>
       onRefresh: _loadArchives,
       child: CustomScrollView(
         slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: _buildModeSwitch(),
+            ),
+          ),
           // 顶部方向统计卡片（方向合理率 + 拆分指标 + 分段比例条 + 操作按钮）
           SliverToBoxAdapter(
             child: Container(

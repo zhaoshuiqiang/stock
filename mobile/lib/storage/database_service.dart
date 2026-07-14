@@ -4,7 +4,9 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import '../models/stock_models.dart';
+import '../models/short_term_decision.dart';
 import '../analysis/limit_up_analyzer.dart';
+import 'decision_tracking_schema.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -31,13 +33,27 @@ class DatabaseService {
     _dbFuture = null;
   }
 
+  @visibleForTesting
+  static Future<void> upgradeDatabaseForTesting(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (oldVersion < 21 && newVersion >= 21) {
+      await db.transaction(createDecisionTrackingSchema);
+    }
+  }
+
   Future<Database> _initDatabase() async {
     final documentsDirectory = await getApplicationDocumentsDirectory();
     final dbPath = path.join(documentsDirectory.path, 'stock_analysis.db');
 
     return await openDatabase(
       dbPath,
-      version: 20,
+      version: 21,
+      onConfigure: (db) async {
+        await db.execute('PRAGMA foreign_keys = ON');
+      },
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -372,6 +388,9 @@ class DatabaseService {
             await txn.execute(
                 "ALTER TABLE recommendation_tracking ADD COLUMN score REAL");
           }
+          if (oldVersion < 21) {
+            await createDecisionTrackingSchema(txn);
+          }
           // 索引补建（幂等，保证升级路径和新装路径都有）
           await txn.execute(
               'CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
@@ -477,6 +496,8 @@ class DatabaseService {
         analyzed_at INTEGER NOT NULL
       )
     ''');
+
+    await createDecisionTrackingSchema(db);
 
     await db.execute('''
       CREATE TABLE sector_pick_results (
@@ -1219,7 +1240,12 @@ class DatabaseService {
     final db = await database;
     final rows = await db.query(
       'recommendation_tracking',
-      columns: ['signal_date', 'score', 'dimension_scores_json', 'signal_price'],
+      columns: [
+        'signal_date',
+        'score',
+        'dimension_scores_json',
+        'signal_price'
+      ],
       where: 'code = ?',
       whereArgs: [code],
       orderBy: 'signal_date ASC',
@@ -1233,9 +1259,8 @@ class DatabaseService {
         if (dimJson != null && dimJson.isNotEmpty) {
           try {
             final dims = jsonDecode(dimJson) as Map<String, dynamic>;
-            final total = dims.values
-                .whereType<double>()
-                .fold(0.0, (a, b) => a + b);
+            final total =
+                dims.values.whereType<double>().fold(0.0, (a, b) => a + b);
             score = (total / dims.length).clamp(0, 10).toDouble();
           } catch (_) {}
         }
@@ -1410,6 +1435,209 @@ class DatabaseService {
     final rows = await db.query('sentiment', limit: 1);
     if (rows.isEmpty) return null;
     return SentimentResult.fromMap(rows.first);
+  }
+
+  Future<int> saveDecisionSnapshotWithOutcomes(
+    DecisionSnapshotRecord snapshot, {
+    Map<int, CalibrationEstimate> calibrations = const {},
+  }) async {
+    final db = await database;
+    return db.transaction((txn) async {
+      final snapshotMap = Map<String, dynamic>.from(snapshot.toMap())
+        ..remove('id');
+      var snapshotId = await txn.insert(
+        'decision_snapshots',
+        snapshotMap,
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      if (snapshotId == 0) {
+        final existing = await txn.query(
+          'decision_snapshots',
+          columns: const ['id'],
+          where:
+              'code = ? AND source = ? AND signal_trade_date = ? AND model_version = ?',
+          whereArgs: [
+            snapshot.code,
+            snapshot.source,
+            snapshotMap['signal_trade_date'],
+            snapshot.modelVersion,
+          ],
+          limit: 1,
+        );
+        if (existing.isEmpty) {
+          throw StateError('Decision snapshot conflict could not be resolved');
+        }
+        snapshotId = (existing.first['id'] as num).toInt();
+      }
+
+      final predictionCreatedAt = snapshot.createdAt.millisecondsSinceEpoch;
+      for (final horizon in const [1, 3, 5]) {
+        final estimate = calibrations[horizon];
+        await txn.insert(
+          'decision_outcomes',
+          {
+            'snapshot_id': snapshotId,
+            'horizon': horizon,
+            if (estimate != null) ...{
+              'predicted_probability': estimate.probability,
+              'predicted_sample_count': estimate.sampleCount,
+              'predicted_wilson_lower': estimate.wilsonLower,
+              'predicted_wilson_upper': estimate.wilsonUpper,
+              'prediction_created_at': predictionCreatedAt,
+            },
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+      return snapshotId;
+    });
+  }
+
+  Future<DecisionSnapshotRecord?> getDecisionSnapshot(int id) async {
+    final db = await database;
+    final rows = await db.query(
+      'decision_snapshots',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : DecisionSnapshotRecord.fromMap(rows.first);
+  }
+
+  Future<List<DecisionOutcomeRecord>> getDecisionOutcomes(
+      int snapshotId) async {
+    final db = await database;
+    final rows = await db.query(
+      'decision_outcomes',
+      where: 'snapshot_id = ?',
+      whereArgs: [snapshotId],
+      orderBy: 'horizon ASC',
+    );
+    return rows.map(DecisionOutcomeRecord.fromMap).toList(growable: false);
+  }
+
+  Future<List<DecisionEvaluationWorkItem>> getPendingDecisionWorkItems({
+    int limit = 100,
+  }) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT o.*
+      FROM decision_outcomes o
+      JOIN decision_snapshots s ON s.id = o.snapshot_id
+      WHERE o.status = 'pending'
+      ORDER BY s.signal_trade_date ASC, o.horizon ASC
+      LIMIT ?
+    ''', [limit]);
+    final result = <DecisionEvaluationWorkItem>[];
+    for (final row in rows) {
+      final outcome = DecisionOutcomeRecord.fromMap(row);
+      final snapshot = await getDecisionSnapshot(outcome.snapshotId);
+      if (snapshot != null) {
+        result.add(DecisionEvaluationWorkItem(
+          snapshot: snapshot,
+          outcome: outcome,
+        ));
+      }
+    }
+    return result;
+  }
+
+  Future<void> saveDecisionOutcome(DecisionOutcomeRecord outcome) async {
+    if (outcome.id == null) {
+      throw ArgumentError('Decision outcome id is required for updates');
+    }
+    final db = await database;
+    final map = Map<String, dynamic>.from(outcome.toMap())..remove('id');
+    await db.update(
+      'decision_outcomes',
+      map,
+      where: 'id = ?',
+      whereArgs: [outcome.id],
+    );
+  }
+
+  Future<List<DecisionCalibrationRow>> getDecisionCalibrationRows({
+    required String modelVersion,
+    required DateTime asOfTradeDate,
+  }) async {
+    final rows = await getDecisionStatisticsRows(modelVersion: modelVersion);
+    final cutoff = _formatSnapshotDate(asOfTradeDate);
+    return rows
+        .where((row) {
+          final target = row.outcome.targetTradeDate;
+          return target != null &&
+              _formatSnapshotDate(target).compareTo(cutoff) < 0;
+        })
+        .map((row) => DecisionCalibrationRow(
+              modelVersion: row.snapshot.modelVersion,
+              horizon: row.outcome.horizon,
+              direction: row.snapshot.direction,
+              directionScore: row.snapshot.directionScore,
+              marketRegime: row.snapshot.marketRegime,
+              signalTradeDate: row.snapshot.signalTradeDate,
+              targetTradeDate: row.outcome.targetTradeDate,
+              status: row.outcome.status,
+              effectiveDirectionHit: row.outcome.effectiveDirectionHit,
+            ))
+        .toList(growable: false);
+  }
+
+  Future<List<DecisionStatisticsRow>> getDecisionStatisticsRows({
+    int? horizon,
+    RecommendationDirection? direction,
+    MarketRegime? marketRegime,
+    String? modelVersion,
+    String? source,
+    String? primaryStrategyId,
+    double? minDirectionScore,
+    double? maxDirectionScore,
+  }) async {
+    final db = await database;
+    final where = <String>[];
+    final args = <Object?>[];
+    void add(String clause, Object? value) {
+      where.add(clause);
+      args.add(value);
+    }
+
+    if (direction != null) add('direction = ?', direction.name);
+    if (marketRegime != null) add('market_regime = ?', marketRegime.name);
+    if (modelVersion != null) add('model_version = ?', modelVersion);
+    if (source != null) add('source = ?', source);
+    if (primaryStrategyId != null) {
+      add('primary_strategy_id = ?', primaryStrategyId);
+    }
+    if (minDirectionScore != null) {
+      add('direction_score >= ?', minDirectionScore);
+    }
+    if (maxDirectionScore != null) {
+      add('direction_score <= ?', maxDirectionScore);
+    }
+    final snapshotRows = await db.query(
+      'decision_snapshots',
+      where: where.isEmpty ? null : where.join(' AND '),
+      whereArgs: args.isEmpty ? null : args,
+      orderBy: 'signal_trade_date DESC, id DESC',
+    );
+    final result = <DecisionStatisticsRow>[];
+    for (final snapshotMap in snapshotRows) {
+      final snapshot = DecisionSnapshotRecord.fromMap(snapshotMap);
+      final outcomeRows = await db.query(
+        'decision_outcomes',
+        where: horizon == null
+            ? 'snapshot_id = ?'
+            : 'snapshot_id = ? AND horizon = ?',
+        whereArgs: horizon == null ? [snapshot.id] : [snapshot.id, horizon],
+        orderBy: 'horizon ASC',
+      );
+      for (final outcomeMap in outcomeRows) {
+        result.add(DecisionStatisticsRow(
+          snapshot: snapshot,
+          outcome: DecisionOutcomeRecord.fromMap(outcomeMap),
+        ));
+      }
+    }
+    return result;
   }
 
   static String _formatSnapshotDate(DateTime date) =>

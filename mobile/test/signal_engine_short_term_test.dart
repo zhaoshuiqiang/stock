@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stock_analyzer/analysis/indicators.dart';
+import 'package:stock_analyzer/analysis/recommendation_policy.dart';
 import 'package:stock_analyzer/analysis/signal_engine.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 
@@ -21,6 +22,13 @@ void main() {
         quote,
         enableAsyncSideEffects: false,
       );
+
+      expect(analysis.shortTermDecision, isNotNull);
+      final policy = RecommendationPolicy.evaluate(analysis.shortTermDecision!);
+      expect(analysis.score, policy.legacyScore);
+      expect(analysis.recommendation, policy.label);
+      expect(analysis.confidenceScore,
+          analysis.shortTermDecision!.evidenceConfidence / 100);
 
       expect(analysis.dimensionScores?['短线交易'], isNotNull);
       expect(analysis.dimensionScores!['短线交易'], greaterThanOrEqualTo(5));
@@ -46,7 +54,8 @@ void main() {
         enableAsyncSideEffects: false,
       );
 
-      expect(analysis.score, lessThanOrEqualTo(6));
+      expect(analysis.score, lessThanOrEqualTo(7));
+      expect(analysis.shortTermDecision!.directionScore, lessThanOrEqualTo(34));
       expect(analysis.recommendation, isNot(anyOf('强烈买入', '买入')));
       expect(
         analysis.reasons.any((r) => r.contains('追高') || r.contains('涨停')),

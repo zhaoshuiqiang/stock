@@ -695,6 +695,62 @@ class ApiClient {
     }
   }
 
+  Future<List<HistoryKline>> getForwardAdjustedHistory(String code,
+      {int days = 180}) async {
+    final cacheKey = 'decision_qfq_${code}_$days';
+    final cached = _getCached(cacheKey);
+    if (cached != null) return cached as List<HistoryKline>;
+    for (final loader in <Future<List<HistoryKline>> Function()>[
+      () => _fetchStockHistoryFromTDX(code, days),
+      () => _fetchStockHistoryFromTencent(code, days),
+      () => _fetchStockHistoryFromEastMoney(code, days, adjustment: 1),
+    ]) {
+      try {
+        final bars = _normalizeDecisionBars(await loader());
+        if (bars.isNotEmpty) {
+          _setCached(cacheKey, bars, duration: const Duration(minutes: 5));
+          return bars;
+        }
+      } catch (e) {
+        debugPrint('Strict qfq history failed for $code: $e');
+      }
+    }
+    return const [];
+  }
+
+  Future<List<HistoryKline>> getRawHistory(String code,
+      {int days = 180}) async {
+    final cacheKey = 'decision_raw_${code}_$days';
+    final cached = _getCached(cacheKey);
+    if (cached != null) return cached as List<HistoryKline>;
+    for (final loader in <Future<List<HistoryKline>> Function()>[
+      () => _fetchStockHistoryFromEastMoney(code, days, adjustment: 0),
+      () => _fetchStockHistoryFromSina(code, days),
+    ]) {
+      try {
+        final bars = _normalizeDecisionBars(await loader());
+        if (bars.isNotEmpty) {
+          _setCached(cacheKey, bars, duration: const Duration(minutes: 5));
+          return bars;
+        }
+      } catch (e) {
+        debugPrint('Raw history failed for $code: $e');
+      }
+    }
+    return const [];
+  }
+
+  static List<HistoryKline> _normalizeDecisionBars(List<HistoryKline> bars) {
+    final byDate = <String, HistoryKline>{};
+    for (final bar in bars) {
+      final key = '${bar.date.year}-${bar.date.month}-${bar.date.day}';
+      byDate[key] = bar;
+    }
+    final result = byDate.values.toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+    return result;
+  }
+
   Future<List<HistoryKline>> _fetchStockHistory(
       String code, int days, String cacheKey) async {
     // 数据源优先级：通达信 > 腾讯 > 东方财富 > 新浪
@@ -958,7 +1014,8 @@ class ApiClient {
   }
 
   Future<List<HistoryKline>> _fetchStockHistoryFromEastMoney(
-      String code, int days) async {
+      String code, int days,
+      {int adjustment = 1}) async {
     // 东方财富K线API
     String secid;
     if (code.startsWith('sh')) {
@@ -970,7 +1027,7 @@ class ApiClient {
     }
 
     final url = Uri.parse(
-        'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=$secid&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=$days');
+        'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=$secid&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=$adjustment&end=20500101&lmt=$days');
     final response = await _httpGet(url,
         headers: {
           'User-Agent': 'Mozilla/5.0',

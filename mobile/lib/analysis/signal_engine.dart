@@ -1,11 +1,11 @@
 import 'package:flutter/foundation.dart';
 import '../models/stock_models.dart';
+import '../models/short_term_decision.dart';
 import '../core/ai_config.dart';
 import 'indicators.dart';
 import 'signal_layer.dart';
 import 'technical_scorer.dart';
 import 'realtime_scorer.dart';
-import 'short_term_scorer.dart';
 import 'confluence_scorer.dart';
 import 'comprehensive_scorer.dart';
 import 'risk_analyzer.dart';
@@ -24,7 +24,6 @@ import 'ai_layer.dart';
 import 'debate_engine.dart';
 import 'recommendation_tracker.dart';
 import 'recommendation_explainer.dart';
-import 'recommendation_calibrator.dart';
 import 'pattern_recognizer.dart';
 import 'sector_rotation.dart';
 import 'momentum_persistence_analyzer.dart';
@@ -32,6 +31,7 @@ import 'next_day_predictor.dart';
 import 'next_session_prediction.dart';
 import 'next_session_predictor.dart';
 import 'signal_detector.dart';
+import 'short_term_decision_engine.dart';
 
 /// 向后兼容：检测特有信号（量价背离、布林收口）
 List<SignalItem> detectSignals(List<HistoryKline> data) {
@@ -39,13 +39,13 @@ List<SignalItem> detectSignals(List<HistoryKline> data) {
 }
 
 double _predictionSupportForRecommendation(
-  int totalScore,
+  RecommendationDirection direction,
   NextDayPredictionResult prediction,
 ) {
-  if (totalScore >= 6) {
+  if (direction == RecommendationDirection.bullish) {
     return prediction.upProbability.clamp(0.0, 1.0).toDouble();
   }
-  if (totalScore <= 4) {
+  if (direction == RecommendationDirection.bearish) {
     return prediction.downProbability.clamp(0.0, 1.0).toDouble();
   }
   final neutralSupport =
@@ -404,41 +404,6 @@ AnalysisResult generateAnalysis(
     sectorAnalysis: sectorAnalysis,
   );
 
-  final shortTermResult = ShortTermScorer.score(
-    data: data,
-    buySignals: buySignals,
-    sellSignals: sellSignals,
-    quote: quote,
-  );
-
-  var totalScore = compResult.totalScore;
-  var recommendation = compResult.recommendation;
-  final cappedScore =
-      ShortTermScorer.capRecommendationScore(totalScore, shortTermResult);
-  if (cappedScore < totalScore) {
-    totalScore = cappedScore;
-    recommendation = _recommendationFromScore(totalScore, quote);
-  }
-
-  final calibration = RecommendationCalibrator.calibrateScore(
-    score: totalScore,
-    data: data,
-    buySignals: buySignals,
-    sellSignals: sellSignals,
-    currentChangePct: quote?.changePct,
-  );
-  final calibrationReason = calibration.reason;
-  if (calibration.score < totalScore) {
-    totalScore = calibration.score;
-    recommendation = _recommendationFromScore(totalScore, quote);
-  }
-  final nextSessionAdjustment = _applyNextSessionRiskGate(
-      totalScore, recommendation, nextSessionPrediction, quote);
-  if (nextSessionAdjustment.score < totalScore) {
-    totalScore = nextSessionAdjustment.score;
-    recommendation = nextSessionAdjustment.recommendation;
-  }
-
   // 6. 推荐理由（见下方步骤13，全部上下文就绪后生成）
 
   // 7. 风险分析
@@ -482,12 +447,37 @@ AnalysisResult generateAnalysis(
     debugPrint('SignalEngine.structureFilter: $e');
   }
 
+  final tradeLevels = calcTradeLevels(data);
+  final decisionResult = ShortTermDecisionEngine.evaluate(
+    ShortTermDecisionInput(
+      data: data,
+      quote: quote,
+      buySignals: buySignals,
+      sellSignals: sellSignals,
+      marketContext: marketContext,
+      marketStructure: marketStructure,
+      industryRelativeStrength: percentile.industryRSScore,
+      nextDayPrediction: nextDayPrediction,
+      nextSessionPrediction: nextSessionPrediction,
+      tradeLevels: tradeLevels,
+      activeStrategies: <TradingStrategy>[
+        ...shortTermStrategies,
+        ...longTermStrategies,
+      ],
+      rawComprehensiveScore: compResult.totalScore.toDouble(),
+    ),
+  );
+  final shortTermDecision = decisionResult.decision;
+  final recommendationDecision = decisionResult.recommendation;
+  final totalScore = recommendationDecision.legacyScore;
+  final recommendation = recommendationDecision.label;
+
   // 12. 置信度计算（内部已包含对抗验证 + v2.30: 回测胜率维度 + 新增: 预测准确率反馈）
   final confResult = ConfidenceCalculator.calculate(
     buySignals: buySignals,
     sellSignals: sellSignals,
     signals: signals,
-    totalScore: totalScore,
+    direction: shortTermDecision.direction,
     last: last,
     quote: quote,
     fundamentalScore: compResult.fundamentalScore,
@@ -495,63 +485,27 @@ AnalysisResult generateAnalysis(
     marketContext: marketContext,
     marketStructure: marketStructure,
     backtestResults: backtestResults,
-    predictionAccuracy:
-        _predictionSupportForRecommendation(totalScore, nextDayPrediction),
+    predictionAccuracy: _predictionSupportForRecommendation(
+      shortTermDecision.direction,
+      nextDayPrediction,
+    ),
   );
   // 回测反馈闭环：根据策略历史表现调整置信度
-  double confidenceScore = confResult.confidenceScore;
-  if (backtestResults.isNotEmpty) {
-    final adjustments = <double>[];
-    // 根据推荐方向采用不同的反馈逻辑：
-    // - 买入推荐（totalScore > 5）：买入信号可靠→提升置信度，卖出信号可靠→降低置信度（反向确认）
-    // - 卖出推荐（totalScore <= 5）：卖出信号可靠→提升置信度，买入信号可靠→降低置信度（反向确认）
-    final isBuyRecommendation = totalScore > 5;
-    // 与推荐方向一致的信号：回测可靠→提升置信度
-    final alignedSignals = isBuyRecommendation ? buySignals : sellSignals;
-    // 与推荐方向相反的信号：回测可靠→降低置信度（反向确认）
-    final oppositeSignals = isBuyRecommendation ? sellSignals : buySignals;
-
-    for (final signal in alignedSignals) {
-      final strategyName = mapSignalToBacktestKey(signal.signal);
-      if (strategyName != null) {
-        var adj = BacktestEngine.getStrategyConfidenceAdjustment(
-            strategyName, backtestResults);
-        // v2.30: KDJ金叉在高K区(k>=50)时回测样本不匹配，稀释调整
-        adj = _diluteKdjAdjustment(signal.signal, last.k, adj);
-        adjustments.add(adj); // adj 高 → 提升置信度
-      }
-    }
-    for (final signal in oppositeSignals) {
-      final strategyName = mapSignalToBacktestKey(signal.signal);
-      if (strategyName != null) {
-        var adj = BacktestEngine.getStrategyConfidenceAdjustment(
-            strategyName, backtestResults);
-        // v2.30: KDJ死叉同理稀释
-        adj = _diluteKdjAdjustment(signal.signal, last.k, adj);
-        // 反向信号可靠性高 → 降低置信度
-        adjustments
-            .add(2.0 - adj); // adj 1.0 → 1.0, adj 1.3 → 0.7, adj 0.7 → 1.3
-      }
-    }
-    if (adjustments.isNotEmpty) {
-      final avgAdjustment =
-          adjustments.reduce((a, b) => a + b) / adjustments.length;
-      confidenceScore =
-          (confidenceScore * (0.5 + avgAdjustment * 0.5)).clamp(0.2, 0.95);
-    }
-  }
+  final confidenceScore = shortTermDecision.evidenceConfidence / 100;
   final validatedSignals = confResult.validatedSignals;
   final confidenceBreakdown = ConfidenceCalculator.breakdown(
     buySignals: buySignals,
     sellSignals: sellSignals,
-    totalScore: totalScore,
+    direction: shortTermDecision.direction,
     fundamentalScore: compResult.fundamentalScore,
     newsSentiment: compResult.newsSentiment,
     marketContext: marketContext,
     marketStructure: marketStructure,
     backtestResults: backtestResults,
-    predictionSupport:
-        _predictionSupportForRecommendation(totalScore, nextDayPrediction),
+    predictionSupport: _predictionSupportForRecommendation(
+      shortTermDecision.direction,
+      nextDayPrediction,
+    ),
   );
 
   // 13. 详细推荐理由（增强版：含市场结构/策略/回测/置信度上下文）
@@ -566,7 +520,7 @@ AnalysisResult generateAnalysis(
         : 5.0,
     '基本面': compResult.fundamentalScore?.totalScore ?? 5.0,
     '结构': marketStructure.structureScore,
-    '短线交易': shortTermResult.score,
+    '短线交易': shortTermDecision.tradeQualityScore / 10,
     '动量持续性': momentumPersistence.persistenceScore * 10,
     '次日预测': nextDayPrediction.upProbability * 10,
     '次交易预测': nextSessionPrediction.nextCloseUpProbability * 10,
@@ -587,21 +541,11 @@ AnalysisResult generateAnalysis(
     recommendation: recommendation,
     dimensionScores: dimensionScores,
   );
-  if (calibrationReason.isNotEmpty) {
-    reasons.add(calibrationReason);
-  }
   reasons.add(
-      '短线交易分：${shortTermResult.score.toStringAsFixed(1)}，${shortTermResult.actionLabel}');
-  if (shortTermResult.riskCaps.isNotEmpty) {
-    reasons.add('短线风控：${shortTermResult.riskCaps.take(3).join('；')}');
-  }
+      '短线交易质量：${shortTermDecision.tradeQualityScore.toStringAsFixed(0)}，风险：${shortTermDecision.riskScore.toStringAsFixed(0)}');
 
   // 13a. 历史决策反思注入（v2.53: 决策反馈闭环）
   // 异步获取历史反思，不阻塞主分析流程
-  if (nextSessionAdjustment.reason.isNotEmpty) {
-    reasons.add(nextSessionAdjustment.reason);
-  }
-
   List<Map<String, dynamic>> historicalReflections = [];
   if (enableAsyncSideEffects && quote != null) {
     RecommendationTracker()
@@ -680,16 +624,8 @@ AnalysisResult generateAnalysis(
     confidenceScore: confidenceScore,
     marketStructure: marketStructure,
   );
-  if (shortTermResult.maxRecommendationScore < compResult.totalScore) {
-    suggestions.insert(0,
-        '短线风控触发：${shortTermResult.riskCaps.take(2).join('；')}，不建议追高，等待回踩或分时低吸确认');
-  } else if (shortTermResult.score >= 7) {
-    suggestions.insert(
-        0, '短线交易分${shortTermResult.score.toStringAsFixed(1)}，可在分时承接确认后小仓位参与');
-  }
-
-  if (nextSessionAdjustment.reason.isNotEmpty) {
-    suggestions.insert(0, nextSessionAdjustment.reason);
+  if (recommendationDecision.gates.isNotEmpty) {
+    suggestions.insert(0, '短线执行条件未满足，保持观察并等待风险或交易质量改善');
   }
 
   final detailedReasons = <RecommendationReason>[];
@@ -717,8 +653,6 @@ AnalysisResult generateAnalysis(
     ));
   }
 
-  final tradeLevels = calcTradeLevels(data);
-
   // v2.30: 推荐追踪 — 覆盖率扩大到个股分析流（原仅在ExploreEngine调用）
   if (enableAsyncSideEffects && totalScore >= 6 && quote != null) {
     final trackResult = AnalysisResult(
@@ -732,6 +666,7 @@ AnalysisResult generateAnalysis(
       longTermStrategies: longTermStrategies,
       marketStructure: marketStructure,
       dimensionScores: dimensionScores,
+      shortTermDecision: shortTermDecision,
     );
     // 异步fire-and-forget，不阻塞主分析流程
     RecommendationTracker().track(trackResult).catchError((e) {
@@ -772,6 +707,7 @@ AnalysisResult generateAnalysis(
     nextDayPrediction:
         _combinedPredictionJson(nextDayPrediction, nextSessionPrediction),
     earlyWarningSignals: earlyWarningSignals,
+    shortTermDecision: shortTermDecision,
   );
 }
 
@@ -818,6 +754,8 @@ Map<String, dynamic> _nextSessionPredictionToJson(
   };
 }
 
+// Kept temporarily for compatibility with older branch-local tests.
+// ignore: unused_element
 _NextSessionRecommendationAdjustment _applyNextSessionRiskGate(
   int score,
   String recommendation,
@@ -1020,16 +958,6 @@ List<String> _generateReasons(
   }
 
   return reasons;
-}
-
-/// v2.30: KDJ回测调整稀释
-/// KDJ金叉/死叉在高K区(k>=50)时回测样本不匹配(回测仅覆盖K<30的超卖金叉)
-/// 将调整向中性值1.0收缩50%，降低误判
-double _diluteKdjAdjustment(String signalName, double kValue, double rawAdj) {
-  if (signalName.startsWith('KDJ') && kValue >= 50) {
-    return 1.0 + (rawAdj - 1.0) * 0.5;
-  }
-  return rawAdj;
 }
 
 /// v2.53: 生成历史决策反思总结

@@ -11,6 +11,7 @@ import '../api/market_context_provider.dart';
 import '../models/stock_models.dart';
 import '../analysis/indicators.dart';
 import '../analysis/signal_engine.dart';
+import '../analysis/decision_calibration_service.dart';
 import '../analysis/backtest_engine.dart';
 import '../analysis/limit_up_analyzer.dart';
 import '../storage/database_service.dart';
@@ -55,6 +56,8 @@ class QuoteScreen extends StatefulWidget {
 class QuoteScreenState extends State<QuoteScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final ApiClient _apiClient = ApiClient();
+  final DecisionCalibrationService _calibrationService =
+      DecisionCalibrationService();
   final DatabaseService _dbService = DatabaseService();
   Timer? _pollingTimer;
   Timer? _analysisRefreshTimer;
@@ -406,7 +409,7 @@ class QuoteScreenState extends State<QuoteScreen>
 
       final calculated = calcAllIndicators(klines);
       final marketContext = await MarketContextProvider.getMarketContext();
-      final analysis = generateAnalysis(
+      var analysis = generateAnalysis(
         calculated,
         _quote,
         marketContext: marketContext,
@@ -419,6 +422,14 @@ class QuoteScreenState extends State<QuoteScreen>
           }
         },
       );
+      try {
+        analysis = await _calibrationService.enrich(
+          analysis,
+          asOfTradeDate: calculated.last.date,
+        );
+      } catch (e) {
+        debugPrint('QuoteScreen.calibration refresh: $e');
+      }
 
       // Recalculate tech analysis
       final tech = <String, dynamic>{};
@@ -479,7 +490,7 @@ class QuoteScreenState extends State<QuoteScreen>
     }
   }
 
-  void _handleQuoteUpdate(QuoteData quote) {
+  Future<void> _handleQuoteUpdate(QuoteData quote) async {
     if (!mounted) return;
     if (quote.code != widget.code) return;
 
@@ -544,6 +555,10 @@ class QuoteScreenState extends State<QuoteScreen>
           mergedQuote,
           marketContext: _marketContext,
           enableAsyncSideEffects: false,
+        );
+        newAnalysis = await _calibrationService.enrich(
+          newAnalysis,
+          asOfTradeDate: _klines.last.date,
         );
       } catch (e) {
         debugPrint('generateAnalysis 失败: $e');
@@ -632,7 +647,7 @@ class QuoteScreenState extends State<QuoteScreen>
         );
       }
 
-      final analysis = generateAnalysis(
+      var analysis = generateAnalysis(
         calculated,
         quote,
         marketContext: marketContext,
@@ -640,6 +655,14 @@ class QuoteScreenState extends State<QuoteScreen>
         sectorAnalysis: sectorRotationResult.topSectors,
         enableAsyncSideEffects: false,
       );
+      try {
+        analysis = await _calibrationService.enrich(
+          analysis,
+          asOfTradeDate: calculated.last.date,
+        );
+      } catch (e) {
+        debugPrint('QuoteScreen.calibration load: $e');
+      }
 
       // 计算支撑压力位和斐波那契
       final tech = <String, dynamic>{};

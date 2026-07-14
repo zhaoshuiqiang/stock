@@ -1,0 +1,155 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:stock_analyzer/storage/database_service.dart';
+import 'package:stock_analyzer/storage/decision_tracking_schema.dart';
+import 'package:stock_analyzer/models/short_term_decision.dart';
+import 'package:stock_analyzer/models/stock_models.dart';
+
+void main() {
+  setUpAll(() {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  });
+
+  test('v20 to v21 migration preserves legacy data and creates constraints',
+      () async {
+    final db = await openDatabase(
+      inMemoryDatabasePath,
+      version: 20,
+      onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+      onCreate: (db, version) async {
+        await db.execute(
+            'CREATE TABLE archive_records (id INTEGER PRIMARY KEY, code TEXT)');
+        await db.execute(
+            'CREATE TABLE recommendation_tracking (id INTEGER PRIMARY KEY, code TEXT)');
+        await db.insert('archive_records', {'id': 1, 'code': '000001'});
+        await db.insert('recommendation_tracking', {'id': 1, 'code': '600519'});
+      },
+    );
+
+    await DatabaseService.upgradeDatabaseForTesting(db, 20, 21);
+
+    expect(await db.query('archive_records'), hasLength(1));
+    expect(await db.query('recommendation_tracking'), hasLength(1));
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'decision_%'",
+    );
+    expect(tables.map((row) => row['name']),
+        containsAll(['decision_snapshots', 'decision_outcomes']));
+
+    final indexes = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_decision_%'",
+    );
+    expect(
+      indexes.map((row) => row['name']),
+      containsAll([
+        'idx_decision_snapshots_trade_date',
+        'idx_decision_snapshots_filter',
+        'idx_decision_outcomes_pending',
+      ]),
+    );
+
+    await expectLater(
+      db.insert('decision_snapshots', _snapshotMap(directionScore: 101)),
+      throwsA(anything),
+    );
+    final snapshotId = await db.insert(
+      'decision_snapshots',
+      _snapshotMap(directionScore: 50),
+    );
+    await expectLater(
+      db.insert('decision_outcomes', {'snapshot_id': snapshotId, 'horizon': 2}),
+      throwsA(anything),
+    );
+    await db
+        .delete('decision_snapshots', where: 'id = ?', whereArgs: [snapshotId]);
+    expect(await db.query('decision_outcomes'), isEmpty);
+    await db.close();
+  });
+
+  test('atomic save is idempotent and creates calibrated 1/3/5 outcomes',
+      () async {
+    final db = await _openTrackingDb();
+    final service = DatabaseService();
+    service.resetForTesting();
+    await service.setDatabaseForTesting(db);
+    final snapshot = DecisionSnapshotRecord.minimalForTesting(
+      code: '000001',
+      signalTradeDate: DateTime(2026, 7, 14),
+    );
+    final calibration = CalibrationEstimate(
+      horizon: 3,
+      probability: 0.67,
+      sampleCount: 30,
+      wilsonLower: 0.49,
+      wilsonUpper: 0.81,
+    );
+
+    final firstId = await service.saveDecisionSnapshotWithOutcomes(
+      snapshot,
+      calibrations: {3: calibration},
+    );
+    final secondId = await service.saveDecisionSnapshotWithOutcomes(snapshot);
+
+    expect(secondId, firstId);
+    expect(await db.query('decision_snapshots'), hasLength(1));
+    final outcomes = await service.getDecisionOutcomes(firstId);
+    expect(outcomes.map((item) => item.horizon), [1, 3, 5]);
+    expect(
+        outcomes.singleWhere((item) => item.horizon == 3).predictedProbability,
+        0.67);
+    expect(
+        outcomes.singleWhere((item) => item.horizon == 1).predictedProbability,
+        isNull);
+    await db.close();
+  });
+
+  test('pending work is typed and ordered by signal date', () async {
+    final db = await _openTrackingDb();
+    final service = DatabaseService();
+    service.resetForTesting();
+    await service.setDatabaseForTesting(db);
+    for (final date in [DateTime(2026, 7, 15), DateTime(2026, 7, 14)]) {
+      await service.saveDecisionSnapshotWithOutcomes(
+        DecisionSnapshotRecord.minimalForTesting(
+          code: date.day == 14 ? '000001' : '000002',
+          signalTradeDate: date,
+        ),
+      );
+    }
+
+    final work = await service.getPendingDecisionWorkItems(limit: 2);
+    expect(work, hasLength(2));
+    expect(work.first.snapshot.signalTradeDate, DateTime(2026, 7, 14));
+    expect(work.first.outcome.status, DecisionOutcomeStatus.pending);
+    await db.close();
+  });
+}
+
+Future<Database> _openTrackingDb() => openDatabase(
+      inMemoryDatabasePath,
+      version: 1,
+      onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+      onCreate: (db, version) => createDecisionTrackingSchema(db),
+    );
+
+Map<String, Object?> _snapshotMap({required double directionScore}) => {
+      'code': '000001',
+      'name': '',
+      'source': 'test',
+      'signal_time': DateTime(2026, 7, 14).millisecondsSinceEpoch,
+      'signal_trade_date': '2026-07-14',
+      'signal_price': 10.0,
+      'benchmark_code': '000300',
+      'direction': 'bullish',
+      'direction_score': directionScore,
+      'trade_quality_score': 70.0,
+      'risk_score': 30.0,
+      'evidence_confidence': 75.0,
+      'recommendation_level': 'bullish',
+      'recommendation_label': '看多',
+      'legacy_score': 8,
+      'market_regime': 'bullishTrend',
+      'model_version': 'v2',
+      'created_at': DateTime(2026, 7, 14).millisecondsSinceEpoch,
+    };
