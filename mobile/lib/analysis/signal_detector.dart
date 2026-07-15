@@ -232,7 +232,9 @@ class SignalDetector {
           strength: 70,
           timestamp: last.date,
           duration: SignalDuration.shortTerm,
-          confidence: 0.7,
+          // v3.22: 降低WR超买置信度(0.70→0.50)，A股趋势市中超买可持续很久，
+          // 仅凭超买判断回调胜率较低。
+          confidence: 0.50,
           signalCount: 1,
         ));
       }
@@ -476,7 +478,9 @@ class SignalDetector {
         strength: 75,
         timestamp: last.date,
         duration: SignalDuration.longTerm,
-        confidence: 0.8,
+        // v3.22: 降低空头趋势信号置信度(0.80→0.55)，ADX是滞后长周期指标，
+        // 对次日短线预测力弱，且A股下跌趋势经常快速反转。
+        confidence: 0.55,
         signalCount: 1,
       ));
     } else if (last.adx14 > 0 && last.adx14 < 20) {
@@ -530,16 +534,18 @@ class SignalDetector {
   }
 
   // 辅助方法：计算KDJ置信度
+  /// v3.22: KDJ死叉置信度降低(base 0.70→0.55 for sell)，强势行情中KDJ死叉频繁失效。
+  /// 金叉保持原有base=0.70，不影响看多信号准确率。
   static double _calculateKDJConfidence(HistoryKline last, HistoryKline prev, {String signalType = 'buy'}) {
-    double base = 0.7;
+    double base = signalType == 'buy' ? 0.70 : 0.55;
     if (signalType == 'buy') {
       if (last.j < 20) base += 0.05; // 超卖区金叉更可靠
       if (last.j > 80) base -= 0.05; // 超买区金叉不可靠
     } else {
-      if (last.j > 80) base += 0.05; // 超买区死叉更可靠
-      if (last.j < 20) base -= 0.05;  // 超卖区死叉不可靠
+      if (last.j > 80) base += 0.05; // 超买区死叉稍可靠
+      if (last.j < 20) base -= 0.05; // 超卖区死叉不可靠
     }
-    return base.clamp(0.6, 0.9);
+    return base.clamp(0.45, 0.9);
   }
 
   /// MACD顶底背离检测（中期信号）

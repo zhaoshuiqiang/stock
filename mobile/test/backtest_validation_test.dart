@@ -1741,7 +1741,8 @@ void main() {
           ),
         );
         expect(r.confidenceScore, lessThanOrEqualTo(0.95));
-        expect(r.confidenceScore, greaterThan(0.75));
+        // v3.22: bearish信号confidence降低后，全对齐场景的最终置信度略微下降，放宽下界到0.74
+        expect(r.confidenceScore, greaterThan(0.74));
       }
     });
 
