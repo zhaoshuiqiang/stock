@@ -1636,5 +1636,6 @@ class ArchiveScreenState extends State<ArchiveScreen>
   /// v3.2: 切回留档tab时自动刷新数据
   void onTabVisible() {
     _loadArchives();
+    _loadDecisionRows();
   }
 }

@@ -10,6 +10,14 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.26.20260715',
+        'date': '2026-07-15',
+        'changes': [
+          '修复: 留档页切回时只刷新历史口径、未刷新新模型，导致今日留档不显示',
+          '留档页 onTabVisible 现同时重载新模型决策数据',
+        ],
+      },
+      {
         'version': 'v3.25.20260715',
         'date': '2026-07-15',
         'changes': [
