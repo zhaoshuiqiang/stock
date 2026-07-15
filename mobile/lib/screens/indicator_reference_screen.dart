@@ -7,7 +7,7 @@ class IndicatorReferenceScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final categories = ['趋势', '震荡', '波动', '量能'];
+    final categories = ['评分', '趋势', '震荡', '波动', '量能'];
 
     return Scaffold(
       appBar: AppBar(
@@ -140,6 +140,7 @@ class IndicatorReferenceScreen extends StatelessWidget {
 
   Color _getCategoryColor(String category) {
     switch (category) {
+      case '评分': return const Color(0xFFE67E22);
       case '趋势': return const Color(0xFF26a69a);
       case '震荡': return const Color(0xFF4caf50);
       case '波动': return const Color(0xFFff9800);

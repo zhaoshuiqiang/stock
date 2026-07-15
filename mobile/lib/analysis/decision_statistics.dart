@@ -134,8 +134,9 @@ class DecisionStatistics {
               outcome: row.outcome.effectiveDirectionHit!,
             ))
         .toList(growable: false);
+    // v3.21: 冷启动门槛降低 30→10样本+5信号日，让新用户更快看到校准指标
     final calibrationEligible =
-        probabilitySamples.length >= 30 && signalDates >= 10;
+        probabilitySamples.length >= 10 && signalDates >= 5;
     final rawHitCount = rawHits.where((hit) => hit).length;
     return DecisionStatisticsSummary(
       evaluatedCount: evaluated.length,

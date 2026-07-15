@@ -64,6 +64,8 @@ class ArchiveReliabilityStats {
 }
 
 class ArchiveReliabilityEvaluator {
+  /// v3.21: 短线阈值收紧 — 当天(0-1日)基准陖1.0%，次日(1-2日)1.5%，之后沿用原有平方根增长。
+  /// 超短线用户关心“买入后跌1.9%算不算正确”，原2%阈值太宽松，收紧后更真实反映短线胜率。
   static (double threshold, double neutralThreshold) calculateThresholds(
     ArchiveRecord record, {
     DateTime? now,
@@ -71,12 +73,22 @@ class ArchiveReliabilityEvaluator {
     final baseNow = now ?? DateTime.now();
     final daysSince =
         baseNow.difference(record.archivedAt).inDays.clamp(0, 365);
-    final timeScale = max(daysSince, 1) / 5.0;
-    final timeFactor = sqrt(timeScale);
-    return (
-      (2.0 * timeFactor).clamp(2.0, 12.0),
-      (8.0 * timeFactor).clamp(4.0, 24.0),
-    );
+    // 短线阈值收紧：0-1天=1.0%, 1-2天=1.5%, 之后≈原有的sqrt增长
+    final double baseThreshold;
+    final double baseNeutralThreshold;
+    if (daysSince <= 1) {
+      baseThreshold = 1.0;
+      baseNeutralThreshold = 3.0;
+    } else if (daysSince <= 2) {
+      baseThreshold = 1.5;
+      baseNeutralThreshold = 4.0;
+    } else {
+      final timeScale = daysSince / 5.0;
+      final timeFactor = sqrt(timeScale);
+      baseThreshold = (2.0 * timeFactor).clamp(2.0, 12.0);
+      baseNeutralThreshold = (8.0 * timeFactor).clamp(4.0, 24.0);
+    }
+    return (baseThreshold, baseNeutralThreshold);
   }
 
   /// 根据存档记录中的推荐文本判断多空方向。

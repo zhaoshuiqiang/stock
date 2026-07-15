@@ -91,6 +91,12 @@ class _ShortTermDecisionPanelState extends State<ShortTermDecisionPanel> {
               '${(estimate.wilsonUpper * 100).toStringAsFixed(1)}%]',
               style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
             ),
+          ] else ...[
+            const SizedBox(height: 8),
+            Text(
+              '暂无${_horizon}日校准数据（需积累历史决策记录，请先使用“全市场扫描”生成决策快照）',
+              style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11),
+            ),
           ],
         ],
       ),

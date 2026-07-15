@@ -139,8 +139,24 @@ class ArchiveScreenState extends State<ArchiveScreen>
           const SizedBox(height: 8),
           if (_decisionRows.isEmpty)
             const Padding(
-              padding: EdgeInsets.only(top: 80),
-              child: Center(child: Text('暂无新模型评估数据')),
+              padding: EdgeInsets.only(top: 60),
+              child: Column(
+                children: [
+                  Icon(Icons.insights_outlined, size: 48, color: Color(0xFF30363D)),
+                  SizedBox(height: 12),
+                  Text('暂无新模型评估数据',
+                      style: TextStyle(color: Colors.white54, fontSize: 14)),
+                  SizedBox(height: 8),
+                  Text(
+                    '短线验证流程：\n'
+                    '1. 在“发现”页点击“刷新探索”执行全市场扫描\n'
+                    '2. 扫描完成后自动生成决策快照\n'
+                    '3. 等待对应天数到期后，此处展示1/3/5日命中率',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.6),
+                  ),
+                ],
+              ),
             )
           else
             ..._decisionRows.map(_buildDecisionRow),
