@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:stock_analyzer/analysis/decision_statistics.dart';
 import 'package:stock_analyzer/models/short_term_decision.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 import 'package:stock_analyzer/storage/database_service.dart';
@@ -66,11 +67,13 @@ void main() {
     expect(calibration.first, isA<DecisionCalibrationRow>());
 
     final statistics = await service.getDecisionStatisticsRows(
-      horizon: 3,
-      direction: RecommendationDirection.bullish,
-      marketRegime: MarketRegime.range,
-      modelVersion: 'v2',
-      source: 'explore',
+      filter: const DecisionStatisticsFilter(
+        horizon: 3,
+        direction: RecommendationDirection.bullish,
+        marketRegime: MarketRegime.range,
+        modelVersion: 'v2',
+        source: 'explore',
+      ),
       primaryStrategyId: 'trend',
       minDirectionScore: 35,
       maxDirectionScore: 55,

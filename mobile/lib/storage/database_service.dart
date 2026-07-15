@@ -6,6 +6,7 @@ import 'package:path/path.dart' as path;
 import '../models/stock_models.dart';
 import '../models/short_term_decision.dart';
 import '../analysis/limit_up_analyzer.dart';
+import '../analysis/decision_statistics.dart';
 import 'decision_tracking_schema.dart';
 
 class DatabaseService {
@@ -1583,6 +1584,7 @@ class DatabaseService {
   }
 
   Future<List<DecisionStatisticsRow>> getDecisionStatisticsRows({
+    DecisionStatisticsFilter? filter,
     int? horizon,
     RecommendationDirection? direction,
     MarketRegime? marketRegime,
@@ -1592,6 +1594,19 @@ class DatabaseService {
     double? minDirectionScore,
     double? maxDirectionScore,
   }) async {
+    final selectedHorizon = filter?.horizon ?? horizon;
+    if (selectedHorizon != null &&
+        !const <int>{1, 3, 5}.contains(selectedHorizon)) {
+      throw ArgumentError.value(
+        selectedHorizon,
+        'horizon',
+        'Only 1, 3, and 5 trading-day horizons are supported.',
+      );
+    }
+    final selectedDirection = filter?.direction ?? direction;
+    final selectedMarketRegime = filter?.marketRegime ?? marketRegime;
+    final selectedModelVersion = filter?.modelVersion ?? modelVersion;
+    final selectedSource = filter?.source ?? source;
     final db = await database;
     final where = <String>[];
     final args = <Object?>[];
@@ -1600,10 +1615,16 @@ class DatabaseService {
       args.add(value);
     }
 
-    if (direction != null) add('direction = ?', direction.name);
-    if (marketRegime != null) add('market_regime = ?', marketRegime.name);
-    if (modelVersion != null) add('model_version = ?', modelVersion);
-    if (source != null) add('source = ?', source);
+    if (selectedDirection != null) {
+      add('direction = ?', selectedDirection.name);
+    }
+    if (selectedMarketRegime != null) {
+      add('market_regime = ?', selectedMarketRegime.name);
+    }
+    if (selectedModelVersion != null) {
+      add('model_version = ?', selectedModelVersion);
+    }
+    if (selectedSource != null) add('source = ?', selectedSource);
     if (primaryStrategyId != null) {
       add('primary_strategy_id = ?', primaryStrategyId);
     }
@@ -1624,10 +1645,12 @@ class DatabaseService {
       final snapshot = DecisionSnapshotRecord.fromMap(snapshotMap);
       final outcomeRows = await db.query(
         'decision_outcomes',
-        where: horizon == null
+        where: selectedHorizon == null
             ? 'snapshot_id = ?'
             : 'snapshot_id = ? AND horizon = ?',
-        whereArgs: horizon == null ? [snapshot.id] : [snapshot.id, horizon],
+        whereArgs: selectedHorizon == null
+            ? [snapshot.id]
+            : [snapshot.id, selectedHorizon],
         orderBy: 'horizon ASC',
       );
       for (final outcomeMap in outcomeRows) {

@@ -1,9 +1,21 @@
 import '../models/stock_models.dart';
+import '../models/short_term_decision.dart';
 import 'calibration_metrics.dart';
 
 class DecisionStatisticsFilter {
   final int? horizon;
-  const DecisionStatisticsFilter({this.horizon});
+  final RecommendationDirection? direction;
+  final MarketRegime? marketRegime;
+  final String? modelVersion;
+  final String? source;
+
+  const DecisionStatisticsFilter({
+    this.horizon,
+    this.direction,
+    this.marketRegime,
+    this.modelVersion,
+    this.source,
+  });
 }
 
 class DecisionCalibrationQuality {
