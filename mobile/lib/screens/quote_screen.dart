@@ -2504,12 +2504,22 @@ class QuoteScreenState extends State<QuoteScreen>
         child: Text('暂无分析数据', style: TextStyle(color: Colors.white54)),
       );
 
+    // v3.23: 传入validatedSignals用于展示对抗论点
+    final validated = _analysis!.validatedSignals ?? [];
+    final validatedMap = <String, ValidatedSignal>{};
+    for (final vs in validated) {
+      validatedMap[vs.signal.signal] = vs;
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.all(8),
       itemCount: _analysis!.signals.length,
       itemBuilder: (context, index) {
         final signal = _analysis!.signals[index];
-        return SignalCard(signal: signal);
+        return SignalCard(
+          signal: signal,
+          validatedSignal: validatedMap[signal.signal],
+        );
       },
     );
   }

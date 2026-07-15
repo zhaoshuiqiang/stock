@@ -199,6 +199,20 @@ class StrategyPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(s.description, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.4)),
+          // v3.23: 策略风控参数标签
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              if (s.recommendedDuration > 0)
+                _buildMetaChip('持有${s.recommendedDuration}天', Colors.white54),
+              if (s.riskRewardRatio > 0)
+                _buildMetaChip('盈亏比1:${s.riskRewardRatio.toStringAsFixed(1)}', Colors.orange),
+              if (s.maxDrawdown > 0)
+                _buildMetaChip('最大回撤${(s.maxDrawdown * 100).toStringAsFixed(0)}%', const Color(0xFFef5350)),
+            ],
+          ),
           const SizedBox(height: 8),
           _buildRuleRow('入场', s.entryRule, const Color(0xFFef5350)),
           const SizedBox(height: 4),
@@ -251,6 +265,18 @@ class StrategyPanel extends StatelessWidget {
         Text(label, style: const TextStyle(color: Colors.white54, fontSize: 10)),
         Text(price.toStringAsFixed(2), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
       ],
+    );
+  }
+
+  // v3.23: 策略元数据标签
+  Widget _buildMetaChip(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(text, style: TextStyle(color: color, fontSize: 10)),
     );
   }
 }

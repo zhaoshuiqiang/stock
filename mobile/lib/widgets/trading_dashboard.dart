@@ -60,6 +60,18 @@ class TradingDashboard extends StatelessWidget {
             const SizedBox(height: 10),
             _buildTradeLevels(),
           ],
+          // v3.23: 置信度8维拆解卡片
+          if (analysis!.confidenceBreakdown != null &&
+              analysis!.confidenceBreakdown!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _buildConfidenceBreakdownCard(),
+          ],
+          // v3.23: 方向5维证据分量
+          if (analysis!.shortTermDecision != null &&
+              analysis!.shortTermDecision!.directionComponents.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _buildDirectionComponentsCard(),
+          ],
           if (analysis!.backtestSummary != null) ...[
             const SizedBox(height: 10),
             _buildBacktestCard(),
@@ -451,6 +463,9 @@ class TradingDashboard extends StatelessWidget {
     final rr = tl['risk_reward_ratio'] as double? ?? 0.0;
     final tp1 = tl['tp1'] as double?;
     final tp2 = tl['tp2'] as double?;
+    final tp3 = tl['tp3'] as double?;
+    final trailingActivation = tl['trailing_stop_activation'] as double?;
+    final trailingDistance = tl['trailing_stop_distance'] as double?;
     final stopType = tl['stop_loss_type'] as String? ?? '固定止损';
 
     return Container(
@@ -535,6 +550,33 @@ class TradingDashboard extends StatelessWidget {
               ),
             ],
           ),
+          // v3.23: 止盈3 + 追踪止损
+          if (tp3 != null || trailingActivation != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                if (tp3 != null)
+                  Expanded(
+                    child: _buildPriceBlock('止盈3', tp3.toStringAsFixed(2), const Color(0xFFE74C3C)),
+                  ),
+                if (tp3 != null && trailingActivation != null) const SizedBox(width: 6),
+                if (trailingActivation != null)
+                  Expanded(
+                    child: _buildPriceBlock(
+                      '追踪止损',
+                      '涨${((trailingActivation - entryLow) / entryLow * 100).toStringAsFixed(1)}%启动',
+                      const Color(0xFF58A6FF),
+                    ),
+                  ),
+                if (trailingDistance != null) ...[
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _buildPriceBlock('追踪距离', trailingDistance.toStringAsFixed(2), const Color(0xFF58A6FF)),
+                  ),
+                ],
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -1171,6 +1213,162 @@ class TradingDashboard extends StatelessWidget {
           color: Color(0xFF58A6FF),
           strokeWidth: 2,
         ),
+      ),
+    );
+  }
+
+  // ─── v3.23: 置信度8维拆解卡片 ────────────────────────
+
+  Widget _buildConfidenceBreakdownCard() {
+    final bd = analysis!.confidenceBreakdown!;
+    final labels = {
+      'signal_consistency': '信号一致性',
+      'fundamental_support': '基本面支撑',
+      'sentiment_confirm': '情绪确认',
+      'market_confirm': '市场环境',
+      'structure_confirm': '结构确认',
+      'signal_freshness': '信号时效',
+      'historical_winrate': '回测胜率',
+      'prediction_support': '预测支持',
+    };
+    final entries = bd.entries.toList();
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF30363D)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.pie_chart_outline, size: 16, color: Color(0xFF58A6FF)),
+              SizedBox(width: 4),
+              Text('置信度维度拆解', style: TextStyle(color: Color(0xFFF0F6FC), fontSize: 14, fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...entries.map((e) {
+            final label = labels[e.key] ?? e.key;
+            final value = e.value;
+            final color = value >= 0.7
+                ? const Color(0xFF26a69a)
+                : value >= 0.5
+                    ? const Color(0xFF58A6FF)
+                    : const Color(0xFFE74C3C);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                children: [
+                  SizedBox(width: 72, child: Text(label, style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11))),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(3),
+                      child: LinearProgressIndicator(
+                        value: value.clamp(0.0, 1.0),
+                        backgroundColor: const Color(0xFF21262D),
+                        valueColor: AlwaysStoppedAnimation<Color>(color),
+                        minHeight: 6,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    width: 32,
+                    child: Text('${(value * 100).toStringAsFixed(0)}%', style: TextStyle(color: color, fontSize: 10), textAlign: TextAlign.right),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ─── v3.23: 方向5维证据分量 ─────────────────────────
+
+  Widget _buildDirectionComponentsCard() {
+    final components = analysis!.shortTermDecision!.directionComponents;
+    final labels = {
+      'trend': '趋势(30%)',
+      'reversal_momentum': '反转动量(25%)',
+      'volume_flow': '量价流(20%)',
+      'relative_strength': '相对强度(15%)',
+      'next_session': '次日预测(10%)',
+    };
+    final direction = analysis!.shortTermDecision!.direction;
+    final dirColor = direction == RecommendationDirection.bullish
+        ? const Color(0xFFE74C3C)
+        : direction == RecommendationDirection.bearish
+            ? const Color(0xFF2ECC71)
+            : const Color(0xFF8B949E);
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: dirColor.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.compass_calibration, size: 16, color: dirColor),
+              const SizedBox(width: 4),
+              const Text('方向证据分量', style: TextStyle(color: Color(0xFFF0F6FC), fontSize: 14, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              Text(
+                '方向分: ${analysis!.shortTermDecision!.directionScore.toStringAsFixed(0)}',
+                style: TextStyle(color: dirColor, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...components.entries.map((e) {
+            final label = labels[e.key] ?? e.key;
+            final value = e.value; // -1.0 to +1.0
+            final barValue = (value + 1.0) / 2.0; // normalize to 0-1
+            final compColor = value > 0.1
+                ? const Color(0xFFE74C3C)
+                : value < -0.1
+                    ? const Color(0xFF2ECC71)
+                    : const Color(0xFF8B949E);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                children: [
+                  SizedBox(width: 90, child: Text(label, style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11))),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        Container(height: 6, decoration: BoxDecoration(color: const Color(0xFF21262D), borderRadius: BorderRadius.circular(3))),
+                        FractionallySizedBox(
+                          widthFactor: barValue.clamp(0.0, 1.0),
+                          alignment: Alignment.centerLeft,
+                          child: Container(height: 6, decoration: BoxDecoration(color: compColor.withOpacity(0.6), borderRadius: BorderRadius.circular(3))),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    width: 36,
+                    child: Text(
+                      value >= 0 ? '+${(value * 100).toStringAsFixed(0)}' : '${(value * 100).toStringAsFixed(0)}',
+                      style: TextStyle(color: compColor, fontSize: 10),
+                      textAlign: TextAlign.right,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
       ),
     );
   }

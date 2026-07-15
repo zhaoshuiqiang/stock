@@ -3,94 +3,153 @@ import '../models/stock_models.dart';
 
 class SignalCard extends StatelessWidget {
   final SignalItem signal;
+  final ValidatedSignal? validatedSignal; // v3.23: 对抗验证信息
 
-  const SignalCard({super.key, required this.signal});
+  const SignalCard({super.key, required this.signal, this.validatedSignal});
 
   @override
   Widget build(BuildContext context) {
     final isBuy = signal.type == 'buy';
     final color = isBuy ? const Color(0xFF26a69a) : const Color(0xFFef5350);
     final bgColor = isBuy ? const Color(0xFF1b3a1b) : const Color(0xFF3a1b1b);
+    final durLabel = signal.duration == SignalDuration.shortTerm
+        ? '短线'
+        : signal.duration == SignalDuration.mediumTerm
+            ? '中线'
+            : signal.duration == SignalDuration.longTerm
+                ? '长线'
+                : null;
+    final confPct = signal.confidence != null
+        ? '${(signal.confidence! * 100).toStringAsFixed(0)}%'
+        : null;
+    // v3.23: 对抗验证后的调整置信度
+    final adjConf = validatedSignal?.adjustedConfidence;
+    final counterPoints = validatedSignal?.counterPoints ?? [];
 
     return Card(
       color: bgColor,
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 类型图标
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                isBuy ? Icons.trending_up : Icons.trending_down,
-                color: color,
-                size: 24,
-              ),
-            ),
-            const SizedBox(width: 12),
-
-            // 信号内容
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 类型和强度
-                  Row(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 类型图标
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    isBuy ? Icons.trending_up : Icons.trending_down,
+                    color: color,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // 信号内容
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: color.withOpacity(0.3),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          isBuy ? '买入' : '卖出',
-                          style: TextStyle(
-                            color: color,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
+                      // 类型 + 强度 + 周期 + 置信度
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: color.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              isBuy ? '买入' : '卖出',
+                              style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
                           ),
-                        ),
+                          _buildStrengthBadge(signal.strength),
+                          if (durLabel != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(durLabel, style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                            ),
+                          if (confPct != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: color.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text('置信$confPct', style: TextStyle(color: color.withOpacity(0.8), fontSize: 10)),
+                            ),
+                          if (signal.signalCount > 1)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF9c27b0).withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text('${signal.signalCount}重共振', style: const TextStyle(color: Color(0xFF9c27b0), fontSize: 10)),
+                            ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      _buildStrengthBadge(signal.strength),
+                      const SizedBox(height: 8),
+                      // 指标和信号名
+                      Text(
+                        signal.indicator.isNotEmpty
+                            ? '${signal.indicator} - ${signal.signal}'
+                            : signal.signal,
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                      ),
+                      // 描述
+                      if (signal.description.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          signal.description,
+                          style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12, height: 1.4),
+                        ),
+                      ],
+                      // v3.23: 对抗验证信息
+                      if (adjConf != null && adjConf < (signal.confidence ?? 1.0) - 0.05) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            const Icon(Icons.warning_amber, size: 12, color: Colors.orange),
+                            const SizedBox(width: 4),
+                            Text(
+                              '对抗验证后: ${(adjConf * 100).toStringAsFixed(0)}%',
+                              style: const TextStyle(color: Colors.orange, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ],
+                      // v3.23: 反方论点
+                      if (counterPoints.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        ...counterPoints.take(2).map((cp) => Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(isBuy ? '• ' : '• ', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                              Expanded(child: Text(cp, style: const TextStyle(color: Colors.white38, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                            ],
+                          ),
+                        )),
+                      ],
                     ],
                   ),
-
-                  const SizedBox(height: 8),
-
-                  // 指标和信号名
-                  Text(
-                    signal.indicator.isNotEmpty
-                        ? '${signal.indicator} - ${signal.signal}'
-                        : signal.signal,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-
-                  // 描述
-                  if (signal.description.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      signal.description,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.6),
-                        fontSize: 12,
-                        height: 1.4,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+                ),
+              ],
             ),
           ],
         ),
