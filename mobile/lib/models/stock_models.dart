@@ -1365,6 +1365,10 @@ class AnalysisResult {
   final List<SignalItem>? earlyWarningSignals;
   final ShortTermDecision? shortTermDecision;
 
+  /// 短线决策引擎输出的完整推荐（方向、标签、门控、可操作状态），
+  /// 替代从 label/score 手工重建的假对象。
+  final RecommendationDecision? recommendationDecision;
+
   AnalysisResult({
     this.quote,
     this.indicators = const {},
@@ -1399,6 +1403,7 @@ class AnalysisResult {
     this.nextDayPrediction,
     this.earlyWarningSignals,
     this.shortTermDecision,
+    this.recommendationDecision,
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {
@@ -1537,6 +1542,13 @@ class AnalysisResult {
               ),
             )
           : null,
+      recommendationDecision: json['recommendation_decision'] is Map
+          ? RecommendationDecision.fromJson(
+              Map<String, dynamic>.from(
+                json['recommendation_decision'] as Map,
+              ),
+            )
+          : null,
     );
   }
 
@@ -1585,6 +1597,7 @@ class AnalysisResult {
       'early_warning_signals':
           earlyWarningSignals?.map((s) => s.toJson()).toList(),
       'short_term_decision': shortTermDecision?.toJson(),
+      'recommendation_decision': recommendationDecision?.toJson(),
     };
   }
 

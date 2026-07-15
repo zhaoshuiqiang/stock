@@ -120,8 +120,8 @@ class ShortTermDecisionEngine {
   }
 
   static RecommendationDirection _directionOf(double score) {
-    if (score >= 12) return RecommendationDirection.bullish;
-    if (score <= -12) return RecommendationDirection.bearish;
+    if (score >= kDirectionBullishThreshold) return RecommendationDirection.bullish;
+    if (score <= kDirectionBearishThreshold) return RecommendationDirection.bearish;
     return RecommendationDirection.neutral;
   }
 }

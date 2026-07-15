@@ -5,6 +5,34 @@ const String _riskAboveThreshold = 'risk_above_threshold';
 const String _evidenceConfidenceBelowThreshold =
     'evidence_confidence_below_threshold';
 
+// 方向分数阈值（9级强度映射）
+const double _kStrongBearishThreshold = -55.0;
+const double _kBearishThreshold = -35.0;
+const double _kCautiousBearishThreshold = -20.0;
+const double _kBearishWatchThreshold = -12.0;
+const double _kBullishWatchThreshold = 12.0;
+const double _kCautiousBullishThreshold = 20.0;
+const double _kBullishThreshold = 35.0;
+const double _kStrongBullishThreshold = 55.0;
+
+// 多头执行门控阈值
+const double _kStrongBullishQualityMin = 70.0;
+const double _kStrongBullishRiskMax = 45.0;
+const double _kStrongBullishConfidenceMin = 65.0;
+const double _kBullishQualityMin = 60.0;
+const double _kBullishRiskMax = 60.0;
+const double _kBullishConfidenceMin = 55.0;
+const double _kCautiousBullishQualityMin = 55.0;
+const double _kCautiousBullishRiskMax = 70.0;
+
+// 空头证据门控阈值
+const double _kBearishConfidenceMin = 55.0;
+
+// 例外强多头阈值（legacyScore=10）
+const double _kExceptionalQualityMin = 85.0;
+const double _kExceptionalRiskMax = 30.0;
+const double _kExceptionalConfidenceMin = 80.0;
+
 class RecommendationPolicy {
   static RecommendationDecision evaluate(ShortTermDecision decision) {
     final direction = _directionOf(decision.directionScore);
@@ -46,38 +74,38 @@ class RecommendationPolicy {
   }
 
   static RecommendationDirection _directionOf(double directionScore) {
-    if (directionScore >= 12) {
+    if (directionScore >= kDirectionBullishThreshold) {
       return RecommendationDirection.bullish;
     }
-    if (directionScore <= -12) {
+    if (directionScore <= kDirectionBearishThreshold) {
       return RecommendationDirection.bearish;
     }
     return RecommendationDirection.neutral;
   }
 
   static RecommendationLevel _levelOf(double directionScore) {
-    if (directionScore <= -55) {
+    if (directionScore <= _kStrongBearishThreshold) {
       return RecommendationLevel.strongBearish;
     }
-    if (directionScore <= -35) {
+    if (directionScore <= _kBearishThreshold) {
       return RecommendationLevel.bearish;
     }
-    if (directionScore <= -20) {
+    if (directionScore <= _kCautiousBearishThreshold) {
       return RecommendationLevel.cautiousBearish;
     }
-    if (directionScore <= -12) {
+    if (directionScore <= _kBearishWatchThreshold) {
       return RecommendationLevel.bearishWatch;
     }
-    if (directionScore < 12) {
+    if (directionScore < _kBullishWatchThreshold) {
       return RecommendationLevel.neutralWatch;
     }
-    if (directionScore < 20) {
+    if (directionScore < _kCautiousBullishThreshold) {
       return RecommendationLevel.bullishWatch;
     }
-    if (directionScore < 35) {
+    if (directionScore < _kBullishThreshold) {
       return RecommendationLevel.cautiousBullish;
     }
-    if (directionScore < 55) {
+    if (directionScore < _kStrongBullishThreshold) {
       return RecommendationLevel.bullish;
     }
     return RecommendationLevel.strongBullish;
@@ -91,39 +119,39 @@ class RecommendationPolicy {
 
     switch (level) {
       case RecommendationLevel.strongBullish:
-        if (decision.tradeQualityScore < 70) {
+        if (decision.tradeQualityScore < _kStrongBullishQualityMin) {
           gates.add(_tradeQualityBelowThreshold);
         }
-        if (decision.riskScore > 45) {
+        if (decision.riskScore > _kStrongBullishRiskMax) {
           gates.add(_riskAboveThreshold);
         }
-        if (decision.evidenceConfidence < 65) {
+        if (decision.evidenceConfidence < _kStrongBullishConfidenceMin) {
           gates.add(_evidenceConfidenceBelowThreshold);
         }
         break;
       case RecommendationLevel.bullish:
-        if (decision.tradeQualityScore < 60) {
+        if (decision.tradeQualityScore < _kBullishQualityMin) {
           gates.add(_tradeQualityBelowThreshold);
         }
-        if (decision.riskScore > 60) {
+        if (decision.riskScore > _kBullishRiskMax) {
           gates.add(_riskAboveThreshold);
         }
-        if (decision.evidenceConfidence < 55) {
+        if (decision.evidenceConfidence < _kBullishConfidenceMin) {
           gates.add(_evidenceConfidenceBelowThreshold);
         }
         break;
       case RecommendationLevel.cautiousBullish:
-        if (decision.tradeQualityScore < 55) {
+        if (decision.tradeQualityScore < _kCautiousBullishQualityMin) {
           gates.add(_tradeQualityBelowThreshold);
         }
-        if (decision.riskScore > 70) {
+        if (decision.riskScore > _kCautiousBullishRiskMax) {
           gates.add(_riskAboveThreshold);
         }
         break;
       case RecommendationLevel.strongBearish:
       case RecommendationLevel.bearish:
       case RecommendationLevel.cautiousBearish:
-        if (decision.evidenceConfidence < 55) {
+        if (decision.evidenceConfidence < _kBearishConfidenceMin) {
           gates.add(_evidenceConfidenceBelowThreshold);
         }
         break;
@@ -203,11 +231,11 @@ class RecommendationPolicy {
     ShortTermDecision decision,
     List<String> gates,
   ) {
+    // baseLevel == strongBullish 已隐含 directionScore >= 55
     return baseLevel == RecommendationLevel.strongBullish &&
         gates.isEmpty &&
-        decision.directionScore >= 55 &&
-        decision.tradeQualityScore >= 85 &&
-        decision.riskScore <= 30 &&
-        decision.evidenceConfidence >= 80;
+        decision.tradeQualityScore >= _kExceptionalQualityMin &&
+        decision.riskScore <= _kExceptionalRiskMax &&
+        decision.evidenceConfidence >= _kExceptionalConfidenceMin;
   }
 }

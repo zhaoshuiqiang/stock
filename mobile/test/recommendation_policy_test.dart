@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:stock_analyzer/analysis/legacy_decision_adapter.dart';
 import 'package:stock_analyzer/analysis/recommendation_policy.dart';
 import 'package:stock_analyzer/models/short_term_decision.dart';
 
@@ -738,22 +737,21 @@ void main() {
     });
   });
 
-  group('LegacyDecisionAdapter', () {
+  group('RecommendationDecision field access', () {
     final source = RecommendationDecision(
       direction: RecommendationDirection.bearish,
       level: RecommendationLevel.strongBearish,
-      label: '原始标签',
+      label: '强烈卖出',
       legacyScore: 10,
       actionable: false,
-      gates: const <String>['ignored_by_adapter'],
+      gates: const <String>['test_gate'],
     );
 
-    test('scoreOf returns the decision legacy score unchanged', () {
-      expect(LegacyDecisionAdapter.scoreOf(source), source.legacyScore);
-    });
-
-    test('recommendationOf returns the decision label unchanged', () {
-      expect(LegacyDecisionAdapter.recommendationOf(source), source.label);
+    test('fields are directly accessible without adapter', () {
+      expect(source.legacyScore, 10);
+      expect(source.label, '强烈卖出');
+      expect(source.actionable, false);
+      expect(source.gates, ['test_gate']);
     });
   });
 }

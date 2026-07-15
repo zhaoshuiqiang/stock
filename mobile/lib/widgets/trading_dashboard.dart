@@ -40,13 +40,14 @@ class TradingDashboard extends StatelessWidget {
           if (analysis!.shortTermDecision != null)
             ShortTermDecisionPanel(
               decision: analysis!.shortTermDecision!,
-              recommendation: RecommendationDecision(
-                direction: analysis!.shortTermDecision!.direction,
-                level: RecommendationLevel.neutralWatch,
-                label: analysis!.recommendation,
-                legacyScore: analysis!.score.clamp(1, 10),
-                actionable: analysis!.score >= 6,
-              ),
+              recommendation: analysis!.recommendationDecision ??
+                  RecommendationDecision(
+                    direction: analysis!.shortTermDecision!.direction,
+                    level: RecommendationLevel.neutralWatch,
+                    label: analysis!.recommendation,
+                    legacyScore: analysis!.score.clamp(1, 10),
+                    actionable: analysis!.score >= 6,
+                  ),
             )
           else
             _buildScoreRow(),

@@ -1,5 +1,9 @@
 enum RecommendationDirection { bullish, neutral, bearish }
 
+/// 方向分数阈值：方向判定为 bull/中立/bear 的临界值
+const double kDirectionBullishThreshold = 12.0;
+const double kDirectionBearishThreshold = -12.0;
+
 enum RecommendationLevel {
   strongBearish,
   bearish,
@@ -400,6 +404,7 @@ T _enumValue<T extends Enum>(
         return value;
       }
     }
+    print('[决策模型] 反序列化警告: "${rawValue}" 不是有效的 ${T} 枚举值，回退到 $fallback');
   }
   return fallback;
 }
@@ -438,6 +443,9 @@ Map<int, CalibrationEstimate> _calibrationMap(Object? value) {
 
 Map<String, double> _doubleMap(Object? value) {
   if (value is! Map) {
+    if (value != null) {
+      print('[决策模型] 反序列化警告: 期望 Map 但收到 ${value.runtimeType}，返回空映射');
+    }
     return <String, double>{};
   }
 
@@ -451,7 +459,11 @@ Map<String, double> _doubleMap(Object? value) {
 
 List<String> _stringList(Object? value) {
   if (value is! List) {
+    if (value != null) {
+      print('[决策模型] 反序列化警告: 期望 List 但收到 ${value.runtimeType}，返回空列表');
+    }
     return <String>[];
   }
-  return List<String>.from(value);
+  // 安全转换：将所有元素转为 String，防止非 String 元素导致下游崩溃
+  return value.map((item) => item.toString()).toList(growable: false);
 }

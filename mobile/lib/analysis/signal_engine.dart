@@ -667,6 +667,7 @@ AnalysisResult generateAnalysis(
       marketStructure: marketStructure,
       dimensionScores: dimensionScores,
       shortTermDecision: shortTermDecision,
+      recommendationDecision: recommendationDecision,
     );
     // 异步fire-and-forget，不阻塞主分析流程
     RecommendationTracker().track(trackResult).catchError((e) {
@@ -708,6 +709,7 @@ AnalysisResult generateAnalysis(
         _combinedPredictionJson(nextDayPrediction, nextSessionPrediction),
     earlyWarningSignals: earlyWarningSignals,
     shortTermDecision: shortTermDecision,
+    recommendationDecision: recommendationDecision,
   );
 }
 
