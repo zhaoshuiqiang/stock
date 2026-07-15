@@ -25,7 +25,7 @@ void main() {
       expect(analysis.recommendation, isNot(anyOf('强烈买入', '买入')));
       expect(
         analysis.suggestions.first,
-        contains('次交易日回调风险'),
+        contains('短线执行条件未满足'),
       );
     });
   });

@@ -139,11 +139,11 @@ class RecommendationPolicy {
   static String _labelOf(RecommendationLevel level) {
     switch (level) {
       case RecommendationLevel.strongBearish:
-        return '强回避';
+        return '强烈卖出';
       case RecommendationLevel.bearish:
-        return '回避';
+        return '卖出';
       case RecommendationLevel.cautiousBearish:
-        return '谨慎减仓';
+        return '谨慎卖出';
       case RecommendationLevel.bearishWatch:
         return '偏空观望';
       case RecommendationLevel.neutralWatch:
@@ -151,11 +151,11 @@ class RecommendationPolicy {
       case RecommendationLevel.bullishWatch:
         return '偏多观望';
       case RecommendationLevel.cautiousBullish:
-        return '谨慎看多';
+        return '谨慎买入';
       case RecommendationLevel.bullish:
-        return '看多';
+        return '买入';
       case RecommendationLevel.strongBullish:
-        return '强看多';
+        return '强烈买入';
     }
   }
 

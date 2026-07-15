@@ -10,7 +10,7 @@ void main() {
         score: -55,
         level: RecommendationLevel.strongBearish,
         direction: RecommendationDirection.bearish,
-        label: '强回避',
+        label: '强烈卖出',
         legacyScore: 1,
         actionable: true,
       ),
@@ -18,7 +18,7 @@ void main() {
         score: -35,
         level: RecommendationLevel.bearish,
         direction: RecommendationDirection.bearish,
-        label: '回避',
+        label: '卖出',
         legacyScore: 2,
         actionable: true,
       ),
@@ -26,7 +26,7 @@ void main() {
         score: -20,
         level: RecommendationLevel.cautiousBearish,
         direction: RecommendationDirection.bearish,
-        label: '谨慎减仓',
+        label: '谨慎卖出',
         legacyScore: 3,
         actionable: true,
       ),
@@ -58,7 +58,7 @@ void main() {
         score: 20,
         level: RecommendationLevel.cautiousBullish,
         direction: RecommendationDirection.bullish,
-        label: '谨慎看多',
+        label: '谨慎买入',
         legacyScore: 7,
         actionable: true,
       ),
@@ -66,7 +66,7 @@ void main() {
         score: 35,
         level: RecommendationLevel.bullish,
         direction: RecommendationDirection.bullish,
-        label: '看多',
+        label: '买入',
         legacyScore: 8,
         actionable: true,
       ),
@@ -74,7 +74,7 @@ void main() {
         score: 55,
         level: RecommendationLevel.strongBullish,
         direction: RecommendationDirection.bullish,
-        label: '强看多',
+        label: '强烈买入',
         legacyScore: 9,
         actionable: true,
       ),
@@ -351,7 +351,7 @@ void main() {
 
       expect(result.level, RecommendationLevel.cautiousBullish);
       expect(result.direction, RecommendationDirection.bullish);
-      expect(result.label, '谨慎看多');
+      expect(result.label, '谨慎买入');
       expect(result.legacyScore, 7);
       expect(result.actionable, isTrue);
       expect(result.gates, isEmpty);
@@ -386,7 +386,7 @@ void main() {
 
       expect(result.level, RecommendationLevel.bearish);
       expect(result.direction, RecommendationDirection.bearish);
-      expect(result.label, '回避');
+      expect(result.label, '卖出');
       expect(result.legacyScore, 2);
       expect(result.actionable, isTrue);
       expect(result.gates, isEmpty);
@@ -731,7 +731,7 @@ void main() {
 
       expect(result.level, RecommendationLevel.strongBullish);
       expect(result.direction, RecommendationDirection.bullish);
-      expect(result.label, '强看多');
+      expect(result.label, '强烈买入');
       expect(result.legacyScore, 10);
       expect(result.actionable, isTrue);
       expect(result.gates, isEmpty);
