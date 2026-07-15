@@ -194,13 +194,16 @@ class MarketStructureAnalyzer {
         : 1.0;
     final isVolumeContracting = avgVolRatio < 0.7;
 
-    // 判断价格是否在MA60附近(±3%)
-    double nearMa60 = 0;
-    if (ma60 > 0 && last.close > 0) {
-      nearMa60 = (last.close - ma60).abs() / ma60;
+    // 判断价格是否在参考均线附近(±3%)
+    // 3.5: 优先用 MA60；短历史(<60 根)回退到 MA20，避免次新/短历史股永远无法判定为吸筹
+    final double refMa = (ma60 > 0 && data.length >= 60)
+        ? ma60
+        : (ma20 > 0 ? ma20 : 0);
+    double nearRefMa = 0;
+    if (refMa > 0 && last.close > 0) {
+      nearRefMa = (last.close - refMa).abs() / refMa;
     }
-    final bool ma60DataSufficient = data.length >= 60;
-    final isNearMA60 = ma60DataSufficient && ma60 > 0 && nearMa60 < 0.03;
+    final isNearRefMa = refMa > 0 && nearRefMa < 0.03;
 
     // 判断趋势
     MarketStructure structure;
@@ -249,7 +252,7 @@ class MarketStructureAnalyzer {
       structureScore = 5.0;
     } else {
       // ADX 20-25
-      if (isNearMA60 && isVolumeContracting) {
+      if (isNearRefMa && isVolumeContracting) {
         structure = MarketStructure.accumulation;
         confidence = 0.60;
         description = '底部积累 - 价格在均线附近+成交量萎缩';

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/stock_models.dart';
 import '../models/short_term_decision.dart';
+import '../validators/data_validator.dart';
 import 'short_term_decision_panel.dart';
 
 /// 分析结果卡片（10级评分）
@@ -33,6 +34,17 @@ class AnalysisResultCard extends StatelessWidget {
 
           // 推荐可信度仪表盘
           _buildConfidenceDashboard(context, textTheme),
+
+          const SizedBox(height: 12),
+
+          // 3.3 数据时效透明化：展示行情时间，陈旧则告警
+          _buildDataFreshness(context, textTheme),
+
+          const SizedBox(height: 12),
+
+          // Batch 4 短线方向预测（方向 + 概率 + 持有期）
+          if (analysis.directionForecast != null)
+            _buildDirectionForecast(context, textTheme),
 
           const SizedBox(height: 16),
 
@@ -426,5 +438,108 @@ class AnalysisResultCard extends StatelessWidget {
     if (analysis.riskLevel == '低') return const Color(0xFF26a69a);
     if (analysis.riskLevel == '中') return const Color(0xFFffb74d);
     return const Color(0xFFe57373);
+  }
+
+  /// Batch 4 短线方向预测展示（方向 + 概率 + 持有期 + 可解释证据）
+  Widget _buildDirectionForecast(BuildContext context, TextTheme textTheme) {
+    final f = analysis.directionForecast!;
+    final dirColor = switch (f.direction) {
+      RecommendationDirection.bullish => const Color(0xFFef5350),
+      RecommendationDirection.bearish => const Color(0xFF26a69a),
+      RecommendationDirection.neutral => Colors.orange,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: dirColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: dirColor.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                '短线方向',
+                style: textTheme.bodySmall
+                    ?.copyWith(color: Colors.white54, fontSize: 11),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${f.directionLabel}',
+                style: textTheme.titleMedium?.copyWith(
+                  color: dirColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '概率 ${(f.probability * 100).toStringAsFixed(0)}%',
+                style: textTheme.bodyMedium
+                    ?.copyWith(color: dirColor, fontSize: 13),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '${f.horizonDays}日',
+                style: textTheme.bodySmall
+                    ?.copyWith(color: Colors.white38, fontSize: 11),
+              ),
+            ],
+          ),
+          if (f.supportingEvidence.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              f.supportingEvidence.take(3).join(' · '),
+              style: textTheme.bodySmall
+                  ?.copyWith(color: Colors.white54, fontSize: 11),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          if (f.momentumPenalized)
+            const SizedBox(height: 4),
+        ],
+      ),
+    );
+  }
+
+  /// 3.3 数据时效透明化：展示行情更新时间，陈旧时给出告警
+  Widget _buildDataFreshness(BuildContext context, TextTheme textTheme) {
+    final quote = analysis.quote;
+    if (quote == null) return const SizedBox.shrink();
+
+    final updated = quote.updateTime;
+    final stale = DataValidator.isStaleQuote(quote);
+    final timeStr = updated != null
+        ? '${updated.hour.toString().padLeft(2, '0')}:'
+            '${updated.minute.toString().padLeft(2, '0')}'
+        : '未知';
+    final color = stale ? const Color(0xFFffb74d) : Colors.white54;
+
+    return Row(
+      children: [
+        Icon(
+          stale ? Icons.warning_amber_rounded : Icons.access_time,
+          size: 14,
+          color: color,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          '行情时间 $timeStr',
+          style: textTheme.bodySmall?.copyWith(color: color, fontSize: 11),
+        ),
+        if (stale) ...[
+          const SizedBox(width: 6),
+          Text(
+            '数据可能延迟',
+            style: textTheme.bodySmall?.copyWith(
+              color: const Color(0xFFffb74d),
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ],
+    );
   }
 }

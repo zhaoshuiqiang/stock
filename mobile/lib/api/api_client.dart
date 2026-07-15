@@ -333,6 +333,10 @@ class ApiClient {
                 ? 'low'
                 : 'medium';
           }
+          // 1.17/1.18: 冻结/陈旧行情降级为 low，避免用过期数据做决策
+          if (DataValidator.isStaleQuote(quote)) {
+            confidence = 'low';
+          }
           final validatedQuote = QuoteData(
             code: quote.code,
             name: quote.name,
@@ -355,7 +359,7 @@ class ApiClient {
             mainOutflow: quote.mainOutflow,
             mainNetFlow: quote.mainNetFlow,
             mainNetFlowRate: quote.mainNetFlowRate,
-            updateTime: quote.updateTime,
+            updateTime: DateTime.now(),
             confidence: confidence,
           );
           _setCached(cacheKey, validatedQuote,
@@ -410,6 +414,10 @@ class ApiClient {
                 ? 'low'
                 : 'medium';
           }
+          // 1.17/1.18: 冻结/陈旧行情降级为 low，避免用过期数据做决策
+          if (DataValidator.isStaleQuote(quote)) {
+            confidence = 'low';
+          }
           final validatedQuote = QuoteData(
             code: quote.code,
             name: quote.name,
@@ -432,7 +440,7 @@ class ApiClient {
             mainOutflow: quote.mainOutflow,
             mainNetFlow: quote.mainNetFlow,
             mainNetFlowRate: quote.mainNetFlowRate,
-            updateTime: quote.updateTime,
+            updateTime: DateTime.now(),
             confidence: confidence,
           );
           _setCached(cacheKey, validatedQuote,

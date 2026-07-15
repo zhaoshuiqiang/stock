@@ -51,7 +51,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 21,
+      version: 22,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -392,6 +392,17 @@ class DatabaseService {
           if (oldVersion < 21) {
             await createDecisionTrackingSchema(txn);
           }
+          if (oldVersion < 22) {
+            // v3.19: 为推荐追踪表增加 direction 列，修正命中率方向盲问题。
+            // 旧记录无方向信息，置空；统计时按 direction 分组，空方向沿用旧口径(仅看多)。
+            try {
+              await txn.execute(
+                  "ALTER TABLE recommendation_tracking ADD COLUMN direction TEXT DEFAULT ''");
+            } catch (e) {
+              // 列已存在则忽略
+              debugPrint('[DB] v21→v22 direction 列已存在或添加失败: $e');
+            }
+          }
           // 索引补建（幂等，保证升级路径和新装路径都有）
           await txn.execute(
               'CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
@@ -546,7 +557,8 @@ class DatabaseService {
         confidence_adjustment TEXT DEFAULT '',
         dimension_scores_json TEXT DEFAULT '',
         feedback TEXT DEFAULT '',
-        score REAL
+        score REAL,
+        direction TEXT DEFAULT ''  -- v3.19: 记录信号方向(bullish/bearish/neutral)，修正命中率方向盲问题
       )
     ''');
 
@@ -863,6 +875,21 @@ class DatabaseService {
   Future<int> addArchive(ArchiveRecord record) async {
     final db = await database;
     return await db.insert('archive_records', record.toMap());
+  }
+
+  /// v3.19: 去重留档——同一 code 已有留档记录时跳过插入，避免重复留档膨胀统计。
+  /// 返回 true 表示本次实际新增，false 表示因重复而跳过。
+  Future<bool> addArchiveIfNotExists(ArchiveRecord record) async {
+    final db = await database;
+    final existing = await db.query(
+      'archive_records',
+      where: 'code = ?',
+      whereArgs: [record.code],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) return false;
+    await db.insert('archive_records', record.toMap());
+    return true;
   }
 
   Future<List<ArchiveRecord>> getArchives() async {

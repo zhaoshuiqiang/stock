@@ -31,6 +31,7 @@ class RecommendationSnapshot {
   final String? feedback;
   final Map<String, double>? dimensionScores;
   final double? score;
+  final String direction; // v3.19: bullish/bearish/neutral，修正命中率方向盲
 
   RecommendationSnapshot({
     this.id,
@@ -52,6 +53,7 @@ class RecommendationSnapshot {
     this.feedback,
     this.dimensionScores,
     this.score,
+    this.direction = '',
   });
 
   factory RecommendationSnapshot.fromMap(Map<String, dynamic> map) {
@@ -77,6 +79,7 @@ class RecommendationSnapshot {
       score: (map['score'] as num?)?.toDouble(),
       dimensionScores:
           _decodeDimensionScores(map['dimension_scores_json'] as String?),
+      direction: (map['direction'] as String?) ?? '',
     );
   }
 
@@ -103,9 +106,46 @@ class RecommendationSnapshot {
       'confidence_adjustment': confidenceAdjustment ?? '',
       'feedback': feedback ?? '',
       'score': score,
+      'direction': direction,
       'dimension_scores_json': _encodeDimensionScores(dimensionScores),
     };
   }
+}
+
+/// v3.19: 从推荐文案推导方向，用于修正命中率方向盲问题。
+/// 与 archive_reliability_evaluator 的判定口径保持一致。
+String directionOf(String recommendation) {
+  if (recommendation.contains('买入') ||
+      recommendation.contains('看多') ||
+      recommendation.contains('偏多观望')) {
+    return 'bullish';
+  }
+  if (recommendation.contains('卖出') ||
+      recommendation.contains('回避') ||
+      recommendation.contains('减仓') ||
+      recommendation.contains('偏空观望')) {
+    return 'bearish';
+  }
+  return 'neutral';
+}
+
+/// v3.19: 计算两个日期之间的交易日数（近似：跳过周末，忽略法定节假日）。
+/// 短线跟踪的"5/10/20日"指交易日而非自然日，用自然日会导致里程碑提前触发、口径失真。
+int tradingDaysBetween(DateTime start, DateTime end) {
+  if (!end.isAfter(start)) return 0;
+  int count = 0;
+  // 从 signal 的次日开始计，得到"自信号起经过的交易日数"
+  DateTime cursor =
+      DateTime(start.year, start.month, start.day).add(const Duration(days: 1));
+  final last = DateTime(end.year, end.month, end.day);
+  while (cursor.isBefore(last) || cursor.isAtSameMomentAs(last)) {
+    final weekday = cursor.weekday;
+    if (weekday != DateTime.saturday && weekday != DateTime.sunday) {
+      count++;
+    }
+    cursor = cursor.add(const Duration(days: 1));
+  }
+  return count;
 }
 
 Map<String, double>? _decodeDimensionScores(String? raw) {
@@ -194,6 +234,7 @@ class RecommendationTracker {
       conceptTags: conceptTags,
       dimensionScores: analysis.dimensionScores,
       score: analysis.score.toDouble(),
+      direction: directionOf(analysis.recommendation),
     );
 
     await _dbService.insertRecommendationSnapshot(snapshot.toMap());
@@ -251,6 +292,7 @@ class RecommendationTracker {
         conceptTags: conceptTags,
         dimensionScores: analysis.dimensionScores,
         score: analysis.score.toDouble(),
+        direction: directionOf(analysis.recommendation),
       );
       newSnapshots.add(snapshot);
       // 标记为已存在，防止批次内重复添加
@@ -290,7 +332,8 @@ class RecommendationTracker {
             DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int);
         final id = row['id'] as int;
         final now = DateTime.now();
-        final daysSince = now.difference(signalDate).inDays;
+        // 用交易日替代自然日，确保"5/10/20日"与短线交易口径一致（fix 1.14）
+        final tradingDaysSince = tradingDaysBetween(signalDate, now);
 
         final currentPrice = pricesByCode[code];
         if (currentPrice == null || currentPrice <= 0) continue;
@@ -299,7 +342,7 @@ class RecommendationTracker {
         final nowMs = now.millisecondsSinceEpoch;
 
         // 更新对应天数的收益 (独立if确保不会漏掉前序里程碑)
-        if (daysSince >= 5 && row['day5_return'] == null) {
+        if (tradingDaysSince >= 5 && row['day5_return'] == null) {
           await txn.update(
               'recommendation_tracking',
               {
@@ -310,7 +353,7 @@ class RecommendationTracker {
               where: 'id = ?',
               whereArgs: [id]);
         }
-        if (daysSince >= 10 && row['day10_return'] == null) {
+        if (tradingDaysSince >= 10 && row['day10_return'] == null) {
           await txn.update(
               'recommendation_tracking',
               {
@@ -321,7 +364,7 @@ class RecommendationTracker {
               where: 'id = ?',
               whereArgs: [id]);
         }
-        if (daysSince >= 20 && row['day20_return'] == null) {
+        if (tradingDaysSince >= 20 && row['day20_return'] == null) {
           final name = row['name'] as String? ?? '';
           final strategy = row['strategy'] as String? ?? '';
 
@@ -418,7 +461,8 @@ class RecommendationTracker {
         'strategy',
         'day20_return',
         'alpha_vs_market',
-        'reflection'
+        'reflection',
+        'direction'
       ],
       where: 'is_closed = 1 AND day20_return IS NOT NULL',
       orderBy: 'signal_date DESC',
@@ -436,6 +480,7 @@ class RecommendationTracker {
         'day20_return': (row['day20_return'] as num).toDouble(),
         'alpha_vs_market': (row['alpha_vs_market'] as num?)?.toDouble() ?? 0,
         'reflection': row['reflection'] as String? ?? '',
+        'direction': (row['direction'] as String?) ?? '',
       });
     }
     return reflections;

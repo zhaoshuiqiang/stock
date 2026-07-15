@@ -317,6 +317,11 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
         );
       } catch (_) {}
 
+      // 1.15: capture 后评估 pending outcomes，否则 decision_outcomes 永远为 pending
+      try {
+        await DecisionTracker().refreshPending(limit: 100);
+      } catch (_) {}
+
       emit(OpportunityProgress(
           status: OpportunityStatus.complete,
           results: opportunities,

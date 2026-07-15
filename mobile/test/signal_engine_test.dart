@@ -258,54 +258,98 @@ void main() {
 
   // ─── 5. BOLL Signal Tests ───
   group('BOLL Signal Tests', () {
-    test('BOLL upper band breakout detection', () {
+    test('BOLL upper band breakout in uptrend is a buy (trend continuation)', () {
       var data = _baseData();
       final n = data.length;
-      // Force prev.close <= bollUpper, last.close > bollUpper
+      // 均线多头排列(adx14 默认 0 时以均线排列兜底判定为向上趋势)
       data[n - 2] = data[n - 2].copyWith(
         close: 18.0,
         bollUpper: 19.0,
         bollMid: 17.0,
         bollLower: 15.0,
+        adx14: 0,
+        ma5: 18.0,
+        ma10: 17.0,
+        ma20: 16.0,
       );
       data[n - 1] = data[n - 1].copyWith(
         close: 20.0,
         bollUpper: 19.0,
         bollMid: 17.0,
         bollLower: 15.0,
+        adx14: 0,
+        ma5: 18.5,
+        ma10: 17.5,
+        ma20: 16.5,
       );
 
       final signals = SignalLayer.detectAllSignals(data);
       final bollUpper = signals.where(
-        (s) => s.indicator == 'BOLL' && s.signal == '突破上轨',
+        (s) => s.indicator == 'BOLL' && s.signal == '趋势突破上轨',
       );
-      expect(bollUpper.isNotEmpty, true, reason: 'Should detect BOLL upper band breakout');
-      expect(bollUpper.first.type, 'sell');
+      expect(bollUpper.isNotEmpty, true,
+          reason: 'Uptrend BOLL upper breakout should be a buy (trend continuation)');
+      expect(bollUpper.first.type, 'buy');
     });
 
-    test('BOLL lower band breakout detection', () {
+    test('BOLL lower band breakout in downtrend is a sell (trend continuation)', () {
       var data = _baseData();
       final n = data.length;
-      // Force prev.close >= bollLower, last.close < bollLower
+      // 均线空头排列 → 向下趋势
       data[n - 2] = data[n - 2].copyWith(
         close: 16.0,
         bollUpper: 19.0,
         bollMid: 17.0,
         bollLower: 15.0,
+        adx14: 0,
+        ma5: 16.0,
+        ma10: 17.0,
+        ma20: 18.0,
       );
       data[n - 1] = data[n - 1].copyWith(
         close: 14.0,
         bollUpper: 19.0,
         bollMid: 17.0,
         bollLower: 15.0,
+        adx14: 0,
+        ma5: 15.5,
+        ma10: 16.5,
+        ma20: 17.5,
       );
 
       final signals = SignalLayer.detectAllSignals(data);
       final bollLower = signals.where(
-        (s) => s.indicator == 'BOLL' && s.signal == '跌破下轨',
+        (s) => s.indicator == 'BOLL' && s.signal == '趋势跌破下轨',
       );
-      expect(bollLower.isNotEmpty, true, reason: 'Should detect BOLL lower band breakout');
-      expect(bollLower.first.type, 'buy');
+      expect(bollLower.isNotEmpty, true,
+          reason: 'Downtrend BOLL lower breakout should be a sell (trend continuation)');
+      expect(bollLower.first.type, 'sell');
+    });
+
+    test('BOLL breakout with indeterminate trend emits no directional signal', () {
+      // v3.19 回归：修复前 ADX 未就绪时突破上轨恒判卖(系统性偏空)。
+      // 当 adx14==0 且均线未排列(趋势未知)时，不应发出方向性 BOLL 信号。
+      var data = _baseData();
+      final n = data.length;
+      data[n - 2] = data[n - 2].copyWith(
+        close: 18.0,
+        bollUpper: 19.0,
+        bollMid: 17.0,
+        bollLower: 15.0,
+        adx14: 0,
+      );
+      data[n - 1] = data[n - 1].copyWith(
+        close: 20.0,
+        bollUpper: 19.0,
+        bollMid: 17.0,
+        bollLower: 15.0,
+        adx14: 0,
+      );
+
+      final signals = SignalLayer.detectAllSignals(data);
+      final boll = signals.where((s) => s.indicator == 'BOLL');
+      expect(boll.isEmpty, true,
+          reason: 'Indeterminate trend should not emit directional BOLL signal');
     });
   });
 

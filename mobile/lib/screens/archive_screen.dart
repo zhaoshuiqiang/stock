@@ -800,12 +800,21 @@ class ArchiveScreenState extends State<ArchiveScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(isFiltered ? '筛选方向合理率' : '方向合理率',
-                                style: TextStyle(
-                                    color: isFiltered
-                                        ? const Color(0xFF58A6FF)
-                                        : Colors.white54,
-                                    fontSize: 12)),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(isFiltered ? '筛选方向合理率' : '方向合理率',
+                                    style: TextStyle(
+                                        color: isFiltered
+                                            ? const Color(0xFF58A6FF)
+                                            : Colors.white54,
+                                        fontSize: 12)),
+                                const SizedBox(height: 2),
+                                const Text('实时浮动（随行情变动）',
+                                    style: TextStyle(
+                                        color: Colors.white30, fontSize: 10)),
+                              ],
+                            ),
                             const SizedBox(height: 4),
                             Text(
                               '${directionReasonableRate.toStringAsFixed(1)}%',

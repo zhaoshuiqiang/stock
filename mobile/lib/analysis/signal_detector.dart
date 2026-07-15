@@ -138,7 +138,11 @@ class SignalDetector {
     final signals = <SignalItem>[];
     double confidence = 0.75;
     if (last.macdDif > 0 && last.macdDea > 0) confidence += 0.05;
-    if (last.macdHist.abs() > 1) confidence += 0.05;
+    // v3.19: macdHist 为价格单位，原 >1 阈值对高价股过严、低价股过松。
+    // 改为相对收盘价(>0.5%)归一化，使不同价位股票口径一致。
+    if (last.close > 0 && last.macdHist.abs() / last.close > 0.005) {
+      confidence += 0.05;
+    }
     confidence = confidence.clamp(0.6, 0.9);
 
     if (last.macdDif > last.macdDea && prev.macdDif <= prev.macdDea) {
@@ -275,38 +279,60 @@ class SignalDetector {
 
     // 3. 布林带突破/支撑
     if (last.bollUpper > 0) {
+      // v3.19: 趋势判定——ADX 未就绪(==0，通常因数据不足 29 根)时改用均线排列兜底，
+      // 避免短历史下 isTrending 恒为 false 导致的系统性"突破上轨判卖"偏空偏差。
+      bool? bollTrend; // true=向上趋势, false=向下趋势, null=未知
+      if (last.adx14 > 25) {
+        bollTrend = last.plusDi14 > last.minusDi14;
+      } else if (last.adx14 == 0) {
+        if (last.ma5 > last.ma10 && last.ma10 > last.ma20) {
+          bollTrend = true;
+        } else if (last.ma5 < last.ma10 && last.ma10 < last.ma20) {
+          bollTrend = false;
+        } else {
+          bollTrend = null;
+        }
+      } else {
+        bollTrend = null; // ADX 在 (0,25] 不可靠，视为未知
+      }
+
       if (last.close > last.bollUpper && prev.close <= prev.bollUpper) {
-        // 趋势行情中突破上轨为强势信号，震荡行情中为超买
-        final isTrending = last.adx14 > 25;
-        signals.add(SignalItem(
-          type: isTrending ? 'buy' : 'sell',
-          indicator: 'BOLL',
-          signal: isTrending ? '趋势突破上轨' : '突破上轨',
-          description: isTrending
-              ? '股价突破布林带上轨且趋势明确(ADX=${last.adx14.toStringAsFixed(1)})，强势突破'
-              : '股价突破布林带上轨，超买状态',
-          strength: isTrending ? 75 : 70,
-          timestamp: last.date,
-          duration: SignalDuration.mediumTerm,
-          confidence: isTrending ? 0.7 : 0.65,
-          signalCount: 1,
-        ));
+        // 趋势行情中突破上轨为强势信号，震荡/未知趋势中不作为方向性信号发出
+        if (bollTrend != null) {
+          final isTrending = bollTrend;
+          signals.add(SignalItem(
+            type: isTrending ? 'buy' : 'sell',
+            indicator: 'BOLL',
+            signal: isTrending ? '趋势突破上轨' : '突破上轨',
+            description: isTrending
+                ? '股价突破布林带上轨且趋势明确(ADX=${last.adx14.toStringAsFixed(1)})，强势突破'
+                : '股价突破布林带上轨，超买状态',
+            strength: isTrending ? 75 : 70,
+            timestamp: last.date,
+            duration: SignalDuration.mediumTerm,
+            confidence: isTrending ? 0.7 : 0.65,
+            signalCount: 1,
+          ));
+        }
       } else if (last.bollLower > 0 && last.close < last.bollLower && prev.close >= prev.bollLower) {
         // P1-5修复：镜像上轨逻辑，趋势行情中破下轨为看跌延续，震荡行情中为超卖
-        final isTrendingDown = last.adx14 > 25 && last.minusDi14 > last.plusDi14;
-        signals.add(SignalItem(
-          type: isTrendingDown ? 'sell' : 'buy',
-          indicator: 'BOLL',
-          signal: isTrendingDown ? '趋势跌破下轨' : '跌破下轨',
-          description: isTrendingDown
-              ? '股价跌破布林带下轨且下跌趋势明确(ADX=${last.adx14.toStringAsFixed(1)})，看跌延续'
-              : '股价跌破布林带下轨，超卖状态',
-          strength: isTrendingDown ? 75 : 70,
-          timestamp: last.date,
-          duration: SignalDuration.mediumTerm,
-          confidence: isTrendingDown ? 0.7 : 0.65,
-          signalCount: 1,
-        ));
+        // v3.19: 与上方统一使用 bollTrend（ADX 未就绪时均线排列兜底），未知趋势不发出方向信号
+        if (bollTrend != null) {
+          final isTrendingDown = !bollTrend;
+          signals.add(SignalItem(
+            type: isTrendingDown ? 'sell' : 'buy',
+            indicator: 'BOLL',
+            signal: isTrendingDown ? '趋势跌破下轨' : '跌破下轨',
+            description: isTrendingDown
+                ? '股价跌破布林带下轨且下跌趋势明确(ADX=${last.adx14.toStringAsFixed(1)})，看跌延续'
+                : '股价跌破布林带下轨，超卖状态',
+            strength: isTrendingDown ? 75 : 70,
+            timestamp: last.date,
+            duration: SignalDuration.mediumTerm,
+            confidence: isTrendingDown ? 0.7 : 0.65,
+            signalCount: 1,
+          ));
+        }
       }
     }
 

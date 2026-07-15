@@ -272,7 +272,20 @@ class _RecommendationStatsScreenState extends State<RecommendationStatsScreen> {
     }
 
     final total = records.length;
-    final wins = records.where((r) => (r['day20_return'] as double) > 0).length;
+    // v3.19: 命中率改为方向感知——看多需 day20_return>0，看空需 day20_return<0；
+    // 旧记录 direction 为空时沿用旧口径(仅看多)以保证向后兼容。
+    int wins = 0;
+    for (final r in records) {
+      final dir = (r['direction'] as String?) ?? '';
+      final ret = r['day20_return'] as double;
+      if (dir == 'bullish') {
+        if (ret > 0) wins++;
+      } else if (dir == 'bearish') {
+        if (ret < 0) wins++;
+      } else {
+        if (ret > 0) wins++;
+      }
+    }
     final hitRate = total > 0 ? wins / total * 100 : 0.0;
     final avgReturn = records
             .map((r) => r['day20_return'] as double)

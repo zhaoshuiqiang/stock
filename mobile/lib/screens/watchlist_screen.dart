@@ -592,7 +592,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
       topSignals: r.topSignals.join('  '),
       archivedAt: DateTime.now(),
     );
-    await _dbService.addArchive(record);
+    await _dbService.addArchiveIfNotExists(record);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -655,7 +655,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
         topSignals: r.topSignals.join('  '),
         archivedAt: DateTime.now(),
       );
-      await _dbService.addArchive(record);
+      await _dbService.addArchiveIfNotExists(record);
     }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -714,6 +714,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     );
     if (confirmed != true) return;
     final seenCodes = <String>{};
+    var inserted = 0;
     for (final r in _oppResults) {
       final normalized = StockCodeUtils.normalizeForArchive(r.code);
       if (!seenCodes.add(normalized)) continue;
@@ -734,12 +735,14 @@ class WatchlistScreenState extends State<WatchlistScreen>
         topSignals: r.topSignals.join('  '),
         archivedAt: DateTime.now(),
       );
-      await _dbService.addArchive(record);
+      if (await _dbService.addArchiveIfNotExists(record)) inserted++;
     }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已归档 ${_oppResults.length} 只股票'),
+          content: Text(inserted == _oppResults.length
+              ? '已归档 ${inserted} 只股票'
+              : '已归档 ${inserted} 只（重复 ${_oppResults.length - inserted} 只已跳过）'),
           backgroundColor: _accentColor,
           duration: const Duration(seconds: 1),
         ),

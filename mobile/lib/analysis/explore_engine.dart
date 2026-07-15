@@ -228,6 +228,13 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         debugPrint('ExploreEngine.decisionTracking: $e');
       }
 
+      // 1.15: capture 后评估 pending outcomes，否则 decision_outcomes 永远为 pending
+      try {
+        await DecisionTracker().refreshPending(limit: 100);
+      } catch (e) {
+        debugPrint('ExploreEngine.refreshPending: $e');
+      }
+
       // Phase 3: 批量记录推荐快照（事务内一次性写入，避免逐只 track 的并发开销）
       try {
         await RecommendationTracker().trackBatch(analysisList);

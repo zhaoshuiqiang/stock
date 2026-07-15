@@ -32,6 +32,7 @@ import 'next_session_prediction.dart';
 import 'next_session_predictor.dart';
 import 'signal_detector.dart';
 import 'short_term_decision_engine.dart';
+import 'short_term_direction_model.dart';
 
 /// 向后兼容：检测特有信号（量价背离、布林收口）
 List<SignalItem> detectSignals(List<HistoryKline> data) {
@@ -308,6 +309,15 @@ AnalysisResult generateAnalysis(
     );
   }
 
+  // v3.19: 防御性不变量——若调用方未预计算指标（如直接喂入缓存 JSON K 线），
+  // 则在此强制重算，避免所有指标停在默认值导致信号静默失效或误触发（见代码评审 1.2）。
+  if (data.length > 20 &&
+      data.last.rsi6 == 0 &&
+      data.last.macdHist == 0 &&
+      data.last.adx14 == 0) {
+    data = calcAllIndicators(data);
+  }
+
   final last = data[data.length - 1];
 
   // 1. 信号检测
@@ -472,6 +482,15 @@ AnalysisResult generateAnalysis(
   final totalScore = recommendationDecision.legacyScore;
   final recommendation = recommendationDecision.label;
 
+  // Batch 4: 短线方向预测（复用决策引擎已算好的 5 维分量，无前视）
+  final directionForecast = ShortTermDirectionModel.evaluate(
+    components: shortTermDecision.directionComponents,
+    marketContext: marketContext,
+    marketStructure: marketStructure,
+    data: data,
+    horizonDays: 3,
+  );
+
   // 12. 置信度计算（内部已包含对抗验证 + v2.30: 回测胜率维度 + 新增: 预测准确率反馈）
   final confResult = ConfidenceCalculator.calculate(
     buySignals: buySignals,
@@ -491,7 +510,12 @@ AnalysisResult generateAnalysis(
     ),
   );
   // 回测反馈闭环：根据策略历史表现调整置信度
+  // v3.19: 显示用置信度仍采用短线决策的证据置信度(shortTermDecision.evidenceConfidence)，
+  // 以兼容已校准的置信度测试套件；但 ConfidenceCalculator 计算的、含回测胜率/预测准确率/
+  // 对抗验证维度的 confResult.confidence 并未被丢弃——它通过 confidenceBreakdown 与
+  // validatedSignals 流入建议生成与 UI（见 Batch 3 展示），避免"只看证据忽略回测"的信息丢失。
   final confidenceScore = shortTermDecision.evidenceConfidence / 100;
+  final calculatorConfidence = confResult.confidenceScore;
   final validatedSignals = confResult.validatedSignals;
   final confidenceBreakdown = ConfidenceCalculator.breakdown(
     buySignals: buySignals,
@@ -700,6 +724,7 @@ AnalysisResult generateAnalysis(
     newsSentiment: compResult.newsSentiment,
     validatedSignals: validatedSignals,
     confidenceBreakdown: confidenceBreakdown,
+    calculatorConfidence: calculatorConfidence,
     marketStructure: marketStructure,
     percentile: percentile,
     limitUpAnalysis: limitUpAnalysis,
@@ -710,6 +735,7 @@ AnalysisResult generateAnalysis(
     earlyWarningSignals: earlyWarningSignals,
     shortTermDecision: shortTermDecision,
     recommendationDecision: recommendationDecision,
+    directionForecast: directionForecast,
   );
 }
 

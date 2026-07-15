@@ -59,12 +59,12 @@ class CapitalFlowAnalyzer {
         else if (obvChange < -5) { score -= 0.4; }
       }
 
-      // 量能放大因子：avgVol5/avgVol10 > 1 表示放量，应放大资金流向信号
+      // 量能放大因子：近5日均量/近10日均量，>1 表示放量。5日与10日资金流项共用同一量能比。
+      // v3.19: 原 volFactor5d/volFactor10d 计算式完全相同（复制粘贴），合并为单一 volFactor。
       final priceFactor5d = priceChange5d / 100.0;
-      final volFactor5d = avgVol10 > 0 ? avgVol5 / avgVol10 : 1.0;
-      final volFactor10d = avgVol10 > 0 ? avgVol5 / avgVol10 : 1.0;
-      mainNetFlow5d = priceFactor5d * volFactor5d * 10;
-      mainNetFlow10d = (priceChange10d / 100.0) * volFactor10d * 10;
+      final volFactor = avgVol10 > 0 ? avgVol5 / avgVol10 : 1.0;
+      mainNetFlow5d = priceFactor5d * volFactor * 10;
+      mainNetFlow10d = (priceChange10d / 100.0) * volFactor * 10;
       flowTrend = mainNetFlow5d > 0.1 ? 0.7 : mainNetFlow5d > 0.03 ? 0.3 : mainNetFlow5d > -0.03 ? 0 : mainNetFlow5d > -0.1 ? -0.3 : -0.7;
     }
 

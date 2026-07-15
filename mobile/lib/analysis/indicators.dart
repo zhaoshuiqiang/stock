@@ -134,7 +134,9 @@ List<HistoryKline> calcRSI(List<HistoryKline> data, List<int> periods) {
   }
 
   for (final period in periods) {
-    if (data.length < period) continue;
+    // v3.19: 种子循环读取 gains[period]，需要 length > period（索引 period 存在）。
+    // 原 data.length < period 在 length == period 时会越界，改为 <= period 跳过。
+    if (data.length <= period) continue;
 
     final List<double> gains = List.filled(data.length, 0);
     final List<double> losses = List.filled(data.length, 0);

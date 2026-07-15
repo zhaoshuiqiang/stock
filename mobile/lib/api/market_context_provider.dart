@@ -7,7 +7,9 @@ import '../models/stock_models.dart';
 /// 市场环境提供者
 class MarketContextProvider {
   static const String _fullSinaUrl = 'https://hq.sinajs.cn/list=sh000001,sz399001';
-  static const String _hotEastMoneyUrl = 'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=30&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141';
+  // v3.19: pz 从 30 提升到 1000，确保取回全部行业板块（原 pz=30 仅返回涨幅前 30 的板块，
+  // 会系统性高估 avgChangePct，导致下跌市不触发扣分）。按板块等权求均值（见下方计算）。
+  static const String _hotEastMoneyUrl = 'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=1000&po=1&np=1&fltt=2&invl=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f104,f105,f128,f136,f140,f141';
 
   static http.Client? _httpClient;
 
@@ -158,8 +160,9 @@ class MarketContextProvider {
           double szIndexPct = 0;
           int upCount = 0;
           int downCount = 0;
-          double weightedSum = 0;
-          int totalStocks = 0;
+          // v3.19: 改为按板块等权求均值（每个板块一票），避免大盘股集中的行业被过度加权。
+          double sumChangePct = 0;
+          int sectorCount = 0;
 
           for (final item in diff) {
             final m = item as Map<String, dynamic>;
@@ -177,13 +180,11 @@ class MarketContextProvider {
             upCount += riseCount;
             downCount += fallCount;
 
-            // v3.15: 加权平均计算全市场平均涨跌幅
-            final sectorStocks = riseCount + fallCount;
-            weightedSum += changePct * sectorStocks;
-            totalStocks += sectorStocks;
+            sumChangePct += changePct;
+            sectorCount++;
           }
 
-          final avgChangePct = totalStocks > 0 ? weightedSum / totalStocks : 0.0;
+          final avgChangePct = sectorCount > 0 ? sumChangePct / sectorCount : 0.0;
 
           return MarketContext(
             shIndexPct: shIndexPct,

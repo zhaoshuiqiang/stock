@@ -5,6 +5,7 @@ import '../analysis/market_structure_analyzer.dart';
 import '../analysis/percentile_analyzer.dart';
 import '../analysis/limit_up_analyzer.dart';
 import 'short_term_decision.dart';
+import 'short_term_direction.dart';
 
 enum DecisionOutcomeStatus { pending, evaluated, invalid }
 
@@ -921,8 +922,9 @@ class HistoryKline {
       minusDi14: QuoteData._parseDouble(json['minus_di14']),
       dx: QuoteData._parseDouble(json['dx']),
       adx14: QuoteData._parseDouble(json['adx14']),
-      wr14: QuoteData._parseDouble(json['wr14']),
-      cci14: QuoteData._parseDouble(json['cci14']),
+      // v3.19: 保留 null 语义，避免缺少字段时被塌缩成 0 导致的假"WR超买"卖信号
+      wr14: json['wr14'] == null ? null : QuoteData._parseDouble(json['wr14']),
+      cci14: json['cci14'] == null ? null : QuoteData._parseDouble(json['cci14']),
     );
   }
 }
@@ -1161,7 +1163,7 @@ class NewsSentiment {
 class MarketContext {
   final double shIndexPct; // 上证指数涨跌幅
   final double szIndexPct; // 深证成指涨跌幅
-  final double indexChange; // 上证指数涨跌额
+  final double indexChange; // 上证/深成指涨跌幅均值（百分比），非点差。仅用于 isFinite 等有限性校验。
   final String
       marketTrend; // 大盘趋势（'strong_up' / 'up' / 'neutral' / 'down' / 'strong_down'）
   final int upCount; // 涨停家数
@@ -1346,6 +1348,7 @@ class AnalysisResult {
   final NewsSentiment? newsSentiment; // 新闻情绪
   final List<ValidatedSignal>? validatedSignals; // 对抗验证信号
   final Map<String, double>? confidenceBreakdown; // 置信度分项明细
+  final double? calculatorConfidence; // v3.19: ConfidenceCalculator 输出的综合置信度（含回测胜率/预测准确率/对抗验证），用于与证据置信度对照展示
 
   // 市场结构 + 概念 + 分位值 (Phase 1-4)
   final MarketStructureResult? marketStructure; // 市场结构分析结果
@@ -1368,6 +1371,9 @@ class AnalysisResult {
   /// 短线决策引擎输出的完整推荐（方向、标签、门控、可操作状态），
   /// 替代从 label/score 手工重建的假对象。
   final RecommendationDecision? recommendationDecision;
+
+  /// Batch 4 短线方向预测（方向 + 概率 + 持有期 + 可解释证据）
+  final DirectionForecast? directionForecast;
 
   AnalysisResult({
     this.quote,
@@ -1394,6 +1400,7 @@ class AnalysisResult {
     this.newsSentiment,
     this.validatedSignals,
     this.confidenceBreakdown,
+    this.calculatorConfidence,
     this.marketStructure,
     this.conceptTags,
     this.percentile,
@@ -1404,6 +1411,7 @@ class AnalysisResult {
     this.earlyWarningSignals,
     this.shortTermDecision,
     this.recommendationDecision,
+    this.directionForecast,
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {
@@ -1512,6 +1520,9 @@ class AnalysisResult {
           : null,
       validatedSignals: validatedSignals,
       confidenceBreakdown: confidenceBreakdown,
+      calculatorConfidence: json['calculator_confidence'] is num
+          ? (json['calculator_confidence'] as num).toDouble()
+          : null,
       marketStructure: json['market_structure'] != null
           ? MarketStructureResult.fromJson(
               json['market_structure'] as Map<String, dynamic>)
@@ -1546,6 +1557,13 @@ class AnalysisResult {
           ? RecommendationDecision.fromJson(
               Map<String, dynamic>.from(
                 json['recommendation_decision'] as Map,
+              ),
+            )
+          : null,
+      directionForecast: json['direction_forecast'] is Map
+          ? DirectionForecast.fromJson(
+              Map<String, dynamic>.from(
+                json['direction_forecast'] as Map,
               ),
             )
           : null,
@@ -1588,6 +1606,7 @@ class AnalysisResult {
       'news_sentiment': newsSentiment?.toJson(),
       'validated_signals': validatedSignals?.map((s) => s.toJson()).toList(),
       'confidence_breakdown': confidenceBreakdown,
+      'calculator_confidence': calculatorConfidence,
       'market_structure': marketStructure?.toJson(),
       'concept_tags': conceptTags,
       'percentile': percentile?.toJson(),
@@ -1598,6 +1617,7 @@ class AnalysisResult {
           earlyWarningSignals?.map((s) => s.toJson()).toList(),
       'short_term_decision': shortTermDecision?.toJson(),
       'recommendation_decision': recommendationDecision?.toJson(),
+      'direction_forecast': directionForecast?.toJson(),
     };
   }
 
@@ -1626,6 +1646,7 @@ class AnalysisResult {
     NewsSentiment? newsSentiment,
     List<ValidatedSignal>? validatedSignals,
     Map<String, double>? confidenceBreakdown,
+    double? calculatorConfidence,
     MarketStructureResult? marketStructure,
     Map<String, List<String>>? conceptTags,
     PercentileResult? percentile,
@@ -1635,6 +1656,7 @@ class AnalysisResult {
     Map<String, dynamic>? nextDayPrediction,
     List<SignalItem>? earlyWarningSignals,
     ShortTermDecision? shortTermDecision,
+    DirectionForecast? directionForecast,
   }) {
     return AnalysisResult(
       quote: quote ?? this.quote,
@@ -1661,6 +1683,7 @@ class AnalysisResult {
       newsSentiment: newsSentiment ?? this.newsSentiment,
       validatedSignals: validatedSignals ?? this.validatedSignals,
       confidenceBreakdown: confidenceBreakdown ?? this.confidenceBreakdown,
+      calculatorConfidence: calculatorConfidence ?? this.calculatorConfidence,
       marketStructure: marketStructure ?? this.marketStructure,
       conceptTags: conceptTags ?? this.conceptTags,
       percentile: percentile ?? this.percentile,
@@ -1670,6 +1693,7 @@ class AnalysisResult {
       nextDayPrediction: nextDayPrediction ?? this.nextDayPrediction,
       earlyWarningSignals: earlyWarningSignals ?? this.earlyWarningSignals,
       shortTermDecision: shortTermDecision ?? this.shortTermDecision,
+      directionForecast: directionForecast ?? this.directionForecast,
     );
   }
 }

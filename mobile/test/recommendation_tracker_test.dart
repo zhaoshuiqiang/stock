@@ -30,7 +30,8 @@ const _recommendationTrackingSchema = '''
     confidence_adjustment TEXT DEFAULT '',
     dimension_scores_json TEXT DEFAULT '',
     feedback TEXT DEFAULT '',
-    score REAL
+    score REAL,
+    direction TEXT DEFAULT ''
   )
 ''';
 
@@ -245,6 +246,37 @@ void main() {
       expect(tech['sample_count'], 1);
       expect(tech['has_enough_data'], isFalse);
       expect(tech['current_weight'], WeightOptimizer.kDefaultWeights['技术面']);
+    });
+  });
+
+  group('tradingDaysBetween (fix 1.14: 交易日口径)', () {
+    test('周五到下周三：交易日 < 自然日', () {
+      // 2026-07-10 是周五，2026-07-15 是周三：自然日差 5，交易日应为 3
+      final friday = DateTime(2026, 7, 10);
+      final wednesday = DateTime(2026, 7, 15);
+      expect(wednesday.difference(friday).inDays, 5);
+      expect(tradingDaysBetween(friday, wednesday), 3);
+    });
+
+    test('周一到下周一：5 个交易日', () {
+      final monday = DateTime(2026, 7, 6);
+      final nextMonday = DateTime(2026, 7, 13);
+      expect(nextMonday.difference(monday).inDays, 7);
+      expect(tradingDaysBetween(monday, nextMonday), 5);
+    });
+
+    test('end 不晚于 start 返回 0', () {
+      expect(
+          tradingDaysBetween(DateTime(2026, 7, 15), DateTime(2026, 7, 15)), 0);
+      expect(
+          tradingDaysBetween(DateTime(2026, 7, 15), DateTime(2026, 7, 10)), 0);
+    });
+
+    test('跨越长周末的里程碑不会提前触发', () {
+      // 自然日已 >=5 但交易日 <5 时，不应计入 5 日里程碑
+      final friday = DateTime(2026, 7, 10);
+      final wednesday = DateTime(2026, 7, 15);
+      expect(tradingDaysBetween(friday, wednesday) < 5, isTrue);
     });
   });
 }

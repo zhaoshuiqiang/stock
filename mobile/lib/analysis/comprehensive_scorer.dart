@@ -7,6 +7,9 @@ import 'sector_rotation.dart';
 
 class ComprehensiveScoreResult {
   final int totalScore;
+  /// v3.19: 该字段为遗留映射，生产路径实际采用 RecommendationPolicy 的标签
+  ///（见 signal_engine.dart 中 recommendationDecision.label），请勿将其作为推荐文案来源。
+  /// 保留仅用于内部/测试参考，避免与生产标签产生矛盾。
   final String recommendation;
   final FundamentalScore? fundamentalScore;
   final NewsSentiment? newsSentiment;
