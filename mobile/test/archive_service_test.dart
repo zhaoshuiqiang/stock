@@ -3,6 +3,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:stock_analyzer/analysis/archive_service.dart';
 import 'package:stock_analyzer/analysis/decision_market_data_provider.dart';
 import 'package:stock_analyzer/analysis/decision_tracker.dart';
+import 'package:stock_analyzer/analysis/opportunity_engine.dart';
 import 'package:stock_analyzer/models/short_term_decision.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 import 'package:stock_analyzer/storage/database_service.dart';
@@ -88,6 +89,83 @@ void main() {
     expect(result.captured, isFalse);
     expect(await db.query('archive_records'), hasLength(1));
     expect(await db.query('decision_snapshots'), hasLength(0));
+  });
+
+  test('由 OpportunityResult 直接捕获决策快照（不触发联网重分析）', () async {
+    final opp = OpportunityResult(
+      code: '000004',
+      name: '招商银行',
+      price: 35.5,
+      changePct: 1.2,
+      score: 8,
+      recommendation: '买入',
+      riskLevel: '低',
+      buySignalCount: 3,
+      sellSignalCount: 0,
+      activeStrategyCount: 2,
+      confluenceScore: 80,
+      shortTermDecision: ShortTermDecision(
+        directionScore: 70,
+        tradeQualityScore: 75,
+        riskScore: 30,
+        evidenceConfidence: 72,
+        direction: RecommendationDirection.bullish,
+        marketRegime: MarketRegime.range,
+        modelVersion: 'short-term-v2',
+        rawComprehensiveScore: 7,
+      ),
+    );
+    final result = await ArchiveService.archiveStock(
+      code: opp.code,
+      name: opp.name,
+      opp: opp,
+      db: storage,
+      skipArchiveRecord: true,
+    );
+
+    expect(result.archived, isFalse);
+    expect(result.captured, isTrue);
+    expect(await db.query('decision_snapshots'), hasLength(1));
+    final snap = (await db.query('decision_snapshots')).first;
+    expect(snap['source'], ArchiveService.kManualSource);
+    expect(snap['code'], '000004');
+  });
+
+  test('skipRefreshPending 时不触发 refreshPending 仍完成捕获', () async {
+    final opp = OpportunityResult(
+      code: '000005',
+      name: '兴业银行',
+      price: 18.0,
+      changePct: -0.5,
+      score: 6,
+      recommendation: '观望',
+      riskLevel: '中',
+      buySignalCount: 1,
+      sellSignalCount: 1,
+      activeStrategyCount: 1,
+      confluenceScore: 60,
+      shortTermDecision: ShortTermDecision(
+        directionScore: 10,
+        tradeQualityScore: 50,
+        riskScore: 45,
+        evidenceConfidence: 60,
+        direction: RecommendationDirection.neutral,
+        marketRegime: MarketRegime.range,
+        modelVersion: 'short-term-v2',
+        rawComprehensiveScore: 5,
+      ),
+    );
+    final result = await ArchiveService.archiveStock(
+      code: opp.code,
+      name: opp.name,
+      opp: opp,
+      db: storage,
+      skipArchiveRecord: true,
+      skipRefreshPending: true,
+    );
+
+    expect(result.captured, isTrue);
+    expect(await db.query('decision_snapshots'), hasLength(1));
   });
 
   test('30天内同向重复留档被跳过', () async {

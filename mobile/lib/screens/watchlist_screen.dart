@@ -10,6 +10,7 @@ import '../api/websocket_client.dart';
 import '../analysis/opportunity_engine.dart';
 import '../analysis/ai_layer.dart';
 import '../analysis/archive_service.dart';
+import '../analysis/decision_tracker.dart';
 import '../analysis/backtest_engine.dart';
 import '../analysis/position_valuation.dart';
 import '../analysis/portfolio_snapshot_service.dart';
@@ -741,7 +742,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
         ),
       );
     }
-    // 后台顺序补捕获决策快照（复用刚才写入的 archive_records，skipArchiveRecord 避免重复写）
+    // 后台顺序补捕获决策快照（复用刚才写入的 archive_records，skipArchiveRecord 避免重复写）。
+    // 每只直接由 opp 的 shortTermDecision 构建捕获对象，无需联网重算；
+    // skipRefreshPending 避免每只都触发一次行情拉取，统一在循环结束后刷新一次。
     final captureSeen = <String>{};
     for (final r in _oppResults) {
       final normalized = StockCodeUtils.normalizeForArchive(r.code);
@@ -753,10 +756,17 @@ class WatchlistScreenState extends State<WatchlistScreen>
           opp: r,
           db: _dbService,
           skipArchiveRecord: true,
+          skipRefreshPending: true,
         );
       } catch (e) {
         debugPrint('[留档] 一键归档捕获失败: $e');
       }
+    }
+    // 批量捕获后统一刷新一次命中率评估（覆盖本次新增的 pending 快照）。
+    try {
+      await DecisionTracker().refreshPending(limit: _oppResults.length);
+    } catch (e) {
+      debugPrint('[留档] 一键归档命中率刷新失败: $e');
     }
   }
 

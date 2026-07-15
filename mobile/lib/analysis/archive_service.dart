@@ -26,7 +26,12 @@ class ArchiveService {
   /// 归档一只股票。
   ///
   /// [analysis] 优先使用（如个股详情页已算好的完整 [AnalysisResult]），可零额外开销
-  /// 同时完成双写；[opp] 为自选页机会摘要，缺少 [ShortTermDecision]，会触发单只重分析。
+  /// 同时完成双写；[opp] 为自选页机会摘要，其已携带扫描期算出的 [ShortTermDecision]，
+  /// 直接据此构建捕获所需的 [AnalysisResult]，无需重新发起网络分析。仅当 [opp] 缺少
+  /// [ShortTermDecision]（旧数据/未持久化）时才回退到 [SingleStockAnalyzer] 单只重分析。
+  ///
+  /// [skipRefreshPending] 为 true 时不在每次捕获后调用 [DecisionTracker.refreshPending]，
+  /// 由调用方在批量归档结束后统一刷新一次，避免 N 次网络拉取。
   ///
   /// 返回 [ArchiveResult] 供 UI 反馈；任意一步失败仅记录日志，不向上抛异常。
   static Future<ArchiveResult> archiveStock({
@@ -36,6 +41,7 @@ class ArchiveService {
     OpportunityResult? opp,
     required DatabaseService db,
     bool skipArchiveRecord = false,
+    bool skipRefreshPending = false,
   }) async {
     final record = _buildRecord(code, name, analysis, opp);
     var archived = false;
@@ -45,13 +51,18 @@ class ArchiveService {
       debugPrint('[留档] 写入 archive_records 失败: $e');
     }
 
-    // 取用于决策快照捕获的完整分析（含 shortTermDecision）
+    // 取用于决策快照捕获的完整分析（含 shortTermDecision）。
+    // 优先复用已有 analysis；其次由 opp 直接构建（零网络开销）；最后回退单只重分析。
     AnalysisResult? captureAnalysis = analysis;
     if (captureAnalysis == null && opp != null) {
-      captureAnalysis = await SingleStockAnalyzer.analyze(
-        opp.code,
-        name: opp.name,
-      );
+      if (opp.shortTermDecision != null) {
+        captureAnalysis = _analysisFromOpportunity(opp);
+      } else {
+        captureAnalysis = await SingleStockAnalyzer.analyze(
+          opp.code,
+          name: opp.name,
+        );
+      }
     }
 
     var captured = false;
@@ -64,13 +75,35 @@ class ArchiveService {
           signalTradeDate: DateTime.now(),
           benchmarkCode: '000300',
         );
-        await DecisionTracker().refreshPending(limit: 20);
+        if (!skipRefreshPending) {
+          await DecisionTracker().refreshPending(limit: 20);
+        }
         captured = true;
       } catch (e) {
         debugPrint('[留档] 决策快照捕获失败: $e');
       }
     }
     return ArchiveResult(archived: archived, captured: captured);
+  }
+
+  /// 由 [OpportunityResult] 直接构建捕获所需的 [AnalysisResult]。
+  ///
+  /// 仅填入 [DecisionTracker.capture] 实际读取的字段（quote / recommendation /
+  /// score / shortTermDecision），其余沿用默认值。这样留档双写不再依赖联网重算，
+  /// 复用机会扫描期已算好的 [ShortTermDecision]。
+  static AnalysisResult _analysisFromOpportunity(OpportunityResult opp) {
+    return AnalysisResult(
+      quote: QuoteData(
+        code: opp.code,
+        name: opp.name,
+        price: opp.price,
+        changePct: opp.changePct,
+        updateTime: DateTime.now(),
+      ),
+      score: opp.score,
+      recommendation: opp.recommendation,
+      shortTermDecision: opp.shortTermDecision,
+    );
   }
 
   static ArchiveRecord _buildRecord(

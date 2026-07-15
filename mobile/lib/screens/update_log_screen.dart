@@ -10,6 +10,16 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.27.20260716',
+        'date': '2026-07-16',
+        'changes': [
+          '修复: 自选页一键归档 400 只，新模型仍为 0 条',
+          '根因: 机会扫描算出的 shortTermDecision 未持久化到 opportunity_results，留档双写被迫对每只股票联网重分析(5次请求)导致批量失败',
+          '机会结果表新增 short_term_decision_json 列(v23迁移)，留档直接复用扫描期决策，零联网开销',
+          '批量归档改为循环结束后统一刷新一次命中率评估',
+        ],
+      },
+      {
         'version': 'v3.26.20260715',
         'date': '2026-07-15',
         'changes': [

@@ -51,7 +51,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 22,
+      version: 23,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -403,6 +403,17 @@ class DatabaseService {
               debugPrint('[DB] v21→v22 direction 列已存在或添加失败: $e');
             }
           }
+          if (oldVersion < 23) {
+            // v3.27: 机会分析结果持久化 short_term_decision_json，使留档双写
+            // 可直接复用扫描期算出的决策，避免对每只股票重新发起网络分析。
+            try {
+              await txn.execute(
+                  "ALTER TABLE opportunity_results ADD COLUMN short_term_decision_json TEXT");
+            } catch (e) {
+              // 列已存在则忽略
+              debugPrint('[DB] v22→v23 short_term_decision 列已存在或添加失败: $e');
+            }
+          }
           // 索引补建（幂等，保证升级路径和新装路径都有）
           await txn.execute(
               'CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_code ON recommendation_tracking(code)');
@@ -505,6 +516,7 @@ class DatabaseService {
         confluence_score INTEGER NOT NULL DEFAULT 0,
         trade_levels_json TEXT,
         top_signals TEXT DEFAULT '',
+        short_term_decision_json TEXT,
         analyzed_at INTEGER NOT NULL
       )
     ''');

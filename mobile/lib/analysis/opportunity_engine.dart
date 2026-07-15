@@ -84,6 +84,9 @@ class OpportunityResult {
       'confluence_score': confluenceScore,
       'trade_levels_json': tradeLevels != null ? jsonEncode(tradeLevels) : null,
       'top_signals': topSignals.join('  '),
+      'short_term_decision_json': shortTermDecision != null
+          ? jsonEncode(shortTermDecision!.toJson())
+          : null,
       'analyzed_at': (analyzedAt ?? DateTime.now()).millisecondsSinceEpoch,
     };
   }
@@ -104,6 +107,16 @@ class OpportunityResult {
           .where((s) => s.isNotEmpty)
           .toList();
     }
+    ShortTermDecision? shortTermDecision;
+    if (map['short_term_decision_json'] != null &&
+        (map['short_term_decision_json'] as String).isNotEmpty) {
+      try {
+        shortTermDecision = ShortTermDecision.fromJson(
+          jsonDecode(map['short_term_decision_json'] as String)
+              as Map<String, dynamic>,
+        );
+      } catch (_) {}
+    }
     return OpportunityResult(
       code: map['code'] as String,
       name: map['name'] as String,
@@ -117,6 +130,7 @@ class OpportunityResult {
       activeStrategyCount: (map['active_strategy_count'] as num?)?.toInt() ?? 0,
       confluenceScore: (map['confluence_score'] as num?)?.toInt() ?? 0,
       tradeLevels: tradeLevels,
+      shortTermDecision: shortTermDecision,
       topSignals: topSignals,
     );
   }
