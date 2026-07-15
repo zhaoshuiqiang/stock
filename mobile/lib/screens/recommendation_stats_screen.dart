@@ -5,6 +5,7 @@ import '../analysis/decision_statistics.dart';
 import '../storage/database_service.dart';
 import '../models/stock_models.dart';
 import '../widgets/decision_archive_summary.dart';
+import '../widgets/decision_calibration_summary.dart';
 
 /// 推荐命中率统计页
 ///
@@ -144,6 +145,8 @@ class _RecommendationStatsScreenState extends State<RecommendationStatsScreen> {
               _loadData();
             },
           ),
+          const SizedBox(height: 16),
+          DecisionCalibrationSummary(summary: summary),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(12),
