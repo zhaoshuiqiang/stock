@@ -9,6 +9,7 @@ import '../api/api_client.dart';
 import '../api/websocket_client.dart';
 import '../analysis/opportunity_engine.dart';
 import '../analysis/ai_layer.dart';
+import '../analysis/archive_service.dart';
 import '../analysis/backtest_engine.dart';
 import '../analysis/position_valuation.dart';
 import '../analysis/portfolio_snapshot_service.dart';
@@ -576,27 +577,19 @@ class WatchlistScreenState extends State<WatchlistScreen>
   // ─── 自选分析：归档 ────────────────────────────────────────────
 
   Future<void> _archiveOppItem(OpportunityResult r) async {
-    final record = ArchiveRecord(
-      code: StockCodeUtils.normalizeForArchive(r.code),
+    final result = await ArchiveService.archiveStock(
+      code: r.code,
       name: r.name,
-      price: r.price,
-      changePct: r.changePct,
-      score: r.score,
-      recommendation: r.recommendation,
-      riskLevel: r.riskLevel,
-      buySignalCount: r.buySignalCount,
-      sellSignalCount: r.sellSignalCount,
-      activeStrategyCount: r.activeStrategyCount,
-      confluenceScore: r.confluenceScore,
-      tradeLevelsJson: r.tradeLevels != null ? r.tradeLevels.toString() : null,
-      topSignals: r.topSignals.join('  '),
-      archivedAt: DateTime.now(),
+      opp: r,
+      db: _dbService,
     );
-    await _dbService.addArchiveIfNotExists(record);
     if (mounted) {
+      final msg = result.archived
+          ? (result.captured ? '${r.name} 已归档（含命中率跟踪）' : '${r.name} 已归档')
+          : '${r.name} 30天内同向已留档';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${r.name} 已归档'),
+          content: Text(msg),
           backgroundColor: _accentColor,
           duration: const Duration(seconds: 1),
         ),
@@ -747,6 +740,23 @@ class WatchlistScreenState extends State<WatchlistScreen>
           duration: const Duration(seconds: 1),
         ),
       );
+    }
+    // 后台顺序补捕获决策快照（复用刚才写入的 archive_records，skipArchiveRecord 避免重复写）
+    final captureSeen = <String>{};
+    for (final r in _oppResults) {
+      final normalized = StockCodeUtils.normalizeForArchive(r.code);
+      if (!captureSeen.add(normalized)) continue;
+      try {
+        await ArchiveService.archiveStock(
+          code: r.code,
+          name: r.name,
+          opp: r,
+          db: _dbService,
+          skipArchiveRecord: true,
+        );
+      } catch (e) {
+        debugPrint('[留档] 一键归档捕获失败: $e');
+      }
     }
   }
 

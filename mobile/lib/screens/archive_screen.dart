@@ -14,6 +14,7 @@ import '../analysis/archive_reliability_evaluator.dart';
 import '../services/legacy_archive_csv_exporter.dart';
 import '../services/decision_csv_exporter.dart';
 import '../analysis/decision_statistics.dart';
+import '../analysis/archive_service.dart';
 import '../models/short_term_decision.dart';
 import '../widgets/decision_archive_summary.dart';
 
@@ -57,9 +58,8 @@ class ArchiveScreenState extends State<ArchiveScreen>
   RecommendationDirection? _decisionDirection;
   MarketRegime? _decisionMarketRegime;
   String? _decisionModelVersion;
-  String? _decisionSource;
+  String _decisionSourceGroup = 'mine'; // 'mine' | 'scan' | 'all'
   final Set<String> _decisionModelVersions = <String>{};
-  final Set<String> _decisionSources = <String>{};
   String _filterType = '全部'; // '全部', '看多', '看空', '观望'
   String _filterReliability = '全部'; // '全部', '非常合理', '合理', '偏差', '非常偏差'
 
@@ -80,7 +80,6 @@ class ArchiveScreenState extends State<ArchiveScreen>
           direction: _decisionDirection,
           marketRegime: _decisionMarketRegime,
           modelVersion: _decisionModelVersion,
-          source: _decisionSource,
         ),
       );
       if (mounted) {
@@ -89,7 +88,6 @@ class ArchiveScreenState extends State<ArchiveScreen>
           _decisionModelVersions.addAll(
             rows.map((row) => row.snapshot.modelVersion),
           );
-          _decisionSources.addAll(rows.map((row) => row.snapshot.source));
         });
       }
     } catch (e) {
@@ -109,7 +107,8 @@ class ArchiveScreenState extends State<ArchiveScreen>
       );
 
   Widget _buildDecisionMode() {
-    final summary = DecisionStatistics.summarize(_decisionRows);
+    final rows = _filterDecisionRows(_decisionRows);
+    final summary = DecisionStatistics.summarize(rows);
     return RefreshIndicator(
       onRefresh: _loadDecisionRows,
       child: ListView(
@@ -126,6 +125,11 @@ class ArchiveScreenState extends State<ArchiveScreen>
               setState(() => _decisionHorizon = horizon);
               _loadDecisionRows();
             },
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            '覆盖看多 / 看空 / 观望全方向，跟踪 1/3/5 日命中率',
+            style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.5),
           ),
           const SizedBox(height: 12),
           Row(
@@ -149,29 +153,33 @@ class ArchiveScreenState extends State<ArchiveScreen>
             ],
           ),
           const SizedBox(height: 8),
-          if (_decisionRows.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 60),
+          if (rows.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 60),
               child: Column(
                 children: [
-                  Icon(Icons.insights_outlined, size: 48, color: Color(0xFF30363D)),
-                  SizedBox(height: 12),
-                  Text('暂无新模型评估数据',
-                      style: TextStyle(color: Colors.white54, fontSize: 14)),
-                  SizedBox(height: 8),
+                  const Icon(Icons.insights_outlined,
+                      size: 48, color: Color(0xFF30363D)),
+                  const SizedBox(height: 12),
                   Text(
-                    '短线验证流程：\n'
-                    '1. 在“发现”页点击“刷新探索”执行全市场扫描\n'
-                    '2. 扫描完成后自动生成决策快照\n'
-                    '3. 等待对应天数到期后，此处展示1/3/5日命中率',
+                    _decisionSourceGroup == 'mine'
+                        ? '尚未留档任何股票'
+                        : '暂无新模型评估数据',
+                    style: const TextStyle(color: Colors.white54, fontSize: 14)),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '在个股详情页点“留档”，或在自选页点“归档”，\n'
+                    '系统自动加入并跟踪 1/3/5 日命中率。\n'
+                    '（也可在“发现”页“刷新探索”生成全市场扫描数据）',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.6),
+                    style: TextStyle(
+                        color: Colors.white38, fontSize: 12, height: 1.6),
                   ),
                 ],
               ),
             )
           else
-            ..._decisionRows.map(_buildDecisionRow),
+            ...rows.map(_buildDecisionRow),
         ],
       ),
     );
@@ -182,6 +190,17 @@ class ArchiveScreenState extends State<ArchiveScreen>
       spacing: 8,
       runSpacing: 8,
       children: [
+        SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(value: 'mine', label: Text('我的留档')),
+            ButtonSegment(value: 'scan', label: Text('全市场扫描')),
+            ButtonSegment(value: 'all', label: Text('全部')),
+          ],
+          selected: {_decisionSourceGroup},
+          showSelectedIcon: false,
+          onSelectionChanged: (value) =>
+              setState(() => _decisionSourceGroup = value.first),
+        ),
         _buildDecisionFilterDropdown<RecommendationDirection>(
           value: _decisionDirection,
           hint: '方向',
@@ -212,18 +231,28 @@ class ArchiveScreenState extends State<ArchiveScreen>
             _loadDecisionRows();
           },
         ),
-        _buildDecisionFilterDropdown<String>(
-          value: _decisionSource,
-          hint: '来源',
-          items: _decisionSources.toList()..sort(),
-          labelOf: (value) => _sourceLabel(value),
-          onChanged: (value) {
-            setState(() => _decisionSource = value);
-            _loadDecisionRows();
-          },
-        ),
       ],
     );
+  }
+
+  /// 按来源分组（我的留档 / 全市场扫描 / 全部）在内存中过滤决策行。
+  List<DecisionStatisticsRow> _filterDecisionRows(
+    List<DecisionStatisticsRow> rows,
+  ) {
+    switch (_decisionSourceGroup) {
+      case 'mine':
+        return rows
+            .where((r) => r.snapshot.source == ArchiveService.kManualSource)
+            .toList();
+      case 'scan':
+        return rows
+            .where((r) =>
+                r.snapshot.source == 'explore' ||
+                r.snapshot.source == 'opportunity')
+            .toList();
+      default:
+        return rows;
+    }
   }
 
   Widget _buildDecisionFilterDropdown<T>({
@@ -781,7 +810,6 @@ class ArchiveScreenState extends State<ArchiveScreen>
                 direction: _decisionDirection,
                 marketRegime: _decisionMarketRegime,
                 modelVersion: _decisionModelVersion,
-                source: _decisionSource,
               ),
             )
           : const <DecisionStatisticsRow>[];

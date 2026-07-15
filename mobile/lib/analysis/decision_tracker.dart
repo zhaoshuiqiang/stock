@@ -126,8 +126,15 @@ class DecisionTracker {
 
   /// 清理超过保留期的历史决策快照（及其 outcomes），防止决策表无限增长。
   /// 默认保留 [kDecisionDataRetentionDays] 天，按 signal_trade_date 计算。
-  Future<int> purgeOldSnapshots({int keepDays = kDecisionDataRetentionDays}) =>
-      storage.purgeOldDecisionData(keepDays: keepDays);
+  /// [excludeSources] 中的来源不会被清理，默认保护用户显式留档(source='archive')。
+  Future<int> purgeOldSnapshots({
+    int keepDays = kDecisionDataRetentionDays,
+    List<String> excludeSources = const ['archive'],
+  }) =>
+      storage.purgeOldDecisionData(
+        keepDays: keepDays,
+        excludeSources: excludeSources,
+      );
 
   Future<void> _recordFailure(
       DecisionOutcomeRecord outcome, DateTime at) async {

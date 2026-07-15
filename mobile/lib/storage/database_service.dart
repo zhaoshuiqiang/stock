@@ -1621,22 +1621,29 @@ class DatabaseService {
   ///
   /// 按 [signal_trade_date] 判断：保留最近 [keepDays] 天的快照，更早的整行删除。
   /// outcomes 先按子查询删除（即使 FK 级联未生效也安全），再删快照。
-  Future<int> purgeOldDecisionData({int keepDays = 90}) async {
+  Future<int> purgeOldDecisionData({
+    int keepDays = 90,
+    List<String> excludeSources = const ['archive'],
+  }) async {
     final db = await database;
     final cutoff = _formatSnapshotDate(
       DateTime.now().subtract(Duration(days: keepDays)),
     );
+    final exclude = excludeSources.isEmpty
+        ? "source IS NOT NULL AND source NOT IN ('__none__')"
+        : "source NOT IN (${excludeSources.map((_) => '?').join(',')})";
+    final args = excludeSources.isEmpty ? <Object?>[] : excludeSources;
     return db.transaction((txn) async {
       await txn.delete(
         'decision_outcomes',
         where: 'snapshot_id IN (SELECT id FROM decision_snapshots '
-            'WHERE signal_trade_date < ?)',
-        whereArgs: [cutoff],
+            'WHERE signal_trade_date < ? AND $exclude)',
+        whereArgs: [cutoff, ...args],
       );
       return txn.delete(
         'decision_snapshots',
-        where: 'signal_trade_date < ?',
-        whereArgs: [cutoff],
+        where: 'signal_trade_date < ? AND $exclude',
+        whereArgs: [cutoff, ...args],
       );
     });
   }

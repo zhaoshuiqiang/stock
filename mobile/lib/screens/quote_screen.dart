@@ -23,6 +23,7 @@ import '../core/trading_session.dart';
 import '../analysis/intraday_level_analyzer.dart';
 import '../analysis/sector_rotation.dart';
 import '../analysis/ai_layer.dart';
+import '../analysis/archive_service.dart';
 import '../core/ai_config.dart';
 
 const _kChartLeftReservedSize = 42.0;
@@ -149,6 +150,21 @@ class QuoteScreenState extends State<QuoteScreen>
         const SnackBar(content: Text('已从自选股移除')),
       );
     }
+  }
+
+  Future<void> _archiveCurrent() async {
+    if (_analysis == null) return;
+    final result = await ArchiveService.archiveStock(
+      code: widget.code,
+      name: widget.name,
+      analysis: _analysis,
+      db: _dbService,
+    );
+    if (!mounted) return;
+    final msg = result.archived
+        ? (result.captured ? '已留档（含命中率跟踪）' : '已留档')
+        : '30天内同向已留档，无需重复';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   void _showStockSearchDialog() async {
@@ -749,6 +765,11 @@ class QuoteScreenState extends State<QuoteScreen>
               color: _isFavorite ? Colors.red : null,
             ),
             onPressed: _toggleFavorite,
+          ),
+          IconButton(
+            icon: const Icon(Icons.archive_outlined),
+            tooltip: '留档',
+            onPressed: _analysis?.shortTermDecision != null ? _archiveCurrent : null,
           ),
         ],
       ),
