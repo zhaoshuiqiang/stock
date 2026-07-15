@@ -39,18 +39,22 @@ class _RecommendationStatsScreenState extends State<RecommendationStatsScreen> {
 
   Future<void> _loadData() async {
     try {
-      final recordsFuture = _tracker.getMarketWideReflections(limit: 500);
-      final reportFuture = _loadDimensionReport();
-      final decisionsFuture =
-          _database.getDecisionStatisticsRows(horizon: _horizon);
-      final records = await recordsFuture;
-      final dimensionReport = await reportFuture;
-      final decisions = await decisionsFuture;
+      if (_showNewModel) {
+        final decisions =
+            await _database.getDecisionStatisticsRows(horizon: _horizon);
+        if (!mounted) return;
+        setState(() {
+          _decisionRows = decisions;
+          _isLoading = false;
+        });
+        return;
+      }
+      final records = await _tracker.getMarketWideReflections(limit: 500);
+      final dimensionReport = await _loadDimensionReport();
       if (!mounted) return;
       setState(() {
         _allRecords = records;
         _dimensionReport = dimensionReport;
-        _decisionRows = decisions;
         _isLoading = false;
       });
     } catch (e) {
@@ -124,8 +128,13 @@ class _RecommendationStatsScreenState extends State<RecommendationStatsScreen> {
         ],
         selected: {_showNewModel},
         showSelectedIcon: false,
-        onSelectionChanged: (value) =>
-            setState(() => _showNewModel = value.first),
+        onSelectionChanged: (value) {
+          setState(() {
+            _showNewModel = value.first;
+            _isLoading = true;
+          });
+          _loadData();
+        },
       );
 
   Widget _buildNewModelBody() {

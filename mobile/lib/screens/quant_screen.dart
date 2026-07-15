@@ -8,6 +8,8 @@ import '../analysis/signal_engine.dart';
 import '../analysis/backtest_engine.dart';
 import '../analysis/position_manager.dart';
 import '../analysis/indicators.dart';
+import '../models/short_term_decision.dart';
+import '../widgets/short_term_decision_panel.dart';
 
 // ─── 配色常量 ────────────────────────────────────────────────────────
 const _kBg = Color(0xFF0D1117);
@@ -210,7 +212,8 @@ class _QuantScreenState extends State<QuantScreen> {
     if (_selectedStocks.any((s) => s.code == stock.code)) return;
     if (_selectedStocks.length >= 5) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('最多选择5只股票'), duration: Duration(seconds: 1)),
+        const SnackBar(
+            content: Text('最多选择5只股票'), duration: Duration(seconds: 1)),
       );
       return;
     }
@@ -250,7 +253,8 @@ class _QuantScreenState extends State<QuantScreen> {
     if (mounted) {
       setState(() {
         _analysisResults.addAll(results);
-        _expandedStocks.addAll(results.where((r) => r.error == null).map((r) => r.stock.code));
+        _expandedStocks.addAll(
+            results.where((r) => r.error == null).map((r) => r.stock.code));
         _isAnalyzing = false;
       });
     }
@@ -275,8 +279,7 @@ class _QuantScreenState extends State<QuantScreen> {
         }
         if (_selectedStrategies.contains('trend_following') ||
             _selectedStrategies.contains('ma_multihead')) {
-          backtestResults['MA金叉'] =
-              BacktestEngine.backtestMACross(calculated);
+          backtestResults['MA金叉'] = BacktestEngine.backtestMACross(calculated);
         }
         if (_selectedStrategies.contains('kdj_oversold')) {
           backtestResults['KDJ超卖'] =
@@ -299,8 +302,7 @@ class _QuantScreenState extends State<QuantScreen> {
       // 计算仓位
       double positionRatio = 0.5;
       if (calculated.isNotEmpty) {
-        positionRatio =
-            PositionManager.calculatePosition(calculated.last);
+        positionRatio = PositionManager.calculatePosition(calculated.last);
       }
 
       // 为每个策略生成信号
@@ -445,7 +447,8 @@ class _QuantScreenState extends State<QuantScreen> {
           color = _kDown;
           detail = 'K=${last.k.toStringAsFixed(1)}超买区域';
         } else {
-          detail = 'K=${last.k.toStringAsFixed(1)} D=${last.d.toStringAsFixed(1)}';
+          detail =
+              'K=${last.k.toStringAsFixed(1)} D=${last.d.toStringAsFixed(1)}';
         }
       }
       signals['kdj_oversold'] = {
@@ -522,11 +525,9 @@ class _QuantScreenState extends State<QuantScreen> {
       Color color = _kTextSecondary;
       if (data.length >= 10) {
         final close5ago = data[data.length - 6].close;
-        final momentum5d = close5ago > 0
-            ? (last.close / close5ago - 1) * 100
-            : 0.0;
-        final volConfirm = last.volMa5 > 0 &&
-            last.volume > last.volMa5 * 1.2;
+        final momentum5d =
+            close5ago > 0 ? (last.close / close5ago - 1) * 100 : 0.0;
+        final volConfirm = last.volMa5 > 0 && last.volume > last.volMa5 * 1.2;
         if (momentum5d > 5 && volConfirm) {
           signal = '买入';
           color = _kUp;
@@ -561,13 +562,13 @@ class _QuantScreenState extends State<QuantScreen> {
       Color color = _kTextSecondary;
       if (data.length >= 10 && last.ma5 > 0 && last.ma20 > 0) {
         final isUptrend = last.ma5 > last.ma20;
-        final volShrink = last.volMa5 > 0 &&
-            last.volume < last.volMa5 * 0.7;
+        final volShrink = last.volMa5 > 0 && last.volume < last.volMa5 * 0.7;
         final isPullback = last.close < last.open;
         if (isUptrend && volShrink && isPullback) {
           signal = '买入';
           color = _kUp;
-          detail = '上升趋势中缩量回调，量比${(last.volume / (last.volMa5 > 0 ? last.volMa5 : 1)).toStringAsFixed(2)}';
+          detail =
+              '上升趋势中缩量回调，量比${(last.volume / (last.volMa5 > 0 ? last.volMa5 : 1)).toStringAsFixed(2)}';
         } else if (isUptrend && volShrink) {
           signal = '偏多';
           color = _kUp;
@@ -707,21 +708,19 @@ class _QuantScreenState extends State<QuantScreen> {
                     title: Text(
                       stock.name,
                       style: TextStyle(
-                        color: alreadyAdded
-                            ? _kTextSecondary
-                            : _kTextPrimary,
+                        color: alreadyAdded ? _kTextSecondary : _kTextPrimary,
                         fontSize: 14,
                       ),
                     ),
                     subtitle: Text(
                       _displayCode(stock.code),
-                      style: const TextStyle(
-                          color: _kTextSecondary, fontSize: 12),
+                      style:
+                          const TextStyle(color: _kTextSecondary, fontSize: 12),
                     ),
                     trailing: alreadyAdded
                         ? const Text('已添加',
-                            style: TextStyle(
-                                color: _kTextSecondary, fontSize: 12))
+                            style:
+                                TextStyle(color: _kTextSecondary, fontSize: 12))
                         : const Icon(Icons.add, color: _kAccent, size: 20),
                     onTap: alreadyAdded ? null : () => _addStock(stock),
                   );
@@ -739,8 +738,8 @@ class _QuantScreenState extends State<QuantScreen> {
                   return Chip(
                     label: Text(
                       '${stock.name}(${_displayCode(stock.code)})',
-                      style: const TextStyle(
-                          color: _kTextPrimary, fontSize: 12),
+                      style:
+                          const TextStyle(color: _kTextPrimary, fontSize: 12),
                     ),
                     deleteIcon: const Icon(Icons.close, size: 16),
                     deleteIconColor: _kTextSecondary,
@@ -784,8 +783,7 @@ class _QuantScreenState extends State<QuantScreen> {
                       _selectedStrategies.clear();
                     } else {
                       _selectedStrategies.clear();
-                      _selectedStrategies.addAll(
-                          _strategies.map((s) => s.id));
+                      _selectedStrategies.addAll(_strategies.map((s) => s.id));
                     }
                   });
                 },
@@ -793,8 +791,7 @@ class _QuantScreenState extends State<QuantScreen> {
                   _selectedStrategies.length == _strategies.length
                       ? '取消全选'
                       : '全选',
-                  style: const TextStyle(
-                      color: _kAccent, fontSize: 12),
+                  style: const TextStyle(color: _kAccent, fontSize: 12),
                 ),
               ),
             ],
@@ -808,8 +805,7 @@ class _QuantScreenState extends State<QuantScreen> {
             crossAxisSpacing: 6,
             childAspectRatio: 3.2,
             children: _strategies.map((strategy) {
-              final selected =
-                  _selectedStrategies.contains(strategy.id);
+              final selected = _selectedStrategies.contains(strategy.id);
               return GestureDetector(
                 onTap: () {
                   setState(() {
@@ -822,9 +818,7 @@ class _QuantScreenState extends State<QuantScreen> {
                 },
                 child: Container(
                   decoration: BoxDecoration(
-                    color: selected
-                        ? _kAccent.withValues(alpha:0.15)
-                        : _kBg,
+                    color: selected ? _kAccent.withValues(alpha: 0.15) : _kBg,
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
                       color: selected ? _kAccent : _kBorder,
@@ -847,9 +841,7 @@ class _QuantScreenState extends State<QuantScreen> {
                             Text(
                               strategy.name,
                               style: TextStyle(
-                                color: selected
-                                    ? _kAccent
-                                    : _kTextPrimary,
+                                color: selected ? _kAccent : _kTextPrimary,
                                 fontSize: 12,
                                 fontWeight: FontWeight.w500,
                               ),
@@ -942,7 +934,7 @@ class _QuantScreenState extends State<QuantScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.query_stats,
-                size: 48, color: _kTextSecondary.withValues(alpha:0.5)),
+                size: 48, color: _kTextSecondary.withValues(alpha: 0.5)),
             const SizedBox(height: 12),
             const Text(
               '选择股票和策略后点击分析',
@@ -1052,9 +1044,7 @@ class _QuantScreenState extends State<QuantScreen> {
                               Text(
                                 quote.price.toStringAsFixed(2),
                                 style: TextStyle(
-                                  color: quote.changePct >= 0
-                                      ? _kUp
-                                      : _kDown,
+                                  color: quote.changePct >= 0 ? _kUp : _kDown,
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -1065,16 +1055,14 @@ class _QuantScreenState extends State<QuantScreen> {
                                     horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: quote.changePct >= 0
-                                      ? _kUp.withValues(alpha:0.15)
-                                      : _kDown.withValues(alpha:0.15),
+                                      ? _kUp.withValues(alpha: 0.15)
+                                      : _kDown.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
                                   '${quote.changePct >= 0 ? '+' : ''}${quote.changePct.toStringAsFixed(2)}%',
                                   style: TextStyle(
-                                    color: quote.changePct >= 0
-                                        ? _kUp
-                                        : _kDown,
+                                    color: quote.changePct >= 0 ? _kUp : _kDown,
                                     fontSize: 12,
                                     fontWeight: FontWeight.w500,
                                   ),
@@ -1094,7 +1082,7 @@ class _QuantScreenState extends State<QuantScreen> {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: _getScoreColor(analysis.score)
-                            .withValues(alpha:0.15),
+                            .withValues(alpha: 0.15),
                         border: Border.all(
                           color: _getScoreColor(analysis.score),
                           width: 2,
@@ -1113,9 +1101,7 @@ class _QuantScreenState extends State<QuantScreen> {
                     ),
                   const SizedBox(width: 8),
                   Icon(
-                    isExpanded
-                        ? Icons.expand_less
-                        : Icons.expand_more,
+                    isExpanded ? Icons.expand_less : Icons.expand_more,
                     color: _kTextSecondary,
                     size: 24,
                   ),
@@ -1134,6 +1120,20 @@ class _QuantScreenState extends State<QuantScreen> {
                   // 推荐和风险
                   _buildRecommendationRow(analysis),
                   const SizedBox(height: 12),
+                  if (analysis.shortTermDecision != null) ...[
+                    ShortTermDecisionPanel(
+                      decision: analysis.shortTermDecision!,
+                      recommendation: analysis.recommendationDecision ??
+                          RecommendationDecision(
+                            direction: analysis.shortTermDecision!.direction,
+                            level: RecommendationLevel.neutralWatch,
+                            label: analysis.recommendation,
+                            legacyScore: analysis.score.clamp(1, 10),
+                            actionable: analysis.score >= 6,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   // 各策略信号
                   _buildStrategySignalsSection(result),
                   const SizedBox(height: 12),
@@ -1184,15 +1184,14 @@ class _QuantScreenState extends State<QuantScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha:0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withValues(alpha:0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label,
-              style: TextStyle(color: _kTextSecondary, fontSize: 11)),
+          Text(label, style: TextStyle(color: _kTextSecondary, fontSize: 11)),
           const SizedBox(width: 4),
           Text(value,
               style: TextStyle(
@@ -1216,8 +1215,7 @@ class _QuantScreenState extends State<QuantScreen> {
         ),
         const SizedBox(height: 8),
         ...selectedStrategies.map((strategyId) {
-          final strategy =
-              _strategies.firstWhere((s) => s.id == strategyId);
+          final strategy = _strategies.firstWhere((s) => s.id == strategyId);
           final sig = strategySignals[strategyId];
           final signalText = sig?['signal'] as String? ?? '中性';
           final detailText = sig?['detail'] as String? ?? '暂无触发信号';
@@ -1232,16 +1230,15 @@ class _QuantScreenState extends State<QuantScreen> {
                   width: 80,
                   child: Text(
                     strategy.name,
-                    style: const TextStyle(
-                        color: _kTextPrimary, fontSize: 12),
+                    style: const TextStyle(color: _kTextPrimary, fontSize: 12),
                   ),
                 ),
                 Container(
                   width: 44,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 4, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                   decoration: BoxDecoration(
-                    color: signalColor.withValues(alpha:0.12),
+                    color: signalColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(3),
                   ),
                   child: Text(
@@ -1258,8 +1255,8 @@ class _QuantScreenState extends State<QuantScreen> {
                 Expanded(
                   child: Text(
                     detailText,
-                    style: const TextStyle(
-                        color: _kTextSecondary, fontSize: 11),
+                    style:
+                        const TextStyle(color: _kTextSecondary, fontSize: 11),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1367,13 +1364,16 @@ class _QuantScreenState extends State<QuantScreen> {
                 Text(
                   name,
                   style: const TextStyle(
-                      color: _kAccent, fontSize: 12, fontWeight: FontWeight.w500),
+                      color: _kAccent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500),
                 ),
                 const SizedBox(height: 4),
                 Row(
                   children: [
                     _buildBacktestMetric(
-                        '胜率', '${(bt.winRate * 100).toStringAsFixed(1)}%',
+                        '胜率',
+                        '${(bt.winRate * 100).toStringAsFixed(1)}%',
                         bt.winRate >= 0.5 ? _kUp : _kDown),
                     _buildBacktestMetric(
                         '盈亏比',
@@ -1401,8 +1401,7 @@ class _QuantScreenState extends State<QuantScreen> {
                 ),
                 Text(
                   '信号${bt.totalSignals}次 | 盈${bt.winningTrades}次 | 亏${bt.losingTrades}次',
-                  style: const TextStyle(
-                      color: _kTextSecondary, fontSize: 10),
+                  style: const TextStyle(color: _kTextSecondary, fontSize: 10),
                 ),
               ],
             ),
@@ -1450,8 +1449,8 @@ class _QuantScreenState extends State<QuantScreen> {
                 Expanded(
                   child: Text(
                     factor,
-                    style: const TextStyle(
-                        color: _kTextSecondary, fontSize: 11),
+                    style:
+                        const TextStyle(color: _kTextSecondary, fontSize: 11),
                   ),
                 ),
               ],
