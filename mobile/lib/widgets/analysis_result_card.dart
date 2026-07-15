@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/stock_models.dart';
+import '../models/short_term_decision.dart';
+import 'short_term_decision_panel.dart';
 
 /// 分析结果卡片（10级评分）
 class AnalysisResultCard extends StatelessWidget {
@@ -33,6 +35,21 @@ class AnalysisResultCard extends StatelessWidget {
           _buildConfidenceDashboard(context, textTheme),
 
           const SizedBox(height: 16),
+
+          if (analysis.shortTermDecision != null) ...[
+            ShortTermDecisionPanel(
+              decision: analysis.shortTermDecision!,
+              recommendation: analysis.recommendationDecision ??
+                  RecommendationDecision(
+                    direction: analysis.shortTermDecision!.direction,
+                    level: RecommendationLevel.neutralWatch,
+                    label: analysis.recommendation,
+                    legacyScore: analysis.score.clamp(1, 10),
+                    actionable: analysis.score >= 6,
+                  ),
+            ),
+            const SizedBox(height: 16),
+          ],
 
           // 详细理由时间轴
           if (analysis.detailedReasons.isNotEmpty)

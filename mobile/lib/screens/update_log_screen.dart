@@ -10,6 +10,16 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.17.20260715',
+        'date': '2026-07-15',
+        'changes': [
+          '补齐短线决策归档的方向、市场状态、模型版本和来源筛选',
+          '新模型归档导出使用版本化决策 CSV，历史归档继续保留 18 列格式',
+          '推荐统计补充 Wilson 区间、收益与 Alpha、MFE/MAE 及校准样本不足提示',
+          '分析结果卡在新模型数据可用时展示方向、质量、风险和证据置信四维面板',
+        ],
+      },
+      {
         'version': 'v3.16.20260715',
         'date': '2026-07-15',
         'changes': [
