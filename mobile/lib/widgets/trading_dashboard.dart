@@ -564,7 +564,9 @@ class TradingDashboard extends StatelessWidget {
                   Expanded(
                     child: _buildPriceBlock(
                       '追踪止损',
-                      '涨${((trailingActivation - entryLow) / entryLow * 100).toStringAsFixed(1)}%启动',
+                      entryLow > 0
+                          ? '涨${((trailingActivation - entryLow) / entryLow * 100).toStringAsFixed(1)}%启动'
+                          : trailingActivation.toStringAsFixed(2),
                       const Color(0xFF58A6FF),
                     ),
                   ),

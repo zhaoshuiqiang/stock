@@ -2508,7 +2508,8 @@ class QuoteScreenState extends State<QuoteScreen>
     final validated = _analysis!.validatedSignals ?? [];
     final validatedMap = <String, ValidatedSignal>{};
     for (final vs in validated) {
-      validatedMap[vs.signal.signal] = vs;
+      // 用 "indicator|signal" 组合键确保唯一性，避免同名信号覆盖
+      validatedMap['${vs.signal.indicator}|${vs.signal.signal}'] = vs;
     }
 
     return ListView.builder(
@@ -2518,7 +2519,7 @@ class QuoteScreenState extends State<QuoteScreen>
         final signal = _analysis!.signals[index];
         return SignalCard(
           signal: signal,
-          validatedSignal: validatedMap[signal.signal],
+          validatedSignal: validatedMap['${signal.indicator}|${signal.signal}'],
         );
       },
     );
