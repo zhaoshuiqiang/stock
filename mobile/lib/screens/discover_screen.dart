@@ -889,6 +889,13 @@ class DiscoverScreenState extends State<DiscoverScreen>
     }
   }
 
+  /// 格式化时分（如 "14:30"），用于标注扫描快照时间
+  String _formatClock(DateTime dt) {
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+
   /// 打板扫描加载指示器
   Widget _buildLoadingIndicator() {
     return const Center(
@@ -1297,6 +1304,28 @@ class DiscoverScreenState extends State<DiscoverScreen>
     return Column(
       children: [
         _buildExploreHeader(),
+        // 3.4: 提示评分为扫描时快照，与详情页实时重算口径不同
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Row(
+            children: [
+              const Icon(Icons.info_outline,
+                  size: 12, color: Color(0xFF8B949E)),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  '评分为扫描时快照；点开详情页将用实时行情重新计算，分数可能不同',
+                  style: const TextStyle(
+                    color: Color(0xFF8B949E),
+                    fontSize: 10.5,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
         _buildBatchAddBar(
           processed
               .map((r) => WatchlistItem(code: r.code, name: r.name))
@@ -1582,6 +1611,11 @@ class DiscoverScreenState extends State<DiscoverScreen>
         color: isPositive ? _kUp : _kDown,
       ));
     }
+    // 3.4: 标注评分为扫描时快照，与详情页实时重算口径不同
+    tags.add(SignalTag(
+      text: '扫描快照 ${_formatClock(r.analyzedAt)}',
+      color: const Color(0xFFE67E22),
+    ));
 
     return StockCard(
       name: r.name,

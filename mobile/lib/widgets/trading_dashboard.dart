@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/stock_models.dart';
+import 'score_radar_chart.dart';
 import 'score_trend_chart.dart';
 import 'short_term_decision_panel.dart';
 import '../models/short_term_decision.dart';
@@ -51,6 +52,8 @@ class TradingDashboard extends StatelessWidget {
             )
           else
             _buildScoreRow(),
+          const SizedBox(height: 10),
+          if (analysis!.dimensionScores != null) _buildScoreRadarCard(),
           const SizedBox(height: 10),
           _buildKeySignals(),
           if (analysis!.tradeLevels != null) ...[
@@ -212,6 +215,52 @@ class TradingDashboard extends StatelessWidget {
             style: const TextStyle(color: Color(0xFF484F58), fontSize: 10),
           ),
       ],
+    );
+  }
+
+  // ─── 维度评分雷达图 (v3.19) ─────────────────────────────────
+
+  Widget _buildScoreRadarCard() {
+    final a = analysis!;
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF30363D)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.radar, size: 16, color: Color(0xFF58A6FF)),
+              const SizedBox(width: 4),
+              const Text(
+                '评分维度拆解',
+                style: TextStyle(
+                  color: Color(0xFFF0F6FC),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '综合 ${a.score}/10',
+                style: const TextStyle(color: Color(0xFF58A6FF), fontSize: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Center(
+            child: ScoreRadarChart(
+              scores: a.dimensionScores!,
+              totalScore: a.score,
+              size: 220,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
