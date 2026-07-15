@@ -137,8 +137,8 @@ class ArchiveReliabilityEvaluator {
     final direction = directionOf(record);
 
     if (direction == ArchiveRecommendationDirection.bullish) {
-      final threshold =
-          record.recommendation == '偏多观望' ? baseThreshold * 1.3 : baseThreshold;
+      final isWeakBullish = record.recommendation.contains('偏多观望');
+      final threshold = isWeakBullish ? baseThreshold * 1.3 : baseThreshold;
       if (priceChangePct >= threshold) return ReliabilityLevel.veryReasonable;
       if (priceChangePct >= 0) return ReliabilityLevel.reasonable;
       if (priceChangePct >= -threshold) return ReliabilityLevel.deviation;
@@ -146,8 +146,8 @@ class ArchiveReliabilityEvaluator {
     }
 
     if (direction == ArchiveRecommendationDirection.bearish) {
-      final threshold =
-          record.recommendation == '偏空观望' ? baseThreshold * 1.3 : baseThreshold;
+      final isWeakBearish = record.recommendation.contains('偏空观望');
+      final threshold = isWeakBearish ? baseThreshold * 1.3 : baseThreshold;
       if (priceChangePct <= -threshold) return ReliabilityLevel.veryReasonable;
       if (priceChangePct <= 0) return ReliabilityLevel.reasonable;
       if (priceChangePct <= threshold) return ReliabilityLevel.deviation;

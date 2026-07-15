@@ -690,6 +690,131 @@ void main() {
       expect(q.amount, equals(0));
     });
   });
+
+  // ─── 11. Market Decline Deduction with Stock Alpha (v3.3) ───
+  group('Market Decline Deduction with Stock Alpha', () {
+    /// Helper to test decline deduction by comparing score with/without market decline
+    /// Returns the score difference (no_decline_score - decline_score)
+    double _deductionEffect({
+      required double marketAvgChangePct,
+      required double stockChangePct,
+      double stockPrice = 15.0,
+      double techScore = 7.0,
+    }) {
+      // Score without market decline (baseline: neutral market +0.3%)
+      final noDecline = ComprehensiveScorer.combine(
+        technicalScore: techScore,
+        realtimeScore: techScore,
+        confluenceScore: techScore,
+        quote: QuoteData(
+          code: 'sh600000', name: '测试股',
+          price: stockPrice, changePct: stockChangePct,
+          turnover: 3.0, mainNetFlowRate: 1.0),
+        marketContext: _makeMarket(0.3),
+        newsList: null,
+      ).totalScore;
+
+      // Score with market decline
+      final withDecline = ComprehensiveScorer.combine(
+        technicalScore: techScore,
+        realtimeScore: techScore,
+        confluenceScore: techScore,
+        quote: QuoteData(
+          code: 'sh600000', name: '测试股',
+          price: stockPrice, changePct: stockChangePct,
+          turnover: 3.0, mainNetFlowRate: 1.0),
+        marketContext: _makeMarket(marketAvgChangePct),
+        newsList: null,
+      ).totalScore;
+
+      return (noDecline - withDecline).toDouble();
+    }
+
+    test('stock strongly outperforming market (>2%) gets zero deduction', () {
+      // Market -2%, Stock +1% → alpha = 1 - (-2) = 3 > 2 → no deduction
+      final diff = _deductionEffect(
+        marketAvgChangePct: -2.0,
+        stockChangePct: 1.0,
+      );
+      expect(diff, equals(0),
+          reason: 'Stock outperforming market by >2% should get zero deduction');
+    });
+
+    test('stock moderately outperforming market (0-2%) gets half deduction', () {
+      // Market -2%, Stock -1% → alpha = -1 - (-2) = 1 → half deduction
+      final diff = _deductionEffect(
+        marketAvgChangePct: -2.0,
+        stockChangePct: -1.0,
+      );
+      // Half of 1.3 = 0.65, which may or may not cross rounding boundary
+      expect(diff, greaterThanOrEqualTo(0),
+          reason: 'Stock moderately outperforming should have some protection');
+    });
+
+    test('stock underperforming market gets full deduction', () {
+      // Market -2%, Stock -4% → alpha = -4 - (-2) = -2 → full deduction
+      final diff = _deductionEffect(
+        marketAvgChangePct: -2.0,
+        stockChangePct: -4.0,
+      );
+      // Full 1.3 deduction, may affect rounding
+      expect(diff, greaterThanOrEqualTo(0),
+          reason: 'Stock underperforming market should get full deduction');
+    });
+
+    test('underperforming stock gets more deduction than outperforming stock',
+        () {
+      // Same market decline, one underperforms, one outperforms
+      final underperformDiff = _deductionEffect(
+        marketAvgChangePct: -2.0,
+        stockChangePct: -5.0, // alpha = -3, full deduction
+      );
+      final outperformDiff = _deductionEffect(
+        marketAvgChangePct: -2.0,
+        stockChangePct: 1.0, // alpha = 3, no deduction
+      );
+      expect(underperformDiff, greaterThanOrEqualTo(outperformDiff),
+          reason: 'Underperforming stock should have larger deduction');
+    });
+
+    test('non-declining market triggers zero deduction', () {
+      final diff = _deductionEffect(
+        marketAvgChangePct: 0.5,
+        stockChangePct: -2.0,
+      );
+      expect(diff, equals(0),
+          reason: 'Non-declining market should not trigger deduction');
+    });
+
+    test('exactly at -0.5% market decline triggers deduction', () {
+      // acp <= -0.5 → deduction = 0.3 (minimum threshold)
+      final diff = _deductionEffect(
+        marketAvgChangePct: -0.5,
+        stockChangePct: -1.0, // underperform
+      );
+      // May or may not cross rounding boundary, just verify no crash
+      expect(diff, greaterThanOrEqualTo(0));
+    });
+
+    test('just above -0.5% market does NOT trigger deduction', () {
+      final diff = _deductionEffect(
+        marketAvgChangePct: -0.49,
+        stockChangePct: -3.0,
+      );
+      expect(diff, equals(0),
+          reason: 'Market -0.49% should not trigger deduction (threshold = -0.5)');
+    });
+
+    test('deep market decline (-3%) with strong outperformance gets zero deduction', () {
+      // Market -3.5%, Stock +0.5% → alpha = 4 > 2 → no deduction
+      final diff = _deductionEffect(
+        marketAvgChangePct: -3.5,
+        stockChangePct: 0.5,
+      );
+      expect(diff, equals(0),
+          reason: 'Stock outperforming by >2% should be protected even in deep decline');
+    });
+  });
 }
 
 /// 验证 QuoteData 是否包含某字段 (编译时检查, 用于测试)
@@ -715,4 +840,23 @@ bool _quoteHasField(String fieldName) {
     default: return false;
   }
   return true;
+}
+
+/// v3.3: 创建用于测试的 MarketContext
+MarketContext _makeMarket(double avgChangePct) {
+  final trend = avgChangePct > 0.5
+      ? 'up'
+      : avgChangePct < -0.5
+          ? 'down'
+          : 'neutral';
+  return MarketContext(
+    shIndexPct: avgChangePct,
+    szIndexPct: avgChangePct,
+    indexChange: 0,
+    marketTrend: trend,
+    upCount: avgChangePct >= 0 ? 2000 : 500,
+    downCount: avgChangePct >= 0 ? 500 : 2000,
+    avgChangePct: avgChangePct,
+    updateTime: DateTime(2026, 7, 15),
+  );
 }

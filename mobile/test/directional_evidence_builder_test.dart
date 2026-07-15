@@ -189,6 +189,161 @@ void main() {
         'reversal_momentum',
       );
     });
+
+    // v3.3: WR14 null fallback tests for oversold/chase guards
+    test('oversold guard activates with WR14=null using bias6 fallback', () {
+      final result = DirectionalEvidenceBuilder.build(
+        _input(
+          data: <HistoryKline>[
+            _kline(0, close: 100),
+            _kline(1, close: 98),
+            _kline(2, close: 96),
+            _kline(3, close: 95, rsi6: 28, wr14: -999,
+                bias6: -9), // WR14=-999 treated as null, bias6<=-8=oversold
+          ],
+          sellSignals: <SignalItem>[
+            _signal(type: 'sell', indicator: 'MACD', strength: 10),
+          ],
+          industryRelativeStrength: -100,
+          nextSessionPrediction: const NextSessionPrediction(
+            nextOpenUpProbability: 0.2,
+            nextCloseUpProbability: 0.2,
+            expectedNextCloseReturn: -3,
+            downsideRiskProbability: 0.8,
+            confidence: 1,
+            sampleCount: 40,
+            scenarioTags: <String>[],
+            riskWarnings: <String>[],
+          ),
+        ),
+      );
+
+      expect(result.guardReasons, contains('oversold_rebound_guard'));
+      expect(result.directionScore, greaterThanOrEqualTo(-19));
+    });
+
+    test(
+        'oversold guard does NOT activate with WR14=null and bias6 not oversold',
+        () {
+      final result = DirectionalEvidenceBuilder.build(
+        _input(
+          data: <HistoryKline>[
+            _kline(0, close: 100),
+            _kline(1, close: 98),
+            _kline(2, close: 96),
+            _kline(3, close: 95, rsi6: 28, wr14: -999,
+                bias6: -5), // bias6=-5 is NOT extreme oversold
+          ],
+          sellSignals: <SignalItem>[
+            _signal(type: 'sell', indicator: 'MACD', strength: 10),
+          ],
+          nextSessionPrediction: const NextSessionPrediction(
+            nextOpenUpProbability: 0.2,
+            nextCloseUpProbability: 0.2,
+            expectedNextCloseReturn: -3,
+            downsideRiskProbability: 0.8,
+            confidence: 1,
+            sampleCount: 40,
+            scenarioTags: <String>[],
+            riskWarnings: <String>[],
+          ),
+        ),
+      );
+
+      // Guard should NOT activate because bias6=-5 is not extreme enough
+      // to trigger the oversold protection without WR14 confirmation
+      expect(result.guardReasons, isNot(contains('oversold_rebound_guard')));
+    });
+
+    test('chase guard activates with WR14=null using bias6 fallback', () {
+      final result = DirectionalEvidenceBuilder.build(
+        _input(
+          data: <HistoryKline>[
+            _kline(0, close: 100),
+            _kline(1, close: 101),
+            _kline(2, close: 102),
+            _kline(3,
+                close: 110.16,
+                open: 102,
+                changePct: 8,
+                rsi6: 65, // RSI<70, so guard falls through to WR14/bias6
+                wr14:
+                    -999, // WR14=-999 treated as null, use bias6 fallback
+                bias6: 9), // bias6>=8=overbought
+          ],
+          buySignals: <SignalItem>[
+            _signal(type: 'buy', indicator: 'MA', strength: 10),
+          ],
+          industryRelativeStrength: 100,
+          marketContext: _market(
+            marketTrend: 'strong_up',
+            shIndexPct: 1.2,
+            szIndexPct: 1.1,
+            avgChangePct: 1.0,
+            upCount: 3600,
+            downCount: 900,
+          ),
+          nextSessionPrediction: const NextSessionPrediction(
+            nextOpenUpProbability: 0.8,
+            nextCloseUpProbability: 0.8,
+            expectedNextCloseReturn: 3,
+            downsideRiskProbability: 0.2,
+            confidence: 1,
+            sampleCount: 40,
+            scenarioTags: <String>[],
+            riskWarnings: <String>[],
+          ),
+        ),
+      );
+
+      expect(result.guardReasons, contains('chase_guard'));
+      expect(result.directionScore, lessThanOrEqualTo(34));
+    });
+
+    test('chase guard does NOT activate with WR14=null and bias6 not extreme',
+        () {
+      final result = DirectionalEvidenceBuilder.build(
+        _input(
+          data: <HistoryKline>[
+            _kline(0, close: 100),
+            _kline(1, close: 101),
+            _kline(2, close: 102),
+            _kline(3,
+                close: 110.16,
+                open: 102,
+                changePct: 8,
+                rsi6: 65, // RSI<70, guard checks WR14/bias6
+                wr14: -999, // WR14=-999 treated as null
+                bias6: 6), // bias6=6 < 8, NOT extreme overbought
+          ],
+          buySignals: <SignalItem>[
+            _signal(type: 'buy', indicator: 'MA', strength: 10),
+          ],
+          marketContext: _market(
+            marketTrend: 'strong_up',
+            shIndexPct: 1.2,
+            szIndexPct: 1.1,
+            avgChangePct: 1.0,
+            upCount: 3600,
+            downCount: 900,
+          ),
+          nextSessionPrediction: const NextSessionPrediction(
+            nextOpenUpProbability: 0.8,
+            nextCloseUpProbability: 0.8,
+            expectedNextCloseReturn: 3,
+            downsideRiskProbability: 0.2,
+            confidence: 1,
+            sampleCount: 40,
+            scenarioTags: <String>[],
+            riskWarnings: <String>[],
+          ),
+        ),
+      );
+
+      // Guard should NOT activate because bias6=6 is not extreme enough
+      // to trigger chase protection without WR14 confirmation
+      expect(result.guardReasons, isNot(contains('chase_guard')));
+    });
   });
 }
 
@@ -236,6 +391,7 @@ HistoryKline _kline(
   double changePct = 0,
   double rsi6 = 50,
   double wr14 = 50,
+  double bias6 = 0,
 }) {
   return HistoryKline(
     date: DateTime.utc(2026, 7, day + 1),
@@ -247,7 +403,8 @@ HistoryKline _kline(
     volMa5: volMa5,
     changePct: changePct,
     rsi6: rsi6,
-    wr14: wr14,
+    wr14: wr14 == -999 ? null : wr14,
+    bias6: bias6,
   );
 }
 

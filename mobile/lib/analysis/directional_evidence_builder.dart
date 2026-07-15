@@ -427,19 +427,30 @@ class DirectionalEvidenceBuilder {
     return _clampUnit(first + second + third);
   }
 
+  /// 超跌反弹保护：检查是否处于深度超卖状态
+  /// v3.3: WR14为null时使用bias6作为备选超卖确认指标，避免无WR14数据的股票绕过保护
   static bool _hasOversoldReboundSetup(List<HistoryKline> data) {
     if (data.length < 4) return false;
     final last = data.last;
     final ref = data[data.length - 4].close;
     if (ref <= 0 || last.close <= 0) return false;
     final change3d = (last.close / ref - 1) * 100;
-    return change3d <= -5 && last.rsi6 <= 30 && (last.wr14 ?? 0) >= 80;
+    if (change3d > -5 || last.rsi6 > 30) return false;
+    // WR14高值=超卖(>=80), bias6深度负值=-超卖(<=-8)
+    // 优先使用WR14，无数据时使用bias6作为备选
+    if (last.wr14 != null) return last.wr14! >= 80;
+    return last.bias6 <= -8;
   }
 
+  /// 追高保护：检查是否处于追高涨态
+  /// v3.3: WR14为null时使用bias6作为备选超买确认指标
   static bool _hasChaseSetup(HistoryKline last, QuoteData? quote) {
     final dailyRise = last.changePct >= 8 || (quote?.changePct ?? 0) >= 8;
-    final overbought = last.rsi6 >= 70 || (last.wr14 ?? 100) <= 20;
-    return dailyRise && overbought;
+    if (!dailyRise) return false;
+    if (last.rsi6 >= 70) return true;
+    // WR14低值=超买(<=20), bias6高值=超买(>=8)
+    if (last.wr14 != null) return last.wr14! <= 20;
+    return last.bias6 >= 8;
   }
 
   static double _clampUnit(double value) {

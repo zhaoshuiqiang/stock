@@ -885,6 +885,12 @@ class DatabaseService {
     await db.delete('archive_records', where: 'id = ?', whereArgs: [id]);
   }
 
+  /// v3.3: 批量删除全部留档记录（单条SQL，O(1)性能）
+  Future<void> deleteAllArchives() async {
+    final db = await database;
+    await db.delete('archive_records');
+  }
+
   Future<void> closeDb() async {
     if (_dbFuture != null) {
       final db = await _dbFuture!;

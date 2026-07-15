@@ -620,11 +620,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
       ),
     );
     if (confirmed != true) return;
-    for (final record in _archives) {
-      if (record.id != null) {
-        await _dbService.deleteArchive(record.id!);
-      }
-    }
+    await _dbService.deleteAllArchives();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('已删除全部留档记录')),

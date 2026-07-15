@@ -170,20 +170,30 @@ class ComprehensiveScorer {
     //   - 乘数折扣：市场环境对原始评分的系统性调节（combinedAdjustment 权重40%）
     //   - 加法折扣：普跌日对所有个股的额外扣分，防止虚假买入信号
     // 双重机制确保普跌日能有效降低买入推荐数量，在熊市日尤其重要
+    // v3.3: 考虑个股相对大盘的相对强度 — 逆市上涨的股票不减分
     if (marketContext != null && quote != null && !isSTStock(quote.name)) {
       final acp = marketContext.avgChangePct;
       double declineDeduction = 0;
       if (acp <= -3.0) {
-        declineDeduction = 2.5;
+        declineDeduction = 2.0;
       } else if (acp <= -2.0) {
-        declineDeduction = 1.8;
+        declineDeduction = 1.3;
       } else if (acp <= -1.0) {
-        declineDeduction = 1.0;
+        declineDeduction = 0.7;
       } else if (acp <= -0.5) {
-        declineDeduction = 0.5;
+        declineDeduction = 0.3;
       }
       if (declineDeduction > 0) {
-        temperedScore = (temperedScore - declineDeduction).clamp(1.0, 10.0);
+        // v3.3: 个股Alpha保护 — 逆市上涨(相对强度>2%)的股票不减分
+        final stockAlpha = (quote.changePct - acp);
+        if (stockAlpha > 2.0) {
+          // 逆市大幅跑赢，不减分
+        } else if (stockAlpha > 0) {
+          // 逆市小幅跑赢，减半扣分
+          temperedScore = (temperedScore - declineDeduction * 0.5).clamp(1.0, 10.0);
+        } else {
+          temperedScore = (temperedScore - declineDeduction).clamp(1.0, 10.0);
+        }
       }
     }
 
