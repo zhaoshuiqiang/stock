@@ -1,137 +1,282 @@
-# 设计优化文档：可修复方向与"更准涨跌预测"方案
+# 设计优化方案
 
-> 配套分析文档：`code_review_analysis_20260715.md`。
-> 性质：仅设计，不改代码。给出优先级、落地路径、验证方法，以及面向短线的涨跌预测增强方案。
-> 日期：2026-07-15
+> 基于代码评审分析报告 | 优先级: P0 > P1 > P2 | 目标: 提升涨跌预测准确性 + 修复架构缺陷
 
 ---
 
-## 0. 设计原则
+## 一、P0级修复方案（立即执行）
 
-1. **先止血后增强**：先修会导致"错误信号/错误数字"的漏洞（1.1–1.7），再做增强。
-2. **单一事实来源**：消除三套并行评分/推荐链（综合评分 B 链死代码、ExploreEngine、policy A 链）带来的口径漂移。
-3. **短线优先**：把"次日/次 session 方向"做成一等公民，而不是只藏在 `directionScore` 里。
-4. **可验证**：每个改动配单测 + 实盘数据核验（尤其金额单位、avgChangePct 口径）。
-5. **不引入前视偏差**：所有预测特征只用 t-1 及之前信息。
+### 1.1 ConfidenceCalculator权重统一
 
----
+**问题**: `calculate()` 使用29/11/11/11/11/11/8/8权重，`breakdown()` 使用32/12/12/12/12/12/8权重
 
-## 1. 必须修复（P0，正确性）
+**修复方案**:
+```
+文件: mobile/lib/analysis/confidence_calculator.dart
+修改: breakdown() 方法
+方案: 将 breakdown 的权重与 calculate 统一为 29/11/11/11/11/11/8/8
+     补充 prediction_support 维度的 UI 展示
+```
 
-### 1.1 修复 WR14 空值语义（对应 1.1）
-- `HistoryKline.fromJson`：`wr14: json['wr14'] == null ? null : _parseDouble(json['wr14'])`（cci14 同理）。
-- 同时给 `generateAnalysis` 入口加不变量：若 `data.last.wr14 == 0 && data.length>14` 且原始未算指标，则强制 `calcAllIndicators(data)`（对应 1.2）。
-- 验证：用一个"无 wr14 字段"的 JSON K 线跑 `detectAllSignals`，断言不再产生"WR超买"卖信号。
+**验证方法**: 对比同一组输入下 calculate() 和 breakdown() 各维度的加权结果一致
 
-### 1.2 修复命中率方向盲（对应 1.3）
-- `recommendation_tracking` 表加 `direction`（`bullish/bearish/neutral`）与 `recommendation_level` 列（迁移 `oldVersion < 9`）。
-- `RecommendationTracker.track` 写入时带上 `analysis.recommendationDecision` 的方向。
-- `recommendation_stats_screen` 命中率改为按方向分别算：`bullish → dayN_return>0 为赢`，`bearish → dayN_return<0 为赢`。
-- 验证：构造一条看空且下跌的记录，断言旧口径算"亏"、新口径算"赢"。
-
-### 1.3 修复 ADX 短历史偏空（对应 1.4）
-- `_detectBollSignals`：`adx14 == 0`（未就绪）时视为"未知/中性"，不做趋势判定，或把长度门限对 ADX 相关逻辑提到 ≥30。
-- 验证：造 22 根 K 线、明显上升趋势的样本，断言上轨突破不再被判卖。
-
-### 1.4 修复资金流 10 日因子（对应 1.5）
-- `capital_flow_analyzer.dart:64-65`：`volFactor10d` 改为 `avgVol10 / 基准`，并复核 `mainNetFlow5d` 的 `*10` 是否真有量纲依据。
-- 验证：单测给定 5 日/10 日均量不同，断言两因子不同。
-
-### 1.5 修正 market_context 口径（对应 1.6 / 1.7）
-- `avgChangePct`：改为**等权或流通市值加权**的全市场（行业+概念）涨跌幅均值；明确文档与代码一致。
-- `indexChange`：要么改为真实上证点差，要么改名 `indexChangePct` 并对齐语义。
-- 验证：用一组已知成分股涨跌幅，断言新 `avgChangePct` 与手算等权一致；检查下跌扣分逻辑在"大市值护盘日"下不再被低估。
+**实施路径**:
+1. 修改 `breakdown()` 权重为 29/11/11/11/11/11/8/8
+2. 在 breakdown 返回的 Map 中增加 `'prediction_support'` 键
+3. 更新依赖 breakdown 结果的 UI 组件（score_radar_chart 等）
+4. 运行现有 confidence_calculator_test.dart 确保不回归
 
 ---
 
-## 2. 应当修复（P1，可信度与一致性）
+### 1.2 交易日计算增加节假日支持
 
-| 项 | 改动 | 验证 |
-|----|------|------|
-| 1.8 RSI 越界 | 守卫改 `data.length < period+1` | 长度=period 单测不抛 |
-| 1.9 MACD 阈值尺度盲 | `macdHist.abs()/close > k` 归一化 | 不同股价同阈值等价 |
-| 1.10 置信度被覆盖 | 让显示值 = `ConfidenceCalculator` 输出，或显式说明二者差异并合并维度 | 单测断言显示值含回测/预测维度 |
-| 1.11 双映射矛盾 | 删 `ComprehensiveScorer.recommendation` 文案映射，统一用 policy | grep 确认无遗留引用 |
-| 1.12 留档去重/阈值 | `addArchive` 加 `UNIQUE(code, date)` 或写前查重；低于阈值不自动留档 | 重复归档单测 |
-| 1.13 方向合理率 | 改为"存档时快照 vs 固定持有期收益"或显式标注"实时浮动" | UI 标注口径 |
-| 1.14 里程碑收益 | 用交易日历 + 固定 `signalTradeDate + N 交易日` 索引历史收盘；分轮独立写入 | 稀疏轮询下单 5/10/20 不坍缩 |
-| 1.15 新模型恒空 | 在扫票/打开统计页时调用 `DecisionTracker.refreshPending`，或隐藏该 tab | 真机跑后 outcomes 被评估 |
-| 1.17/1.18 校验 | 抓行情时填 `updateTime`；校验器对"错但看似合理"数据降级/拒绝 | 冻结行情能被标记 |
+**问题**: `tradingDaysBetween()` 仅跳过周末，不识别法定节假日
 
----
+**修复方案**:
+```
+文件: mobile/lib/analysis/recommendation_tracker.dart
+新增: mobile/lib/core/trading_calendar.dart (静态节假日表)
+方案: 维护当年 + 前年法定节假日集合(Set<String>)
+     tradingDaysBetween 在遍历时额外检查是否在节假日集合中
+```
 
-## 3. 增强方向（P2，短线体验）
+**实施路径**:
+1. 新建 `trading_calendar.dart`，内含 2025-2026 年节假日 Set
+2. 修改 `tradingDaysBetween` 使用 calendar 过滤
+3. 同步修改 `TradingSession.isInTradingSession()` 复用 calendar
+4. 编写测试覆盖春节/国庆/清明等长假场景
 
-1. **7 维评分雷达图上线**：把孤儿 `ScoreRadarChart` 接入 `TradingDashboard`，展示 `dimensionScores` 拆解。
-2. **建议/理由回到主决策面**：`suggestions`（操作/仓位）与 `reasons`（引擎理由）至少摘要展示在决策页。
-3. **数据时效透明化**：决策页露出 `asOfTradeDate` + "数据陈旧"告警；Discover 卡片显示 `analyzedAt` 与陈旧标记。
-4. **Discover 与详情页口径对齐**：统一 `ExploreEngine` 与 `generateAnalysis` 的评分/推荐来源，或明确标注"扫描快照/实时"差异。
-5. **结构分析降门槛**：`accumulation` 用可用均線（如 MA20/MA30）替代强制 MA60，避免短历史低估吸筹。
+**验证方法**: 测试 2026-01-28(除夕) 到 2026-02-05(初八) 间应为0个交易日
 
 ---
 
-## 4. "更准涨跌预测"设计方案（短线方向模型）
+### 1.3 Archive去重增加时间维度
 
-### 4.1 目标
-把现有分散在 `directionScore` / `NextDayPredictor` / `NextSessionPredictor` 里的"方向判断"整合成一个**显式、可校准、可回测**的短线方向模块，产出：
-- `direction`（涨/跌/震荡）
-- `directionProbability`（0–1，可排序）
-- `horizon`（1/3/5 日）
-- `supportingEvidence`（可解释项，供 UI 展示）
+**问题**: `addArchiveIfNotExists()` 仅按code去重
 
-### 4.2 特征工程（全部 t-1 及之前，无前视）
-| 维度 | 特征 | 来源 |
-|------|------|------|
-| 趋势 | MA5/MA10/MA20 排列、价格相对 MA、ADX | technical_scorer / indicators |
-| 反转 | RSI6/WR14/KDJ/BIAS6 的超买超卖+背离 | directional_evidence._reversalMomentum |
-| 量价 | 量能因子、量价背离、换手 | capital_flow + signal_layer |
-| 相对强度 | 个股 Alpha（相对 avgChangePct）、行业 RS | percentile + market_context |
-| 资金 | 主力净流入加速度、5/10 日净额 | capital_flow_analyzer（修 1.5 后） |
-| 共振 | 跨指标同向信号数（真正跨指标，非 1.22 的"同名"） | confluence |
-| 结构 | bullTrend/bearTrend/accumulation/distribution | market_structure |
-| 市场状态 | avgChangePct（修 1.7 后）、广度、情绪温度 | market_context + sentiment |
-| 次日/次session | NextDay/NextSession 现有预测分 | 现有 predictor |
+**修复方案**:
+```
+文件: mobile/lib/storage/database_service.dart
+方案: 去重逻辑改为: 同一code在30天内不重复留档
+     但方向变化时(bullish→bearish)允许重新留档
+```
 
-### 4.3 模型形态（推荐从规则加权起步，再上轻量校准）
-1. **基线（立即可做）**：把 `directionScore` 的 5 个分量（trend 0.30 / reversal 0.25 / volumeFlow 0.20 / relStrength 0.15 / nextSession 0.10）作为可解释加权分，输出方向 + 概率（用历史分位映射到概率）。
-2. **校准（第二步）**：用 `decision_outcomes`（修 1.15 后开始积累）做 **walk-forward 逻辑回归 / 梯度提升**，特征即 4.2，输出 `directionProbability`；禁止用未来标签训练。
-3. **评估**：以方向准确率、多空分层收益率、牛市/熊市分别准确率、按 `directionProbability` 分桶的命中率曲线（reliability diagram）为指标。
-
-### 4.4 关键纠偏（提升"准"的核心）
-- **去动量偏置**：当前 ADX>30 多头时降低追高惩罚（1.x 动量偏置）会抬高追高风险。新模型对"已大涨+高乖离"样本应**降权或反向**，而不是加赏。
-- **市场状态门控**：用修好的 `avgChangePct` 做状态分层，牛/熊/震荡分别校准阈值，避免单一阈值跨市失真。
-- **次新股/ST 特殊处理**：短历史（<60）样本在结构维度降级，避免 1.4/1.20 的系统性偏差污染训练。
-- **样本与时点**：训练/回测严格按交易日，禁用自然日（修 1.14）。
-
-### 4.5 输出与展示
-- 决策页顶部把"方向 + 概率"做成与综合评分并列的一等公民；
-- 概率分桶展示历史命中率（reliability diagram），让用户知道"概率 0.7 时历史上真涨了多少"——这比单一"置信度"更可行动。
+**实施路径**:
+1. 修改 `addArchiveIfNotExists` 查询条件: `code=? AND archived_at > ?`（30天前）
+2. 增加方向检测：新方向与最近留档方向不同时，允许插入
+3. 数据库层增加 `direction` 列到 archive_records（v23迁移）
+4. 现有测试扩展覆盖重复+方向变化场景
 
 ---
 
-## 5. 实盘数据核验清单（上线前必须做）
+## 二、P1级优化方案（本周完成）
 
-| 核验项 | 方法 | 预期 |
-|--------|------|------|
-| 1.16 金额单位 | 同一标的分别走腾讯/Sina/EM，打印 `amount`，对照 `price*volume` | 三路一致，确认腾讯是否多乘 10000 |
-| 1.7 avgChangePct | 取某交易日全市场成分股，手算等权 vs App 输出 | 一致或明确加权口径 |
-| 1.6 indexChange | 打印字段，对照上证真实点差 | 语义正确 |
-| 1.17 冻结行情 | 断网/改 TTL 后观察 `updateTime`/`isStaleQuote` | 能检测陈旧 |
+### 2.1 评分口径统一标注
 
----
+**目标**: 让用户清楚每个评分的计算时间和来源
 
-## 6. 落地路线（建议顺序，分批提交）
+**方案**:
+1. `ExploreResult` 增加 `scoredAt: DateTime` 和 `scoreSource: String` 字段
+2. 板块精选的 `originalScore` 和 `score` 在UI中同时展示（已部分实现）
+3. 详情页分析完成后，若与列表评分差异≥2分，弹出Toast提示
 
-- **批次 1（P0 正确性）**：1.1 + 1.2 + 1.4 + 1.5 + 1.7（含对应单测与实盘核验）→ 直接提升信号与数字正确性。
-- **批次 2（P1 可信度）**：1.8–1.11、1.13–1.15、1.17/1.18 → 让统计/置信度可信。
-- **批次 3（P2 体验）**：雷达图、建议回主面、时效透明、口径对齐。
-- **批次 4（预测增强）**：4.x 短线方向模块，先基线后校准，配 reliability diagram。
-
-> 每批次独立 PR + 单测 + 跑 `flutter test`（674+ 既有用例需全绿，注意 `hot_sectors_test` 为 API 依赖型既有失败，与本次无关）。
+**实施路径**:
+- 修改 `ExploreResult.toMap/fromMap` 增加字段
+- 数据库v23迁移增加 `score_source` TEXT 列
+- UI层增加差异提示逻辑
 
 ---
 
-## 7. 风险与权衡
-- 修 1.2（加 direction 列）涉及 DB 迁移，需保证旧记录兼容（迁移里对旧行 direction 置 neutral 或重推）。
-- 修 1.7 改变 `avgChangePct` 会影响既有"下跌扣分"与 `getMarketAdjustmentFactor`，需回归综合评分既有用例。
-- 预测增强的校准需足够样本，建议先上线基线（可解释加权），再据 `decision_outcomes` 积累切换校准模型。
+### 2.2 移除B Chain冗余recommendation
+
+**目标**: 消除双轨推荐标签的维护负担和混淆风险
+
+**方案**:
+```
+文件: mobile/lib/analysis/comprehensive_scorer.dart
+修改: ComprehensiveScoreResult.recommendation 标记为 @Deprecated
+     下游所有消费者仅使用 RecommendationPolicy 输出
+```
+
+**实施路径**:
+1. `ComprehensiveScoreResult.recommendation` 改为始终返回空字符串
+2. Grep全项目确认无下游消费此字段（预期仅测试代码引用）
+3. 保留字段但标注 deprecated，避免破坏性变更
+
+---
+
+### 2.3 分时扫描候选池实时化
+
+**问题**: 候选池仅来自上次explore扫描结果，可能已过时
+
+**方案**:
+```
+文件: mobile/lib/analysis/intraday_scan_engine.dart
+修改: scan() 方法增加实时候选池补充逻辑
+方案:
+  1. 优先从 explore_results 取前20只
+  2. 额外从涨停池(limit_up_pool)取当日炸板股+首板股前5只
+  3. 额外从自选列表取前5只
+  4. 合并去重后作为最终候选池(≤30只)
+```
+
+**实施路径**:
+1. `scan()` 增加 `_buildCandidatePool()` 方法
+2. 从三个数据源合并候选
+3. 去重后截断到30只
+4. 确保分时扫描结果更贴近当日活跃标的
+
+---
+
+### 2.4 全市场Tab自动刷新
+
+**问题**: 切到全市场Tab不触发数据检查/刷新
+
+**方案**:
+```
+文件: mobile/lib/screens/discover_screen.dart
+修改: TabController listener 增加 index==3 时的懒加载检查
+逻辑: 若 _exploreResults 为空 或 最近一次扫描>4小时 → 自动触发
+```
+
+**实施路径**:
+1. 在 `_tabController.addListener` 中增加 `if (index == 3)` 分支
+2. 检查 `_exploreResults.isNotEmpty && _exploreResults.first.analyzedAt` 距今时长
+3. 超过4小时且在交易时段 → 自动触发 `_exploreEngine.explore()`
+
+---
+
+## 三、预测准确性提升方案
+
+### 3.1 买入信号数量与胜率的逆相关利用
+
+**现有发现**: 代码注释 "买入信号>=5胜率33.3%，>=3胜率38.4%"
+
+**优化方案**:
+```
+文件: mobile/lib/analysis/technical_scorer.dart (已实现惩罚)
+增强: 将此统计反馈到 ConfidenceCalculator
+```
+
+具体措施:
+1. `ConfidenceCalculator.calculate()` 增加 `buySignalCount` 参数
+2. 信号一致性维度内，当buySignals≥5时额外降低0.1
+3. 在 `_generateReasons` 中增加"信号过多警告"文案
+
+---
+
+### 3.2 情绪温度计联动评分惩罚
+
+**目标**: 退潮期/冰点期自动降低全市场买入评分
+
+**方案**:
+```
+文件: mobile/lib/analysis/comprehensive_scorer.dart
+修改: combine() 增加市场情绪阶段参数
+逻辑:
+  - 退潮期(retreat): 所有买入推荐评分 ×0.90
+  - 冰点期(freezing): 所有买入推荐评分 ×0.85
+  - 启动期/高潮期: 不折扣
+```
+
+**实施路径**:
+1. `combine()` 增加 `EmotionPhase? currentPhase` 参数
+2. 在 `temperedScore` 计算后应用阶段折扣
+3. `ExploreEngine` 在分析前获取最新情绪阶段传入
+4. 测试覆盖4个阶段的评分输出
+
+---
+
+### 3.3 追高保护强化（连涨天数 + 市场结构联动）
+
+**现有问题**: 牛市结构中追高保护被动量保护因子削弱（×0.5），导致牛市追高风险被低估
+
+**方案**:
+```
+文件: mobile/lib/analysis/comprehensive_scorer.dart
+修改: 动量保护因子增加条件约束
+逻辑:
+  - 涨幅>8% 时：即使ADX>30+多头排列，惩罚不低于0.85（当前可低至0.80×0.5=0.90不够）
+  - 连涨≥5天时：动量保护因子上限0.7（当前0.5导致几乎无惩罚）
+```
+
+---
+
+### 3.4 方向预测准确率闭环
+
+**目标**: 利用 `recommendation_tracking` 的历史收益数据反馈到未来预测
+
+**方案**:
+```
+新增: mobile/lib/analysis/prediction_feedback_loop.dart
+逻辑:
+  1. 统计最近50条已关闭推荐的方向命中率
+  2. 按 marketStructure 分组统计（牛市结构下命中率 vs 熊市结构下命中率）
+  3. 将结构化命中率作为 predictionAccuracy 反馈给 ConfidenceCalculator
+```
+
+**实施路径**:
+1. 新建 `PredictionFeedbackLoop` 静态类
+2. `getStructuredAccuracy(marketStructure)` 方法返回该结构下的历史命中率
+3. `signal_engine.dart` 中调用此方法替代固定的 `predictionAccuracy=0.5`
+4. 冷启动阶段(<20条数据)返回0.5作为默认值
+
+---
+
+### 3.5 板块轮动主线强度优化
+
+**现有问题**: 主线判定依赖单日板块涨幅，缺乏时间维度确认
+
+**方案**:
+```
+文件: mobile/lib/analysis/sector_rotation.dart
+修改: analyze() 增加连续强势天数的实际计算
+现状: historyData 参数很少被传入（大部分调用不带此参数）
+```
+
+具体措施:
+1. `SectorPickEngine.pick()` 调用时传入板块3日涨幅历史
+2. 连续强势天数≥3时 strengthScore 额外+1.5
+3. 避免"一日游"板块被错误标记为主线
+
+---
+
+## 四、实施优先级排序
+
+| 优先级 | 任务 | 预估工时 | 影响范围 |
+|--------|------|---------|---------|
+| P0-1 | ConfidenceCalculator权重统一 | 2h | UI展示 |
+| P0-2 | 交易日计算+节假日 | 4h | 留档追踪 |
+| P0-3 | Archive去重+时间维度 | 3h | 留档完整性 |
+| P1-1 | 评分口径标注 | 3h | 用户体验 |
+| P1-2 | B Chain recommendation标注废弃 | 1h | 代码维护 |
+| P1-3 | 分时扫描候选池实时化 | 4h | 推荐时效性 |
+| P1-4 | 全市场Tab自动刷新 | 2h | 用户体验 |
+| P2-1 | 情绪阶段联动评分 | 4h | 预测准确性 |
+| P2-2 | 预测准确率闭环 | 6h | 预测准确性 |
+| P2-3 | 主线强度时间维度 | 3h | 板块推荐质量 |
+
+---
+
+## 五、验证方法总览
+
+### 5.1 单元测试验证
+
+| 模块 | 测试文件 | 验证点 |
+|------|---------|--------|
+| ConfidenceCalculator | confidence_calculator_test.dart | calculate vs breakdown 输出一致 |
+| 交易日计算 | recommendation_tracker_test.dart | 节假日期间返回0 |
+| Archive去重 | database_service_test.dart | 30天内同code不重复、方向变化允许 |
+| 情绪联动 | comprehensive_scorer_test.dart | 退潮期评分×0.90 |
+
+### 5.2 集成验证
+
+1. 运行全量测试: `cd mobile && flutter test`（674+ tests全部通过）
+2. 模拟器验证: 打开Discover页各Tab，确认数据刷新行为
+3. 留档验证: 手动留档同一股票两次，确认第二次被正确处理
+
+### 5.3 回归风险控制
+
+- 所有修改限定在analysis层和storage层，UI层仅增加展示
+- B Chain recommendation字段保留（标废弃），不删除避免编译错误
+- 数据库迁移使用 `oldVersion < N` 模式，向前兼容

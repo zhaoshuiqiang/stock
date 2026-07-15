@@ -879,15 +879,33 @@ class DatabaseService {
 
   /// v3.19: 去重留档——同一 code 已有留档记录时跳过插入，避免重复留档膨胀统计。
   /// 返回 true 表示本次实际新增，false 表示因重复而跳过。
+  /// v3.20: 留档去重增加时间维度 — 同一code在30天内不重复留档，
+  /// 但推荐方向变化时（如看多→看空）允许重新留档，记录分析拐点。
   Future<bool> addArchiveIfNotExists(ArchiveRecord record) async {
     final db = await database;
+    final thirtyDaysAgo = record.archivedAt
+        .subtract(const Duration(days: 30))
+        .millisecondsSinceEpoch;
     final existing = await db.query(
       'archive_records',
-      where: 'code = ?',
-      whereArgs: [record.code],
+      where: 'code = ? AND archived_at > ?',
+      whereArgs: [record.code, thirtyDaysAgo],
+      orderBy: 'archived_at DESC',
       limit: 1,
     );
-    if (existing.isNotEmpty) return false;
+    if (existing.isNotEmpty) {
+      // 方向变化时允许重新留档
+      final lastRec = existing.first['recommendation'] as String? ?? '';
+      final lastIsBullish = lastRec.contains('买入') || lastRec.contains('看多');
+      final newIsBullish = record.recommendation.contains('买入') || record.recommendation.contains('看多');
+      final lastIsBearish = lastRec.contains('卖出') || lastRec.contains('回避');
+      final newIsBearish = record.recommendation.contains('卖出') || record.recommendation.contains('回避');
+      // 方向相同则跳过
+      if ((lastIsBullish && newIsBullish) || (lastIsBearish && newIsBearish)) {
+        return false;
+      }
+      // 方向变化，允许插入
+    }
     await db.insert('archive_records', record.toMap());
     return true;
   }

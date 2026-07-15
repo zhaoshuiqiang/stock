@@ -108,6 +108,10 @@ class DiscoverScreenState extends State<DiscoverScreen>
       if (!_tabController.indexIsChanging && _tabController.index == 2) {
         _maybeRefreshIntradayScan();
       }
+      // v3.20: 切到全市场 Tab（index=3）时检查数据时效，超过4小时自动刷新
+      if (!_tabController.indexIsChanging && _tabController.index == 3) {
+        _maybeRefreshExplore();
+      }
     });
     _loadExploreFromDb();
     _loadWatchlistCodes();
@@ -225,6 +229,22 @@ class DiscoverScreenState extends State<DiscoverScreen>
     if (_lastIntradayScanTime != null &&
         now.difference(_lastIntradayScanTime!).inMinutes < 1) return;
     _loadIntradayScanResults();
+  }
+
+  /// v3.20: 检查全市场探索数据是否过期，超过4小时且在交易时段内自动触发重新扫描
+  void _maybeRefreshExplore() {
+    if (_exploreLoading) return;
+    if (!TradingSession.isInTradingSession()) return;
+    if (_exploreResults.isEmpty) {
+      _exploreEngine.explore();
+      return;
+    }
+    // 检查最新一条结果的分析时间
+    final latestAnalyzedAt = _exploreResults.first.analyzedAt;
+    final elapsed = DateTime.now().difference(latestAnalyzedAt);
+    if (elapsed.inHours >= 4) {
+      _exploreEngine.explore();
+    }
   }
 
   Future<void> _loadIntradayScanResults() async {

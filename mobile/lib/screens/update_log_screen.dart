@@ -10,6 +10,17 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.20.20260715',
+        'date': '2026-07-15',
+        'changes': [
+          'P0修复: ConfidenceCalculator的calculate/breakdown权重统一为29/11/11/11/11/11/8/8',
+          'P0修复: tradingDaysBetween接入法定节假日表，修复长假期间里程碑提前触发',
+          'P0修复: 留档去重增加时间维度(30天)+方向变化允许重新留档',
+          'P1优化: 全市场Tab切换时检查数据时效，超过4小时自动刷新',
+          '新增: TradingCalendar交易日历模块(2025-2026年节假日)',
+        ],
+      },
+      {
         'version': 'v3.19.20260715',
         'date': '2026-07-15',
         'changes': [

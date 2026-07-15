@@ -5,6 +5,7 @@ import '../models/stock_models.dart';
 import '../storage/database_service.dart';
 import '../data/concept_tag_provider.dart';
 import '../core/ai_config.dart';
+import '../core/trading_calendar.dart';
 import 'market_structure_analyzer.dart';
 import 'ai_layer.dart';
 
@@ -129,8 +130,9 @@ String directionOf(String recommendation) {
   return 'neutral';
 }
 
-/// v3.19: 计算两个日期之间的交易日数（近似：跳过周末，忽略法定节假日）。
+/// v3.20: 计算两个日期之间的交易日数（跳过周末 + 法定节假日）。
 /// 短线跟踪的"5/10/20日"指交易日而非自然日，用自然日会导致里程碑提前触发、口径失真。
+/// v3.19→v3.20: 接入 TradingCalendar 节假日表，修复长假期间提前触发问题。
 int tradingDaysBetween(DateTime start, DateTime end) {
   if (!end.isAfter(start)) return 0;
   int count = 0;
@@ -139,8 +141,7 @@ int tradingDaysBetween(DateTime start, DateTime end) {
       DateTime(start.year, start.month, start.day).add(const Duration(days: 1));
   final last = DateTime(end.year, end.month, end.day);
   while (cursor.isBefore(last) || cursor.isAtSameMomentAs(last)) {
-    final weekday = cursor.weekday;
-    if (weekday != DateTime.saturday && weekday != DateTime.sunday) {
+    if (TradingCalendar.isTradingDay(cursor)) {
       count++;
     }
     cursor = cursor.add(const Duration(days: 1));

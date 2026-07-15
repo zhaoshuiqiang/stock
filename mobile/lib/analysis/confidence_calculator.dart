@@ -230,7 +230,7 @@ class ConfidenceCalculator {
     final isBearishDirection =
         resolvedDirection == RecommendationDirection.bearish;
 
-    // 1. 信号一致性(32%): 与calculate方法保持一致
+    // 1. 信号一致性(29%): 与calculate方法权重一致
     double signalConsistency = 0.5;
     if (signalCount > 0) {
       final dominantDirection = buyCount >= sellCount ? 'buy' : 'sell';
@@ -243,7 +243,7 @@ class ConfidenceCalculator {
           : 0.3 + (1 - concentration) * 0.4;
     }
 
-    // 2. 基本面支撑(12%): 缩减权重，短线交易PE/PB参考价值有限
+    // 2. 基本面支撑(11%): 缩减权重，短线交易PE/PB参考价值有限
     double fundamentalSupport = 0.5;
     if (fundamentalScore != null) {
       if (isBullishDirection && fundamentalScore.totalScore >= 6) {
@@ -265,7 +265,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 3. 情绪面确认(12%)
+    // 3. 情绪面确认(11%)
     double sentimentConfirm = 0.5;
     if (newsSentiment != null) {
       if (isBullishDirection && newsSentiment.score > 2) {
@@ -279,7 +279,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 4. 市场环境(12%): 大盘趋势权重，短线需顺势操作
+    // 4. 市场环境(11%): 大盘趋势权重，短线需顺势操作
     double marketConfirm = 0.5;
     if (marketContext != null) {
       if (isBullishDirection && marketContext.avgChangePct > 0.5) {
@@ -293,7 +293,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 5. 结构确认(12%)
+    // 5. 结构确认(11%)
     double structureConfirm = 0.5;
     if (marketStructure != null) {
       final isBullish =
@@ -316,7 +316,7 @@ class ConfidenceCalculator {
       }
     }
 
-    // 6. 信号时效性(12%) — P0-6修复：按方向过滤
+    // 6. 信号时效性(11%) — P0-6修复：按方向过滤
     double signalFreshness = 0.5;
     final directionalSignals = switch (resolvedDirection) {
       RecommendationDirection.bullish => buySignals,
