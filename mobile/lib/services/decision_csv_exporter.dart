@@ -9,6 +9,43 @@ class DecisionExportRow {
   const DecisionExportRow({required this.snapshot, required this.outcomes});
 }
 
+List<DecisionExportRow> buildDecisionExportRows(
+  List<DecisionStatisticsRow> rows,
+) {
+  final snapshots = <int, DecisionSnapshotRecord>{};
+  final outcomes = <int, Map<int, DecisionOutcomeRecord>>{};
+  for (final row in rows) {
+    final snapshotId = row.snapshot.id;
+    if (snapshotId == null) {
+      throw ArgumentError.value(
+        row.snapshot,
+        'rows',
+        'Decision export rows require persisted snapshot ids.',
+      );
+    }
+    snapshots[snapshotId] = row.snapshot;
+    outcomes.putIfAbsent(snapshotId, () => <int, DecisionOutcomeRecord>{})[
+        row.outcome.horizon] = row.outcome;
+  }
+  return snapshots.entries
+      .map(
+        (entry) => DecisionExportRow(
+          snapshot: entry.value,
+          outcomes: Map<int, DecisionOutcomeRecord>.unmodifiable(
+            outcomes[entry.key]!,
+          ),
+        ),
+      )
+      .toList(growable: false);
+}
+
+String decisionExportFileName(DateTime now) {
+  String part(int value, int width) => value.toString().padLeft(width, '0');
+  final stamp = '${part(now.year, 4)}${part(now.month, 2)}${part(now.day, 2)}_'
+      '${part(now.hour, 2)}${part(now.minute, 2)}${part(now.second, 2)}';
+  return 'decision_export_$stamp.csv';
+}
+
 String buildDecisionCsv(List<DecisionExportRow> rows) {
   final headers = <String>[
     'code',

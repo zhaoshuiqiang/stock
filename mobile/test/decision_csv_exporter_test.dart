@@ -43,4 +43,43 @@ void main() {
     expect(csv, contains('invalid'));
     expect(csv, isNot(contains('pending,0')));
   });
+
+  test('groups all outcome horizons by decision snapshot for export', () {
+    final first = DecisionSnapshotRecord.minimalForTesting(
+      id: 1,
+      code: '000001',
+      signalTradeDate: DateTime(2026, 7, 14),
+    );
+    final second = DecisionSnapshotRecord.minimalForTesting(
+      id: 2,
+      code: '000002',
+      signalTradeDate: DateTime(2026, 7, 14),
+    );
+
+    final rows = buildDecisionExportRows([
+      DecisionStatisticsRow(
+        snapshot: first,
+        outcome: DecisionOutcomeRecord(snapshotId: 1, horizon: 1),
+      ),
+      DecisionStatisticsRow(
+        snapshot: first,
+        outcome: DecisionOutcomeRecord(snapshotId: 1, horizon: 3),
+      ),
+      DecisionStatisticsRow(
+        snapshot: second,
+        outcome: DecisionOutcomeRecord(snapshotId: 2, horizon: 5),
+      ),
+    ]);
+
+    expect(rows, hasLength(2));
+    expect(rows.first.outcomes.keys, containsAll(<int>[1, 3]));
+    expect(rows.last.outcomes.keys, contains(5));
+  });
+
+  test('uses a distinct filename prefix for decision exports', () {
+    expect(
+      decisionExportFileName(DateTime(2026, 7, 15, 9, 8, 7)),
+      'decision_export_20260715_090807.csv',
+    );
+  });
 }

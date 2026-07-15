@@ -12,7 +12,9 @@ import '../storage/database_service.dart';
 import '../analysis/sector_rotation.dart';
 import '../analysis/archive_reliability_evaluator.dart';
 import '../services/legacy_archive_csv_exporter.dart';
+import '../services/decision_csv_exporter.dart';
 import '../analysis/decision_statistics.dart';
+import '../models/short_term_decision.dart';
 import '../widgets/decision_archive_summary.dart';
 
 const _kVeryReasonableColor = Color(0xFF4CAF50);
@@ -52,6 +54,12 @@ class ArchiveScreenState extends State<ArchiveScreen>
   bool _showNewModel = true;
   int _decisionHorizon = 3;
   List<DecisionStatisticsRow> _decisionRows = [];
+  RecommendationDirection? _decisionDirection;
+  MarketRegime? _decisionMarketRegime;
+  String? _decisionModelVersion;
+  String? _decisionSource;
+  final Set<String> _decisionModelVersions = <String>{};
+  final Set<String> _decisionSources = <String>{};
   String _filterType = '全部'; // '全部', '看多', '看空', '观望'
   String _filterReliability = '全部'; // '全部', '非常合理', '合理', '偏差', '非常偏差'
 
@@ -67,9 +75,23 @@ class ArchiveScreenState extends State<ArchiveScreen>
   Future<void> _loadDecisionRows() async {
     try {
       final rows = await _dbService.getDecisionStatisticsRows(
-        horizon: _decisionHorizon,
+        filter: DecisionStatisticsFilter(
+          horizon: _decisionHorizon,
+          direction: _decisionDirection,
+          marketRegime: _decisionMarketRegime,
+          modelVersion: _decisionModelVersion,
+          source: _decisionSource,
+        ),
       );
-      if (mounted) setState(() => _decisionRows = rows);
+      if (mounted) {
+        setState(() {
+          _decisionRows = rows;
+          _decisionModelVersions.addAll(
+            rows.map((row) => row.snapshot.modelVersion),
+          );
+          _decisionSources.addAll(rows.map((row) => row.snapshot.source));
+        });
+      }
     } catch (e) {
       debugPrint('[留档] 加载决策统计行失败: $e');
     }
@@ -95,6 +117,8 @@ class ArchiveScreenState extends State<ArchiveScreen>
         children: [
           _buildModeSwitch(),
           const SizedBox(height: 12),
+          _buildDecisionFilters(),
+          const SizedBox(height: 12),
           DecisionArchiveSummary(
             summary: summary,
             horizon: _decisionHorizon,
@@ -104,6 +128,15 @@ class ArchiveScreenState extends State<ArchiveScreen>
             },
           ),
           const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              onPressed: _exportToCsv,
+              icon: const Icon(Icons.ios_share, size: 16),
+              label: const Text('导出决策CSV'),
+            ),
+          ),
+          const SizedBox(height: 8),
           if (_decisionRows.isEmpty)
             const Padding(
               padding: EdgeInsets.only(top: 80),
@@ -113,6 +146,78 @@ class ArchiveScreenState extends State<ArchiveScreen>
             ..._decisionRows.map(_buildDecisionRow),
         ],
       ),
+    );
+  }
+
+  Widget _buildDecisionFilters() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _buildDecisionFilterDropdown<RecommendationDirection>(
+          value: _decisionDirection,
+          hint: '方向',
+          items: RecommendationDirection.values,
+          labelOf: (value) => value.name,
+          onChanged: (value) {
+            setState(() => _decisionDirection = value);
+            _loadDecisionRows();
+          },
+        ),
+        _buildDecisionFilterDropdown<MarketRegime>(
+          value: _decisionMarketRegime,
+          hint: '市场状态',
+          items: MarketRegime.values,
+          labelOf: (value) => value.name,
+          onChanged: (value) {
+            setState(() => _decisionMarketRegime = value);
+            _loadDecisionRows();
+          },
+        ),
+        _buildDecisionFilterDropdown<String>(
+          value: _decisionModelVersion,
+          hint: '模型版本',
+          items: _decisionModelVersions.toList()..sort(),
+          labelOf: (value) => value,
+          onChanged: (value) {
+            setState(() => _decisionModelVersion = value);
+            _loadDecisionRows();
+          },
+        ),
+        _buildDecisionFilterDropdown<String>(
+          value: _decisionSource,
+          hint: '来源',
+          items: _decisionSources.toList()..sort(),
+          labelOf: (value) => value,
+          onChanged: (value) {
+            setState(() => _decisionSource = value);
+            _loadDecisionRows();
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDecisionFilterDropdown<T>({
+    required T? value,
+    required String hint,
+    required List<T> items,
+    required String Function(T value) labelOf,
+    required ValueChanged<T?> onChanged,
+  }) {
+    return DropdownButton<T>(
+      value: value,
+      hint: Text(hint),
+      items: [
+        DropdownMenuItem<T>(value: null, child: Text('全部$hint')),
+        ...items.map(
+          (item) => DropdownMenuItem<T>(
+            value: item,
+            child: Text(labelOf(item)),
+          ),
+        ),
+      ],
+      onChanged: onChanged,
     );
   }
 
@@ -530,7 +635,9 @@ class ArchiveScreenState extends State<ArchiveScreen>
 
   /// 导出留档数据为 CSV 文件并通过系统分享
   Future<void> _exportToCsv() async {
-    if (_archives.isEmpty) {
+    final hasRows =
+        _showNewModel ? _decisionRows.isNotEmpty : _archives.isNotEmpty;
+    if (!hasRows) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('暂无留档数据可导出')),
       );
@@ -547,14 +654,27 @@ class ArchiveScreenState extends State<ArchiveScreen>
       final now = DateTime.now();
 
       // 使用专用导出服务生成 CSV（含 BOM 和可靠性评估）
-      final csvContent = buildLegacyArchiveCsv(
-        records: _archives,
-        quoteOf: (code) => _currentQuotes[code],
-        now: now,
-      );
-
+      final decisionRowsForExport = _showNewModel
+          ? await _dbService.getDecisionStatisticsRows(
+              filter: DecisionStatisticsFilter(
+                direction: _decisionDirection,
+                marketRegime: _decisionMarketRegime,
+                modelVersion: _decisionModelVersion,
+                source: _decisionSource,
+              ),
+            )
+          : const <DecisionStatisticsRow>[];
       final stamp = DateFormat('yyyyMMdd_HHmmss').format(now);
-      final fileName = 'archive_export_$stamp.csv';
+      final csvContent = _showNewModel
+          ? buildDecisionCsv(buildDecisionExportRows(decisionRowsForExport))
+          : buildLegacyArchiveCsv(
+              records: _archives,
+              quoteOf: (code) => _currentQuotes[code],
+              now: now,
+            );
+      final fileName = _showNewModel
+          ? decisionExportFileName(now)
+          : 'archive_export_$stamp.csv';
 
       // 保存到临时目录（供分享使用）
       final tempDir = await getTemporaryDirectory();
