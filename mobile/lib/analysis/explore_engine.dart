@@ -235,6 +235,16 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         debugPrint('ExploreEngine.refreshPending: $e');
       }
 
+      // 自动清理超过保留期的历史决策数据，防止决策表无限增长
+      try {
+        final removed = await DecisionTracker().purgeOldSnapshots();
+        if (removed > 0) {
+          debugPrint('ExploreEngine.purgeOldSnapshots: 已清理 $removed 条旧决策快照');
+        }
+      } catch (e) {
+        debugPrint('ExploreEngine.purgeOldSnapshots: $e');
+      }
+
       // Phase 3: 批量记录推荐快照（事务内一次性写入，避免逐只 track 的并发开销）
       try {
         await RecommendationTracker().trackBatch(analysisList);

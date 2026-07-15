@@ -23,6 +23,9 @@ Future<void> captureDecisionBatchForTesting({
   }
 }
 
+/// 决策快照保留天数：超过该天数的历史快照在每次扫描后自动清理，避免表无限增长。
+const int kDecisionDataRetentionDays = 90;
+
 class DecisionTracker {
   final DatabaseService storage;
   final DecisionMarketDataSource marketData;
@@ -120,6 +123,11 @@ class DecisionTracker {
       }
     }
   }
+
+  /// 清理超过保留期的历史决策快照（及其 outcomes），防止决策表无限增长。
+  /// 默认保留 [kDecisionDataRetentionDays] 天，按 signal_trade_date 计算。
+  Future<int> purgeOldSnapshots({int keepDays = kDecisionDataRetentionDays}) =>
+      storage.purgeOldDecisionData(keepDays: keepDays);
 
   Future<void> _recordFailure(
       DecisionOutcomeRecord outcome, DateTime at) async {

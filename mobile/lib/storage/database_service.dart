@@ -936,6 +936,15 @@ class DatabaseService {
     await db.delete('archive_records');
   }
 
+  /// 清空全部决策评估数据（新模型页）：先删 outcomes 再删 snapshots。
+  Future<void> deleteAllDecisionData() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('decision_outcomes');
+      await txn.delete('decision_snapshots');
+    });
+  }
+
   Future<void> closeDb() async {
     if (_dbFuture != null) {
       final db = await _dbFuture!;
@@ -1606,6 +1615,30 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [outcome.id],
     );
+  }
+
+  /// 删除超过保留期的决策快照及其 outcomes，避免决策表无限增长。
+  ///
+  /// 按 [signal_trade_date] 判断：保留最近 [keepDays] 天的快照，更早的整行删除。
+  /// outcomes 先按子查询删除（即使 FK 级联未生效也安全），再删快照。
+  Future<int> purgeOldDecisionData({int keepDays = 90}) async {
+    final db = await database;
+    final cutoff = _formatSnapshotDate(
+      DateTime.now().subtract(Duration(days: keepDays)),
+    );
+    return db.transaction((txn) async {
+      await txn.delete(
+        'decision_outcomes',
+        where: 'snapshot_id IN (SELECT id FROM decision_snapshots '
+            'WHERE signal_trade_date < ?)',
+        whereArgs: [cutoff],
+      );
+      return txn.delete(
+        'decision_snapshots',
+        where: 'signal_trade_date < ?',
+        whereArgs: [cutoff],
+      );
+    });
   }
 
   Future<List<DecisionCalibrationRow>> getDecisionCalibrationRows({

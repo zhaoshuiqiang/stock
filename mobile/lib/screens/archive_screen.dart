@@ -128,13 +128,25 @@ class ArchiveScreenState extends State<ArchiveScreen>
             },
           ),
           const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerRight,
-            child: OutlinedButton.icon(
-              onPressed: _exportToCsv,
-              icon: const Icon(Icons.ios_share, size: 16),
-              label: const Text('导出决策CSV'),
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _exportToCsv,
+                icon: const Icon(Icons.ios_share, size: 16),
+                label: const Text('导出决策CSV'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: _deleteAllDecision,
+                icon: const Icon(Icons.delete_sweep, size: 16),
+                label: const Text('清空决策数据'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  side: BorderSide(color: Colors.red.withOpacity(0.5)),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           if (_decisionRows.isEmpty)
@@ -174,7 +186,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
           value: _decisionDirection,
           hint: '方向',
           items: RecommendationDirection.values,
-          labelOf: (value) => value.name,
+          labelOf: (value) => _directionLabel(value),
           onChanged: (value) {
             setState(() => _decisionDirection = value);
             _loadDecisionRows();
@@ -184,7 +196,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
           value: _decisionMarketRegime,
           hint: '市场状态',
           items: MarketRegime.values,
-          labelOf: (value) => value.name,
+          labelOf: (value) => _marketRegimeLabel(value),
           onChanged: (value) {
             setState(() => _decisionMarketRegime = value);
             _loadDecisionRows();
@@ -194,7 +206,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
           value: _decisionModelVersion,
           hint: '模型版本',
           items: _decisionModelVersions.toList()..sort(),
-          labelOf: (value) => value,
+          labelOf: (value) => _modelVersionLabel(value),
           onChanged: (value) {
             setState(() => _decisionModelVersion = value);
             _loadDecisionRows();
@@ -204,7 +216,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
           value: _decisionSource,
           hint: '来源',
           items: _decisionSources.toList()..sort(),
-          labelOf: (value) => value,
+          labelOf: (value) => _sourceLabel(value),
           onChanged: (value) {
             setState(() => _decisionSource = value);
             _loadDecisionRows();
@@ -237,6 +249,64 @@ class ArchiveScreenState extends State<ArchiveScreen>
     );
   }
 
+  /// 方向枚举 → 中文标签
+  static String _directionLabel(RecommendationDirection value) {
+    switch (value) {
+      case RecommendationDirection.bullish:
+        return '看多';
+      case RecommendationDirection.neutral:
+        return '观望';
+      case RecommendationDirection.bearish:
+        return '看空';
+    }
+  }
+
+  /// 市场状态枚举 → 中文标签
+  static String _marketRegimeLabel(MarketRegime value) {
+    switch (value) {
+      case MarketRegime.bullishTrend:
+        return '牛市趋势';
+      case MarketRegime.bearishTrend:
+        return '熊市趋势';
+      case MarketRegime.rebound:
+        return '反弹';
+      case MarketRegime.pullback:
+        return '回调';
+      case MarketRegime.range:
+        return '震荡';
+      case MarketRegime.highVolatility:
+        return '高波动';
+      case MarketRegime.unknown:
+        return '未知';
+    }
+  }
+
+  /// 数据来源 → 中文标签（动态值，未知来源回退原始字符串）
+  static String _sourceLabel(String value) {
+    switch (value) {
+      case 'explore':
+        return '探索扫描';
+      case 'opportunity':
+        return '机会扫描';
+      case 'test':
+        return '测试';
+      default:
+        return value;
+    }
+  }
+
+  /// 模型版本 → 中文标签（动态值，未知版本回退原始字符串）
+  static String _modelVersionLabel(String value) {
+    switch (value) {
+      case 'short-term-v2':
+        return '短线决策V2';
+      case 'direction-v1':
+        return '方向模型V1';
+      default:
+        return value;
+    }
+  }
+
   Widget _buildDecisionRow(DecisionStatisticsRow row) {
     final snapshot = row.snapshot;
     final outcome = row.outcome;
@@ -256,11 +326,11 @@ class ArchiveScreenState extends State<ArchiveScreen>
           Text(outcome.status.name),
         ]),
         const SizedBox(height: 6),
-        Text('${snapshot.source}  ${snapshot.modelVersion}',
+        Text('${_sourceLabel(snapshot.source)}  ${_modelVersionLabel(snapshot.modelVersion)}',
             style: const TextStyle(color: Colors.white54, fontSize: 12)),
         const SizedBox(height: 6),
         Text(
-          '${snapshot.direction.name}  方向 ${snapshot.directionScore.toStringAsFixed(0)}  '
+          '${_directionLabel(snapshot.direction)}  方向 ${snapshot.directionScore.toStringAsFixed(0)}  '
           '质量 ${snapshot.tradeQualityScore.toStringAsFixed(0)}  '
           '风险 ${snapshot.riskScore.toStringAsFixed(0)}  '
           '证据 ${snapshot.evidenceConfidence.toStringAsFixed(0)}',
@@ -643,6 +713,45 @@ class ArchiveScreenState extends State<ArchiveScreen>
       );
     }
     _loadArchives();
+  }
+
+  /// 清空新模型页的全部决策评估数据（decision_snapshots + decision_outcomes）。
+  Future<void> _deleteAllDecision() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF0D1117),
+        title: const Text('清空决策数据', style: TextStyle(color: Colors.white)),
+        content: const Text(
+            '确定要删除全部新模型评估数据吗？此操作不可恢复，删除后需重新扫描才会再次产生。',
+            style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('清空', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await _dbService.deleteAllDecisionData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已清空全部决策评估数据')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('清空失败：$e')),
+        );
+      }
+      return;
+    }
+    _loadDecisionRows();
   }
 
   /// 导出留档数据为 CSV 文件并通过系统分享

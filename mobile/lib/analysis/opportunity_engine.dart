@@ -322,6 +322,14 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
         await DecisionTracker().refreshPending(limit: 100);
       } catch (_) {}
 
+      // 自动清理超过保留期的历史决策数据，防止决策表无限增长
+      try {
+        final removed = await DecisionTracker().purgeOldSnapshots();
+        if (removed > 0) {
+          print('OpportunityEngine.purgeOldSnapshots: 已清理 $removed 条旧决策快照');
+        }
+      } catch (_) {}
+
       emit(OpportunityProgress(
           status: OpportunityStatus.complete,
           results: opportunities,
