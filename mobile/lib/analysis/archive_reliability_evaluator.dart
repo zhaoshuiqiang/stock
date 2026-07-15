@@ -79,12 +79,22 @@ class ArchiveReliabilityEvaluator {
     );
   }
 
+  /// 根据存档记录中的推荐文本判断多空方向。
+  ///
+  /// 同时兼容新标签(强烈买入/买入/谨慎买入/卖出等)和旧标签(看多/强看多/回避/强回避等)。
   static ArchiveRecommendationDirection directionOf(ArchiveRecord record) {
     final recommendation = record.recommendation.trim();
-    if (recommendation.contains('买入') || recommendation == '偏多观望') {
+    // 多头：新标签含'买入'，旧标签含'看多'，偏多观望
+    if (recommendation.contains('买入') ||
+        recommendation.contains('看多') ||
+        recommendation == '偏多观望') {
       return ArchiveRecommendationDirection.bullish;
     }
-    if (recommendation.contains('卖出') || recommendation == '偏空观望') {
+    // 空头：新标签含'卖出'，旧标签含'回避'或'减仓'，偏空观望
+    if (recommendation.contains('卖出') ||
+        recommendation.contains('回避') ||
+        recommendation.contains('减仓') ||
+        recommendation == '偏空观望') {
       return ArchiveRecommendationDirection.bearish;
     }
     if (recommendation.contains('观望')) {

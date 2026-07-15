@@ -62,7 +62,8 @@ String buildLegacyArchiveCsv({
       record.confluenceScore,
       dateFormat.format(record.archivedAt),
       currentPrice > 0 ? currentPrice.toStringAsFixed(4) : null,
-      currentPrice > 0 ? quote!.changePct.toStringAsFixed(2) : null,
+      // currentPrice > 0 隐含 quote != null，防御式写法避免 ! 操作符
+      currentPrice > 0 ? (quote?.changePct ?? 0).toStringAsFixed(2) : null,
       currentPrice > 0 ? priceChange.toStringAsFixed(2) : null,
       currentPrice > 0 ? (deviation ? '是' : '否') : null,
       _label(level),

@@ -65,10 +65,14 @@ class ArchiveScreenState extends State<ArchiveScreen>
   }
 
   Future<void> _loadDecisionRows() async {
-    final rows = await _dbService.getDecisionStatisticsRows(
-      horizon: _decisionHorizon,
-    );
-    if (mounted) setState(() => _decisionRows = rows);
+    try {
+      final rows = await _dbService.getDecisionStatisticsRows(
+        horizon: _decisionHorizon,
+      );
+      if (mounted) setState(() => _decisionRows = rows);
+    } catch (e) {
+      debugPrint('[留档] 加载决策统计行失败: $e');
+    }
   }
 
   Widget _buildModeSwitch() => SegmentedButton<bool>(
@@ -152,6 +156,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
   }
 
   void _startAutoRefresh() {
+    _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       _refreshCurrentPrices();
     });
@@ -159,6 +164,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
 
   Future<void> _loadArchives() async {
     final archives = await _dbService.getArchives();
+    if (!mounted) return;
     setState(() {
       _archives = archives;
     });
@@ -522,16 +528,6 @@ class ArchiveScreenState extends State<ArchiveScreen>
     _loadArchives();
   }
 
-  /// CSV 字段转义：包含逗号/引号/换行时用双引号包裹，内部双引号双写
-  String _csvEscape(String? value) {
-    if (value == null) return '';
-    final v = value.replaceAll('\r', ' ').replaceAll('\n', ' ');
-    if (v.contains(',') || v.contains('"')) {
-      return '"${v.replaceAll('"', '""')}"';
-    }
-    return v;
-  }
-
   /// 导出留档数据为 CSV 文件并通过系统分享
   Future<void> _exportToCsv() async {
     if (_archives.isEmpty) {
@@ -548,77 +544,9 @@ class ArchiveScreenState extends State<ArchiveScreen>
     );
 
     try {
-      // CSV 表头：留档元数据 + 推荐字段 + 实时行情 + 可靠性判定
-      final headers = [
-        '代码',
-        '名称',
-        '留档价格',
-        '留档涨跌幅(%)',
-        '评分',
-        '推荐',
-        '风险等级',
-        '买入信号数',
-        '卖出信号数',
-        '活跃战法数',
-        '共振评分',
-        '留档时间',
-        '现价',
-        '现涨跌幅(%)',
-        '价格变动(%)',
-        '是否偏差',
-        '可靠性',
-        'topSignals',
-      ];
-
       final now = DateTime.now();
-      final dateFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
 
-      final lines = <String>[];
-      lines.add(headers.map(_csvEscape).join(','));
-
-      for (final record in _archives) {
-        final quote = _currentQuotes[record.code];
-        final currentPrice = quote?.price ?? 0;
-        final currentChangePct = quote?.changePct ?? 0;
-        final priceChangePct = record.price > 0 && currentPrice > 0
-            ? (currentPrice - record.price) / record.price * 100
-            : 0.0;
-        String reliability = '未知';
-        bool isDeviation = false;
-        if (currentPrice > 0 &&
-            (record.recommendation.contains('买入') ||
-                record.recommendation.contains('卖出') ||
-                record.recommendation.contains('观望'))) {
-          final level = _getReliabilityLevel(record, currentPrice);
-          reliability = _getReliabilityInfo(level).label;
-          isDeviation = level == ReliabilityLevel.deviation ||
-              level == ReliabilityLevel.veryDeviation;
-        }
-
-        final row = [
-          record.code,
-          record.name,
-          record.price.toStringAsFixed(4),
-          record.changePct.toStringAsFixed(2),
-          record.score.toString(),
-          record.recommendation,
-          record.riskLevel,
-          record.buySignalCount.toString(),
-          record.sellSignalCount.toString(),
-          record.activeStrategyCount.toString(),
-          record.confluenceScore.toString(),
-          dateFormat.format(record.archivedAt),
-          currentPrice > 0 ? currentPrice.toStringAsFixed(4) : '',
-          currentPrice > 0 ? currentChangePct.toStringAsFixed(2) : '',
-          currentPrice > 0 ? priceChangePct.toStringAsFixed(2) : '',
-          currentPrice > 0 ? (isDeviation ? '是' : '否') : '',
-          reliability,
-          record.topSignals,
-        ];
-        lines.add(row.map(_csvEscape).join(','));
-      }
-
-      // 添加 BOM 防止 Excel 打开 CSV 时中文乱码
+      // 使用专用导出服务生成 CSV（含 BOM 和可靠性评估）
       final csvContent = buildLegacyArchiveCsv(
         records: _archives,
         quoteOf: (code) => _currentQuotes[code],
@@ -832,31 +760,39 @@ class ArchiveScreenState extends State<ArchiveScreen>
                         child: Row(
                           children: [
                             // 非常合理（绿）
-                            Container(
-                              width: veryReasonablePct * 0.01 * double.infinity,
-                              decoration: BoxDecoration(
-                                borderRadius: const BorderRadius.horizontal(
-                                    left: Radius.circular(6)),
-                                color: _kVeryReasonableColor,
+                            Expanded(
+                              flex: veryReasonablePct.ceil(),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: const BorderRadius.horizontal(
+                                      left: Radius.circular(6)),
+                                  color: _kVeryReasonableColor,
+                                ),
                               ),
                             ),
                             // 合理（橙）
-                            Container(
-                              width: reasonablePct * 0.01 * double.infinity,
-                              color: _kReasonableColor,
+                            Expanded(
+                              flex: reasonablePct.ceil(),
+                              child: Container(
+                                color: _kReasonableColor,
+                              ),
                             ),
                             // 偏差（青）
-                            Container(
-                              width: deviationPct * 0.01 * double.infinity,
-                              color: _kDeviationColor,
+                            Expanded(
+                              flex: deviationPct.ceil(),
+                              child: Container(
+                                color: _kDeviationColor,
+                              ),
                             ),
                             // 非常偏差（红）
-                            Container(
-                              width: veryDeviationPct * 0.01 * double.infinity,
-                              decoration: BoxDecoration(
-                                borderRadius: const BorderRadius.horizontal(
-                                    right: Radius.circular(6)),
-                                color: _kVeryDeviationColor,
+                            Expanded(
+                              flex: veryDeviationPct.ceil(),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: const BorderRadius.horizontal(
+                                      right: Radius.circular(6)),
+                                  color: _kVeryDeviationColor,
+                                ),
                               ),
                             ),
                           ],
@@ -1344,22 +1280,20 @@ class ArchiveScreenState extends State<ArchiveScreen>
 
   /// 统计标签组件：显示"标签 N(X%)"格式
   Widget _buildStatLabel(String label, int count, double pct, Color color) {
-    return Container(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            margin: const EdgeInsets.only(right: 3),
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
-          Text(
-            '$label $count(${pct.toStringAsFixed(0)}%)',
-            style: TextStyle(color: color, fontSize: 10),
-          ),
-        ],
-      ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          margin: const EdgeInsets.only(right: 3),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        Text(
+          '$label $count(${pct.toStringAsFixed(0)}%)',
+          style: TextStyle(color: color, fontSize: 10),
+        ),
+      ],
     );
   }
 

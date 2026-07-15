@@ -89,6 +89,19 @@ class SuggestionGenerator {
       if (quote != null && quote.pe > 0 && quote.pb > 0 && quote.pb < 1) {
         suggestions.add('市净率${quote.pb.toStringAsFixed(2)}倍破净，可能存在安全边际，不宜恐慌性抛售');
       }
+    } else if (recommendation == '强烈卖出') {
+      suggestions.add('技术面强烈偏空，建议及时止损或止盈，规避风险');
+      suggestions.add('多项指标共振偏空，建议大幅减仓观望');
+      suggestions.add('等待调整结束（如RSI回到50附近、MACD金叉）后再考虑入场');
+      if (quote != null && quote.pe > 0 && quote.pb > 0 && quote.pb < 1) {
+        suggestions.add('即使市净率${quote.pb.toStringAsFixed(2)}倍破净，当前技术面仍偏弱，不宜补仓');
+      }
+    } else if (recommendation == '观望') {
+      suggestions.add('技术面信号不明确，建议观望等待明确方向');
+      suggestions.add('关注量能变化和关键支撑/阻力位的突破方向');
+      if (sellSignals.length >= 3) {
+        suggestions.add('虽然整体评分中性，但空头信号较多，建议适当减仓防范风险');
+      }
     } else {
       suggestions.add('技术面偏空信号较强，建议及时止损或止盈，规避风险');
       if (sellSignals.length >= 3) {
