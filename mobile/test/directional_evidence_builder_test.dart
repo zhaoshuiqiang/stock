@@ -67,7 +67,7 @@ void main() {
             _kline(3, close: 95, rsi6: 28, wr14: 86),
           ],
           sellSignals: <SignalItem>[
-            _signal(type: 'sell', indicator: 'MACD', strength: 10),
+            _signal(type: 'sell', indicator: 'MACD', strength: 90),
           ],
           industryRelativeStrength: -100,
           nextSessionPrediction: const NextSessionPrediction(
@@ -107,8 +107,8 @@ void main() {
             ),
           ],
           sellSignals: <SignalItem>[
-            _signal(type: 'sell', indicator: 'MACD', strength: 10),
-            _signal(type: 'sell', indicator: 'VOLUME', strength: 10),
+            _signal(type: 'sell', indicator: 'MACD', strength: 90),
+            _signal(type: 'sell', indicator: 'VOLUME', strength: 90),
           ],
           nextSessionPrediction: const NextSessionPrediction(
             nextOpenUpProbability: 0.2,
@@ -140,7 +140,7 @@ void main() {
                 close: 110.16, open: 102, changePct: 8, rsi6: 78, wr14: 8),
           ],
           buySignals: <SignalItem>[
-            _signal(type: 'buy', indicator: 'MA', strength: 10),
+            _signal(type: 'buy', indicator: 'MA', strength: 90),
           ],
           industryRelativeStrength: 100,
           marketContext: _market(
@@ -150,6 +150,10 @@ void main() {
             avgChangePct: 1.0,
             upCount: 3600,
             downCount: 900,
+          ),
+          nextDayPrediction: _prediction(
+            upProbability: 0.8,
+            downProbability: 0.2,
           ),
           nextSessionPrediction: const NextSessionPrediction(
             nextOpenUpProbability: 0.8,
@@ -190,6 +194,106 @@ void main() {
       );
     });
 
+    test('production strength 75 exceeds 45 without saturating', () {
+      final weak = DirectionalEvidenceBuilder.build(
+        _input(buySignals: <SignalItem>[
+          _signal(type: 'buy', indicator: 'MA', strength: 45),
+        ]),
+      );
+      final strong = DirectionalEvidenceBuilder.build(
+        _input(buySignals: <SignalItem>[
+          _signal(type: 'buy', indicator: 'MA', strength: 75),
+        ]),
+      );
+
+      expect(strong.components[trendComponentKey],
+          greaterThan(weak.components[trendComponentKey]!));
+      expect(strong.components[trendComponentKey], lessThan(1));
+    });
+
+    test('duration and confidence scale otherwise identical signals', () {
+      double trend(SignalDuration duration, double confidence) =>
+          DirectionalEvidenceBuilder.build(
+            _input(buySignals: <SignalItem>[
+              _signal(
+                type: 'buy',
+                indicator: 'MA',
+                strength: 80,
+                duration: duration,
+                confidence: confidence,
+              ),
+            ]),
+          ).components[trendComponentKey]!;
+
+      expect(trend(SignalDuration.shortTerm, 1),
+          greaterThan(trend(SignalDuration.mediumTerm, 1)));
+      expect(trend(SignalDuration.mediumTerm, 1),
+          greaterThan(trend(SignalDuration.longTerm, 1)));
+      expect(trend(SignalDuration.shortTerm, 0.9),
+          greaterThan(trend(SignalDuration.shortTerm, 0.4)));
+    });
+
+    test('same-family same-direction duplicates retain strongest evidence', () {
+      final strongestOnly = DirectionalEvidenceBuilder.build(
+        _input(buySignals: <SignalItem>[
+          _signal(type: 'buy', indicator: 'MA', strength: 75),
+        ]),
+      );
+      final duplicated = DirectionalEvidenceBuilder.build(
+        _input(buySignals: <SignalItem>[
+          _signal(type: 'buy', indicator: 'MA', strength: 45),
+          _signal(type: 'buy', indicator: 'MA', strength: 75),
+        ]),
+      );
+
+      expect(duplicated.components[trendComponentKey],
+          strongestOnly.components[trendComponentKey]);
+    });
+
+    test('same-family opposite evidence offsets and records conflict', () {
+      final result = DirectionalEvidenceBuilder.build(
+        _input(
+          buySignals: <SignalItem>[
+            _signal(type: 'buy', indicator: 'MA', strength: 75),
+          ],
+          sellSignals: <SignalItem>[
+            _signal(type: 'sell', indicator: 'MA', strength: 45),
+          ],
+        ),
+      );
+
+      expect(result.components[trendComponentKey], closeTo(0.15, 0.000001));
+      expect(result.dataQualityFlags, contains('evidence_family_conflict'));
+    });
+
+    test('numeric and textual MA evidence share one family', () {
+      final data = <HistoryKline>[
+        _kline(0, close: 100),
+        _kline(1, close: 100),
+        _kline(2, close: 100),
+        _kline(3, close: 100, ma5: 103, ma10: 102, ma20: 101),
+      ];
+      final signalOnly = DirectionalEvidenceBuilder.build(
+        _input(
+          data: _neutralData(),
+          buySignals: <SignalItem>[
+            _signal(type: 'buy', indicator: 'MA', strength: 60),
+          ],
+        ),
+      );
+      final combined = DirectionalEvidenceBuilder.build(
+        _input(
+          data: data,
+          buySignals: <SignalItem>[
+            _signal(type: 'buy', indicator: 'MA', strength: 60),
+          ],
+        ),
+      );
+
+      expect(combined.components[trendComponentKey],
+          signalOnly.components[trendComponentKey]);
+    });
+
     // v3.3: WR14 null fallback tests for oversold/chase guards
     test('oversold guard activates with WR14=null using bias6 fallback', () {
       final result = DirectionalEvidenceBuilder.build(
@@ -198,11 +302,14 @@ void main() {
             _kline(0, close: 100),
             _kline(1, close: 98),
             _kline(2, close: 96),
-            _kline(3, close: 95, rsi6: 28, wr14: -999,
+            _kline(3,
+                close: 95,
+                rsi6: 28,
+                wr14: -999,
                 bias6: -9), // WR14=-999 treated as null, bias6<=-8=oversold
           ],
           sellSignals: <SignalItem>[
-            _signal(type: 'sell', indicator: 'MACD', strength: 10),
+            _signal(type: 'sell', indicator: 'MACD', strength: 90),
           ],
           industryRelativeStrength: -100,
           nextSessionPrediction: const NextSessionPrediction(
@@ -231,11 +338,14 @@ void main() {
             _kline(0, close: 100),
             _kline(1, close: 98),
             _kline(2, close: 96),
-            _kline(3, close: 95, rsi6: 28, wr14: -999,
+            _kline(3,
+                close: 95,
+                rsi6: 28,
+                wr14: -999,
                 bias6: -5), // bias6=-5 is NOT extreme oversold
           ],
           sellSignals: <SignalItem>[
-            _signal(type: 'sell', indicator: 'MACD', strength: 10),
+            _signal(type: 'sell', indicator: 'MACD', strength: 90),
           ],
           nextSessionPrediction: const NextSessionPrediction(
             nextOpenUpProbability: 0.2,
@@ -267,12 +377,11 @@ void main() {
                 open: 102,
                 changePct: 8,
                 rsi6: 65, // RSI<70, so guard falls through to WR14/bias6
-                wr14:
-                    -999, // WR14=-999 treated as null, use bias6 fallback
+                wr14: -999, // WR14=-999 treated as null, use bias6 fallback
                 bias6: 9), // bias6>=8=overbought
           ],
           buySignals: <SignalItem>[
-            _signal(type: 'buy', indicator: 'MA', strength: 10),
+            _signal(type: 'buy', indicator: 'MA', strength: 90),
           ],
           industryRelativeStrength: 100,
           marketContext: _market(
@@ -317,7 +426,7 @@ void main() {
                 bias6: 6), // bias6=6 < 8, NOT extreme overbought
           ],
           buySignals: <SignalItem>[
-            _signal(type: 'buy', indicator: 'MA', strength: 10),
+            _signal(type: 'buy', indicator: 'MA', strength: 90),
           ],
           marketContext: _market(
             marketTrend: 'strong_up',
@@ -392,6 +501,9 @@ HistoryKline _kline(
   double rsi6 = 50,
   double wr14 = 50,
   double bias6 = 0,
+  double ma5 = 0,
+  double ma10 = 0,
+  double ma20 = 0,
 }) {
   return HistoryKline(
     date: DateTime.utc(2026, 7, day + 1),
@@ -405,6 +517,9 @@ HistoryKline _kline(
     rsi6: rsi6,
     wr14: wr14 == -999 ? null : wr14,
     bias6: bias6,
+    ma5: ma5,
+    ma10: ma10,
+    ma20: ma20,
   );
 }
 
@@ -413,14 +528,16 @@ SignalItem _signal({
   required String indicator,
   String signal = '',
   int strength = 8,
+  SignalDuration duration = SignalDuration.shortTerm,
+  double confidence = 1,
 }) {
   return SignalItem(
     type: type,
     indicator: indicator,
     signal: signal,
     strength: strength,
-    confidence: 1,
-    duration: SignalDuration.shortTerm,
+    confidence: confidence,
+    duration: duration,
   );
 }
 

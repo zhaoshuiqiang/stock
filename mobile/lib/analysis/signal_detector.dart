@@ -1,4 +1,5 @@
 import '../models/stock_models.dart';
+import 'signal_evidence_classifier.dart';
 
 /// 分层信号检测器
 /// 负责检测短期、中期、长期的信号
@@ -16,8 +17,8 @@ class SignalDetector {
     baseSignals.addAll(_detectMediumTermSignals(data, last, prev));
     baseSignals.addAll(_detectLongTermSignals(data, last, prev));
 
-    // 共振信号增强（替换为基础信号列表，避免重复）
-    final signals = _detectConfluenceSignals(data, baseSignals);
+    // 共振只记录同方向独立组件覆盖，不再按同一指标重复次数抬高置信度。
+    final signals = SignalConfluenceAnnotator.annotate(baseSignals);
 
     signals.sort((a, b) => b.strength.compareTo(a.strength));
     return signals;
@@ -498,39 +499,6 @@ class SignalDetector {
     }
 
     return signals;
-  }
-
-  /// 共振信号增强
-  static List<SignalItem> _detectConfluenceSignals(
-      List<HistoryKline> data, List<SignalItem> signals) {
-    // 统计各指标的共振信号数量
-    final signalCounts = <String, int>{};
-    for (final signal in signals) {
-      if (signal.indicator.isNotEmpty) {
-        signalCounts[signal.indicator] = (signalCounts[signal.indicator] ?? 0) + 1;
-      }
-    }
-
-    // 对共振信号增强置信度
-    final enhancedSignals = <SignalItem>[];
-    for (final signal in signals) {
-      if (signal.indicator.isNotEmpty) {
-        final count = signalCounts[signal.indicator] ?? 1;
-        if (count > 1) {
-          // 共振信号，增加置信度
-          enhancedSignals.add(signal.copyWith(
-            signalCount: count,
-            confidence: (signal.confidence ?? 0.5) + 0.1 * (count - 1).clamp(0, 2),
-          ));
-        } else {
-          enhancedSignals.add(signal.copyWith(signalCount: 1));
-        }
-      } else {
-        enhancedSignals.add(signal.copyWith(signalCount: 1));
-      }
-    }
-
-    return enhancedSignals;
   }
 
   // 辅助方法：计算KDJ置信度

@@ -2,6 +2,7 @@ import 'market_regime_classifier.dart';
 import 'market_structure_analyzer.dart';
 import 'next_day_predictor.dart';
 import 'next_session_prediction.dart';
+import 'signal_evidence_classifier.dart';
 import '../models/short_term_decision.dart';
 import '../models/stock_models.dart';
 
@@ -14,6 +15,7 @@ const String nextSessionComponentKey = 'next_session';
 const String oversoldReboundGuard = 'oversold_rebound_guard';
 const String chaseGuard = 'chase_guard';
 const String historyDataMissingFlag = 'history_data_missing';
+const String evidenceFamilyConflictFlag = 'evidence_family_conflict';
 
 class DirectionalEvidenceInput {
   final List<HistoryKline> data;
@@ -65,6 +67,55 @@ class DirectionalEvidenceResult {
             Map<String, String>.unmodifiable(signalComponentOwnership);
 }
 
+class _EvidenceObservation {
+  final String component;
+  final String family;
+  final double signedValue;
+  final String source;
+
+  const _EvidenceObservation({
+    required this.component,
+    required this.family,
+    required this.signedValue,
+    required this.source,
+  });
+}
+
+class _FamilyAccumulator {
+  double? strongestPositive;
+  double? strongestNegative;
+
+  void add(double value) {
+    if (value > 0 &&
+        (strongestPositive == null || value > strongestPositive!)) {
+      strongestPositive = value;
+    } else if (value < 0 &&
+        (strongestNegative == null || value < strongestNegative!)) {
+      strongestNegative = value;
+    }
+  }
+
+  bool get hasConflict =>
+      strongestPositive != null && strongestNegative != null;
+
+  double get value {
+    if (hasConflict) {
+      return (strongestPositive! + strongestNegative!) / 2;
+    }
+    return strongestPositive ?? strongestNegative ?? 0;
+  }
+}
+
+class _AggregatedEvidence {
+  final Map<String, double> components;
+  final bool hasFamilyConflict;
+
+  const _AggregatedEvidence({
+    required this.components,
+    required this.hasFamilyConflict,
+  });
+}
+
 class DirectionalEvidenceBuilder {
   static const Map<String, double> componentWeights = <String, double>{
     trendComponentKey: 0.30,
@@ -93,41 +144,34 @@ class DirectionalEvidenceBuilder {
       );
     }
 
-    final signalComponents = _signalComponents(
-      input.buySignals,
-      input.sellSignals,
-      signalOwnership,
-    );
-
-    final trend = _combine(
-      _priceTrend(input.data),
-      _marketStructureTrend(input.marketStructure),
-      signalComponents[trendComponentKey] ?? 0,
-    );
-    final reversalMomentum = _combine(
-      _reversalMomentum(input.data.last),
-      signalComponents[reversalMomentumComponentKey] ?? 0,
-    );
-    final volumeFlow = _combine(
-      _volumeFlow(input.data.last, input.quote),
-      signalComponents[volumeFlowComponentKey] ?? 0,
-    );
-    final relativeStrength = _combine(
-      _relativeStrength(input.industryRelativeStrength),
-      signalComponents[relativeStrengthComponentKey] ?? 0,
-    );
-    final nextSession = _combine(
-      _nextSession(input.nextDayPrediction, input.nextSessionPrediction),
-      signalComponents[nextSessionComponentKey] ?? 0,
-    );
-
-    final components = <String, double>{
-      trendComponentKey: trend,
-      reversalMomentumComponentKey: reversalMomentum,
-      volumeFlowComponentKey: volumeFlow,
-      relativeStrengthComponentKey: relativeStrength,
-      nextSessionComponentKey: nextSession,
-    };
+    final observations = <_EvidenceObservation>[
+      ..._priceTrendEvidence(input.data),
+      ..._marketStructureEvidence(input.marketStructure),
+      ..._reversalMomentumEvidence(input.data.last),
+      ..._volumeFlowEvidence(input.data.last, input.quote),
+      _EvidenceObservation(
+        component: relativeStrengthComponentKey,
+        family: 'relative_strength',
+        signedValue: _relativeStrength(input.industryRelativeStrength),
+        source: 'numeric',
+      ),
+      ..._nextSessionEvidence(
+        input.nextDayPrediction,
+        input.nextSessionPrediction,
+      ),
+      ..._signalEvidence(
+        input.buySignals,
+        input.sellSignals,
+        signalOwnership,
+      ),
+    ];
+    final aggregated = _aggregateEvidence(observations);
+    final components = aggregated.components;
+    if (aggregated.hasFamilyConflict) {
+      dataQualityFlags.add(evidenceFamilyConflictFlag);
+    }
+    final trend = components[trendComponentKey] ?? 0;
+    final volumeFlow = components[volumeFlowComponentKey] ?? 0;
 
     final stockEvidence = 100 *
         componentWeights.entries.fold<double>(
@@ -161,13 +205,13 @@ class DirectionalEvidenceBuilder {
       directionScore: guardedDirectionScore,
       marketRegime: market.marketRegime,
       guardReasons: guardReasons,
-      dataQualityFlags: dataQualityFlags,
+      dataQualityFlags: dataQualityFlags.toSet().toList(growable: false),
       signalComponentOwnership: signalOwnership,
     );
   }
 
   static Map<String, double> _emptyComponents() {
-    return const <String, double>{
+    return <String, double>{
       trendComponentKey: 0,
       reversalMomentumComponentKey: 0,
       volumeFlowComponentKey: 0,
@@ -176,18 +220,12 @@ class DirectionalEvidenceBuilder {
     };
   }
 
-  static Map<String, double> _signalComponents(
+  static List<_EvidenceObservation> _signalEvidence(
     List<SignalItem> buySignals,
     List<SignalItem> sellSignals,
     Map<String, String> ownership,
   ) {
-    final componentValues = <String, List<double>>{
-      trendComponentKey: <double>[],
-      reversalMomentumComponentKey: <double>[],
-      volumeFlowComponentKey: <double>[],
-      relativeStrengthComponentKey: <double>[],
-      nextSessionComponentKey: <double>[],
-    };
+    final observations = <_EvidenceObservation>[];
     final seen = <int>{};
 
     void apply(SignalItem signal, double direction) {
@@ -196,10 +234,15 @@ class DirectionalEvidenceBuilder {
         return;
       }
 
-      final component = _componentForSignal(signal);
+      final classification = SignalEvidenceClassifier.classify(signal);
       final key = _signalKey(signal, identity);
-      ownership[key] = component;
-      componentValues[component]!.add(direction * _signalStrength(signal));
+      ownership[key] = classification.component;
+      observations.add(_EvidenceObservation(
+        component: classification.component,
+        family: classification.family,
+        signedValue: direction * _signalStrength(signal),
+        source: 'signal',
+      ));
     }
 
     for (final signal in buySignals) {
@@ -209,60 +252,7 @@ class DirectionalEvidenceBuilder {
       apply(signal, -1);
     }
 
-    return componentValues.map<String, double>((key, values) {
-      if (values.isEmpty) {
-        return MapEntry<String, double>(key, 0);
-      }
-      final average = values.reduce((a, b) => a + b) / values.length;
-      return MapEntry<String, double>(key, _clampUnit(average));
-    });
-  }
-
-  static String _componentForSignal(SignalItem signal) {
-    final text = '${signal.indicator} ${signal.signal} ${signal.description}'
-        .toLowerCase();
-    if (_containsAny(text, const <String>[
-      'rsi',
-      'kdj',
-      'wr',
-      'bias',
-      'cci',
-      'reversal',
-      'oversold',
-      'overbought',
-    ])) {
-      return reversalMomentumComponentKey;
-    }
-    if (_containsAny(text, const <String>[
-      'volume',
-      'vol',
-      'obv',
-      'flow',
-      'fund',
-      'turnover',
-    ])) {
-      return volumeFlowComponentKey;
-    }
-    if (_containsAny(text, const <String>[
-      'relative',
-      'industry',
-      'sector',
-      'rs',
-    ])) {
-      return relativeStrengthComponentKey;
-    }
-    if (_containsAny(text, const <String>[
-      'next',
-      'prediction',
-      'session',
-    ])) {
-      return nextSessionComponentKey;
-    }
-    return trendComponentKey;
-  }
-
-  static bool _containsAny(String text, List<String> tokens) {
-    return tokens.any(text.contains);
+    return observations;
   }
 
   static String _signalKey(SignalItem signal, int identity) {
@@ -276,18 +266,30 @@ class DirectionalEvidenceBuilder {
       SignalDuration.longTerm => 0.45,
       null => 0.75,
     };
-    final confidence = (signal.confidence?.clamp(0.4, 1.0) ?? 0.8).toDouble();
-    return _clampUnit((signal.strength / 10) * durationWeight * confidence);
+    final confidence = (signal.confidence ?? 0.8).clamp(0.0, 1.0).toDouble();
+    return _clampUnit((signal.strength / 100) * durationWeight * confidence);
   }
 
-  static double _priceTrend(List<HistoryKline> data) {
-    var value = 0.0;
+  static List<_EvidenceObservation> _priceTrendEvidence(
+    List<HistoryKline> data,
+  ) {
+    final values = <_EvidenceObservation>[];
     final last = data.last;
     if (last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0) {
       if (last.ma5 > last.ma10 && last.ma10 > last.ma20) {
-        value += 0.45;
+        values.add(const _EvidenceObservation(
+          component: trendComponentKey,
+          family: 'ma',
+          signedValue: 0.45,
+          source: 'numeric',
+        ));
       } else if (last.ma5 < last.ma10 && last.ma10 < last.ma20) {
-        value -= 0.45;
+        values.add(const _EvidenceObservation(
+          component: trendComponentKey,
+          family: 'ma',
+          signedValue: -0.45,
+          source: 'numeric',
+        ));
       }
     }
 
@@ -296,99 +298,135 @@ class DirectionalEvidenceBuilder {
       if (ref > 0 && last.close > 0) {
         final change3d = (last.close / ref - 1) * 100;
         if (change3d >= 3) {
-          value += 0.20;
+          values.add(const _EvidenceObservation(
+            component: trendComponentKey,
+            family: 'price_momentum',
+            signedValue: 0.20,
+            source: 'numeric',
+          ));
         } else if (change3d <= -3) {
-          value -= 0.20;
+          values.add(const _EvidenceObservation(
+            component: trendComponentKey,
+            family: 'price_momentum',
+            signedValue: -0.20,
+            source: 'numeric',
+          ));
         }
       }
     }
 
     if (last.adx14 >= 25 && last.plusDi14 > last.minusDi14) {
-      value += 0.20;
+      values.add(const _EvidenceObservation(
+        component: trendComponentKey,
+        family: 'adx',
+        signedValue: 0.20,
+        source: 'numeric',
+      ));
     } else if (last.adx14 >= 25 && last.minusDi14 > last.plusDi14) {
-      value -= 0.20;
+      values.add(const _EvidenceObservation(
+        component: trendComponentKey,
+        family: 'adx',
+        signedValue: -0.20,
+        source: 'numeric',
+      ));
     }
 
-    return _clampUnit(value);
+    return values;
   }
 
-  static double _marketStructureTrend(MarketStructureResult? structure) {
-    if (structure == null) return 0;
-    return switch (structure.structure) {
+  static List<_EvidenceObservation> _marketStructureEvidence(
+    MarketStructureResult? structure,
+  ) {
+    if (structure == null) return const <_EvidenceObservation>[];
+    final value = switch (structure.structure) {
       MarketStructure.bullTrend => 0.35 * structure.confidence,
       MarketStructure.bearTrend => -0.35 * structure.confidence,
       MarketStructure.accumulation => 0.15 * structure.confidence,
       MarketStructure.distribution => -0.15 * structure.confidence,
       MarketStructure.consolidation => 0,
     };
+    if (value == 0) return const <_EvidenceObservation>[];
+    return <_EvidenceObservation>[
+      _EvidenceObservation(
+        component: trendComponentKey,
+        family: 'market_structure',
+        signedValue: value.toDouble(),
+        source: 'numeric',
+      ),
+    ];
   }
 
-  static double _reversalMomentum(HistoryKline last) {
-    var value = 0.0;
+  static List<_EvidenceObservation> _reversalMomentumEvidence(
+    HistoryKline last,
+  ) {
+    final values = <_EvidenceObservation>[];
     if (last.rsi6 > 0) {
       if (last.rsi6 <= 30) {
-        value += 0.30;
+        values.add(_numeric(reversalMomentumComponentKey, 'rsi', 0.30));
       } else if (last.rsi6 >= 70) {
-        value -= 0.30;
+        values.add(_numeric(reversalMomentumComponentKey, 'rsi', -0.30));
       }
     }
 
     final wr14 = last.wr14;
     if (wr14 != null && wr14 > 0) {
       if (wr14 >= 80) {
-        value += 0.20;
+        values.add(_numeric(reversalMomentumComponentKey, 'wr', 0.20));
       } else if (wr14 <= 20) {
-        value -= 0.20;
+        values.add(_numeric(reversalMomentumComponentKey, 'wr', -0.20));
       }
     }
 
     if (last.k > 0 && last.d > 0) {
       if (last.k <= 25 && last.k > last.d) {
-        value += 0.20;
+        values.add(_numeric(reversalMomentumComponentKey, 'kdj', 0.20));
       } else if (last.k >= 75 && last.k < last.d) {
-        value -= 0.20;
+        values.add(_numeric(reversalMomentumComponentKey, 'kdj', -0.20));
       }
     }
 
     if (last.bias6.isFinite) {
       if (last.bias6 <= -6) {
-        value += 0.15;
+        values.add(_numeric(reversalMomentumComponentKey, 'bias', 0.15));
       } else if (last.bias6 >= 8) {
-        value -= 0.15;
+        values.add(_numeric(reversalMomentumComponentKey, 'bias', -0.15));
       }
     }
 
-    return _clampUnit(value);
+    return values;
   }
 
-  static double _volumeFlow(HistoryKline last, QuoteData? quote) {
-    var value = 0.0;
+  static List<_EvidenceObservation> _volumeFlowEvidence(
+    HistoryKline last,
+    QuoteData? quote,
+  ) {
+    final values = <_EvidenceObservation>[];
 
     if (last.volMa5 > 0 && last.volume > 0) {
       final volumeRatio = last.volume / last.volMa5;
       if (last.close >= last.open && volumeRatio >= 1.4) {
-        value += 0.55;
+        values.add(_numeric(volumeFlowComponentKey, 'volume_price', 0.55));
       } else if (last.close < last.open && volumeRatio >= 1.3) {
-        value -= 0.65;
+        values.add(_numeric(volumeFlowComponentKey, 'volume_price', -0.65));
       } else if (last.close >= last.open && volumeRatio < 0.7) {
-        value -= 0.20;
+        values.add(_numeric(volumeFlowComponentKey, 'volume_price', -0.20));
       }
     }
 
     if (quote != null) {
       if (quote.mainNetFlowRate >= 5) {
-        value += 0.35;
+        values.add(_numeric(volumeFlowComponentKey, 'capital_flow', 0.35));
       } else if (quote.mainNetFlowRate <= -5) {
-        value -= 0.35;
+        values.add(_numeric(volumeFlowComponentKey, 'capital_flow', -0.35));
       }
       if (quote.volumeRatio >= 1.5 && quote.changePct > 0) {
-        value += 0.20;
+        values.add(_numeric(volumeFlowComponentKey, 'volume_price', 0.20));
       } else if (quote.volumeRatio >= 1.5 && quote.changePct < 0) {
-        value -= 0.20;
+        values.add(_numeric(volumeFlowComponentKey, 'volume_price', -0.20));
       }
     }
 
-    return _clampUnit(value);
+    return values;
   }
 
   static double _relativeStrength(double? industryRelativeStrength) {
@@ -402,7 +440,7 @@ class DirectionalEvidenceBuilder {
     return _clampUnit(normalized);
   }
 
-  static double _nextSession(
+  static List<_EvidenceObservation> _nextSessionEvidence(
     NextDayPredictionResult nextDay,
     NextSessionPrediction nextSession,
   ) {
@@ -414,17 +452,57 @@ class DirectionalEvidenceBuilder {
         .clamp(-1.0, 1.0)
         .toDouble();
     final confidence = nextSession.confidence.clamp(0.0, 1.0).toDouble();
+    final sessionEdge = _clampUnit(
+      (nextCloseEdge * 0.40 + returnEdge * 0.35 + riskEdge * 0.25) * confidence,
+    );
+    return <_EvidenceObservation>[
+      _numeric(nextSessionComponentKey, 'next_day_model', nextDayEdge),
+      _numeric(nextSessionComponentKey, 'next_session_model', sessionEdge),
+    ];
+  }
 
-    return _clampUnit(
-      nextDayEdge * 0.30 +
-          nextCloseEdge * 0.30 * confidence +
-          returnEdge * 0.25 * confidence +
-          riskEdge * 0.15 * confidence,
+  static _EvidenceObservation _numeric(
+    String component,
+    String family,
+    double value,
+  ) {
+    return _EvidenceObservation(
+      component: component,
+      family: family,
+      signedValue: _clampUnit(value),
+      source: 'numeric',
     );
   }
 
-  static double _combine(double first, [double second = 0, double third = 0]) {
-    return _clampUnit(first + second + third);
+  static _AggregatedEvidence _aggregateEvidence(
+    List<_EvidenceObservation> observations,
+  ) {
+    final families = <String, Map<String, _FamilyAccumulator>>{};
+    for (final observation in observations) {
+      if (!observation.signedValue.isFinite) continue;
+      families
+          .putIfAbsent(
+              observation.component, () => <String, _FamilyAccumulator>{})
+          .putIfAbsent(observation.family, _FamilyAccumulator.new)
+          .add(_clampUnit(observation.signedValue));
+    }
+
+    var hasConflict = false;
+    final components = _emptyComponents();
+    for (final component in components.keys) {
+      final values =
+          families[component]?.values.toList() ?? const <_FamilyAccumulator>[];
+      if (values.isEmpty) continue;
+      hasConflict = hasConflict || values.any((family) => family.hasConflict);
+      components[component] = _clampUnit(
+        values.fold<double>(0, (sum, family) => sum + family.value) /
+            values.length,
+      );
+    }
+    return _AggregatedEvidence(
+      components: components,
+      hasFamilyConflict: hasConflict,
+    );
   }
 
   /// 超跌反弹保护：检查是否处于深度超卖状态
