@@ -181,8 +181,9 @@ class DecisionScoreDiagnostics {
   }
 
   static DecisionScoreDiagnosticsResult analyze(
-    List<DecisionStatisticsRow> rows,
-  ) {
+    List<DecisionStatisticsRow> rows, {
+    List<DecisionStatisticsRow>? readinessRows,
+  }) {
     final directionalMature = rows
         .where((row) =>
             row.outcome.status == DecisionOutcomeStatus.evaluated &&
@@ -218,7 +219,7 @@ class DecisionScoreDiagnostics {
     final bearishMonotonicity =
         _monotonicity(buckets, RecommendationDirection.bearish);
     final readiness = _readiness(
-      rows,
+      readinessRows ?? rows,
       scoreCorrelation,
       componentCorrelations,
       bullishMonotonicity,

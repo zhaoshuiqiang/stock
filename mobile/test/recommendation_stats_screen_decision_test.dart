@@ -18,6 +18,12 @@ void main() {
       medianReturn: 0.8,
       meanAlpha: 0.4,
       medianAlpha: 0.2,
+      orientedSampleCount: 30,
+      orientedAlphaSampleCount: 28,
+      meanOrientedReturn: 1.5,
+      medianOrientedReturn: 1.0,
+      meanOrientedAlpha: 0.6,
+      medianOrientedAlpha: 0.3,
       meanMfe: 2.5,
       meanMae: -1.1,
       calibration: DecisionCalibrationQuality(
@@ -31,10 +37,12 @@ void main() {
     ));
 
     expect(find.text('Wilson 95%'), findsOneWidget);
-    expect(find.text('平均收益'), findsOneWidget);
-    expect(find.text('中位 Alpha'), findsOneWidget);
+    expect(find.text('方向化平均收益'), findsOneWidget);
+    expect(find.text('方向化中位 Alpha'), findsOneWidget);
     expect(find.text('MFE'), findsOneWidget);
     expect(find.text('MAE'), findsOneWidget);
     expect(find.textContaining('样本不足'), findsNWidgets(2));
+    expect(find.textContaining('已收集 12/30 条'), findsOneWidget);
+    expect(find.textContaining('4/10 个信号日'), findsOneWidget);
   });
 }

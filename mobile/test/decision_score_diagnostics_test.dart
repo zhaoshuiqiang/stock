@@ -221,6 +221,51 @@ void main() {
       isFalse,
     );
   });
+
+  test('readiness can use all horizons without duplicating visible diagnostics',
+      () {
+    final currentHorizon = <DecisionStatisticsRow>[];
+    final allHorizons = <DecisionStatisticsRow>[];
+    for (var index = 0; index < 10; index++) {
+      final current = _row(
+        id: index + 1,
+        signalDate: DateTime(2026, 1, 1 + index),
+        direction: RecommendationDirection.bullish,
+        directionScore: 20.0 + index,
+        forecastReturn: 1.0 + index,
+        effectiveHit: true,
+        horizon: 1,
+      );
+      currentHorizon.add(current);
+      allHorizons.add(current);
+      allHorizons.add(_row(
+        id: index + 1,
+        signalDate: DateTime(2026, 1, 1 + index),
+        direction: RecommendationDirection.bullish,
+        directionScore: 20.0 + index,
+        forecastReturn: 1.0 + index,
+        effectiveHit: true,
+        horizon: 3,
+      ));
+      allHorizons.add(_row(
+        id: index + 1,
+        signalDate: DateTime(2026, 1, 1 + index),
+        direction: RecommendationDirection.bullish,
+        directionScore: 20.0 + index,
+        forecastReturn: 1.0 + index,
+        effectiveHit: true,
+        horizon: 5,
+      ));
+    }
+
+    final result = DecisionScoreDiagnostics.analyze(
+      currentHorizon,
+      readinessRows: allHorizons,
+    );
+
+    expect(result.scoreCorrelation.sampleCount, 10);
+    expect(result.readiness.labelCompleteness, 1);
+  });
 }
 
 DecisionStatisticsRow _correlationRow(int index, {required int dateCount}) {

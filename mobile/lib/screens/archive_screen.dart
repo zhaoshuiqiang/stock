@@ -15,13 +15,18 @@ import '../analysis/sector_rotation.dart';
 import '../analysis/archive_reliability_evaluator.dart';
 import '../services/legacy_archive_csv_exporter.dart';
 import '../services/decision_csv_exporter.dart';
+import '../analysis/decision_archive_filter.dart';
+import '../analysis/decision_score_diagnostics.dart';
 import '../analysis/decision_statistics.dart';
 import '../analysis/decision_tracker.dart';
 import '../analysis/archive_service.dart';
 import '../analysis/trading_date_utils.dart';
+import '../analysis/short_term_decision_engine.dart';
 import '../models/short_term_decision.dart';
 import '../widgets/decision_archive_summary.dart';
 import '../widgets/decision_calibration_summary.dart';
+import '../widgets/decision_score_diagnostics_panel.dart';
+import '../widgets/decision_snapshot_provenance_card.dart';
 import '../widgets/score_radar_chart.dart';
 
 const _kVeryReasonableColor = Color(0xFF4CAF50);
@@ -54,29 +59,35 @@ class ArchiveScreenState extends State<ArchiveScreen>
   final DatabaseService _dbService = DatabaseService();
   List<ArchiveRecord> _archives = [];
   bool _isLoading = true;
-  Map<String, QuoteData> _currentQuotes = {};
+  final Map<String, QuoteData> _currentQuotes = {};
   Timer? _refreshTimer;
   Timer? _pendingTimer;
   bool _tabVisible = false;
   String _sortBy = 'time'; // 'time', 'score', 'change'
   bool _sortAscending = false;
   bool _showNewModel = true;
-  int _decisionHorizon = 3;
+  int _decisionHorizon = kDefaultDecisionArchiveFilter.horizon;
   List<DecisionStatisticsRow> _decisionRows = [];
   RecommendationDirection? _decisionDirection;
   MarketRegime? _decisionMarketRegime;
-  String? _decisionModelVersion;
-  String _decisionSourceGroup = 'mine'; // 'mine' | 'scan' | 'all'
+  String? _decisionModelVersion = kDefaultDecisionArchiveFilter.modelVersion;
+  DecisionSignalPhase? _decisionSignalPhase =
+      kDefaultDecisionArchiveFilter.signalPhase;
+  bool _decisionIncludeRetrospective =
+      kDefaultDecisionArchiveFilter.includeRetrospective;
+  DecisionArchiveSourceGroup _decisionSourceGroup =
+      kDefaultDecisionArchiveFilter.sourceGroup;
   String _decisionGroupBy = 'all'; // 'all' | 'day'
   bool _decisionTodayOnly = false;
-  String _decisionSegmentBy = 'direction'; // 'direction' | 'regime' (P1-2)
+  String _decisionSegmentBy = 'direction'; // direction | regime | phase
   int _decisionPeriodDays = 0; // 0=全部, 30, 60, 90 (P1-2)
   bool _decisionHasError = false; // P2-3: 加载失败标记
-  bool _archivesHasError = false; // P2-3
   bool _autoCleanEnabled = false; // P2-4: 自动清理过期决策数据（默认关）
   int _autoCleanDays = 90; // P2-4: 清理早于 N 天的数据
   bool _autoCleanRan = false; // P2-4: 本会话是否已执行过自动清理
-  final Set<String> _decisionModelVersions = <String>{};
+  final Set<String> _decisionModelVersions = <String>{
+    ShortTermDecisionEngine.modelVersion,
+  };
   String _filterType = '全部'; // '全部', '看多', '看空', '观望'
   String _filterReliability = '全部'; // '全部', '非常合理', '合理', '偏差', '非常偏差'
 
@@ -97,7 +108,8 @@ class ArchiveScreenState extends State<ArchiveScreen>
       final prefs = await SharedPreferences.getInstance();
       if (!mounted) return;
       setState(() {
-        _autoCleanEnabled = prefs.getBool('archive_auto_clean_enabled') ?? false;
+        _autoCleanEnabled =
+            prefs.getBool('archive_auto_clean_enabled') ?? false;
         _autoCleanDays = prefs.getInt('archive_auto_clean_days') ?? 90;
       });
     } catch (e) {
@@ -127,12 +139,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
   Future<void> _loadDecisionRows() async {
     try {
       final rows = await _dbService.getDecisionStatisticsRows(
-        filter: DecisionStatisticsFilter(
-          horizon: _decisionHorizon,
-          direction: _decisionDirection,
-          marketRegime: _decisionMarketRegime,
-          modelVersion: _decisionModelVersion,
-        ),
+        filter: const DecisionStatisticsFilter(includeRetrospective: true),
       );
       if (mounted) {
         setState(() {
@@ -175,7 +182,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
   Widget _buildModeSwitch() => SegmentedButton<bool>(
         segments: const [
           ButtonSegment(value: true, label: Text('决策命中')),
-          ButtonSegment(value: false, label: Text('实时合理')),
+          ButtonSegment(value: false, label: Text('实时核对')),
         ],
         selected: {_showNewModel},
         showSelectedIcon: false,
@@ -187,8 +194,12 @@ class ArchiveScreenState extends State<ArchiveScreen>
   bool _decisionFiltersActive() =>
       _decisionDirection != null ||
       _decisionMarketRegime != null ||
-      _decisionModelVersion != null ||
-      _decisionSourceGroup != 'mine';
+      _decisionModelVersion != ShortTermDecisionEngine.modelVersion ||
+      _decisionSignalPhase != DecisionSignalPhase.preMarket ||
+      _decisionIncludeRetrospective ||
+      _decisionSourceGroup != DecisionArchiveSourceGroup.manual ||
+      _decisionTodayOnly ||
+      _decisionPeriodDays != 0;
 
   /// P2-3: 决策数据加载失败时显示错误态 + 重试按钮。
   Widget _buildDecisionErrorIfNeeded() {
@@ -293,14 +304,16 @@ class ArchiveScreenState extends State<ArchiveScreen>
   }
 
   Widget _buildDecisionMode() {
-    var rows = _filterDecisionRows(_decisionRows);
-    if (_decisionTodayOnly) {
-      final today = TradingDateUtils.normalizeToTradeDate(DateTime.now());
-      rows = rows
-          .where((r) => _sameDay(r.snapshot.signalTradeDate, today))
-          .toList();
-    }
+    final rows = _filterDecisionRows(_decisionRows);
+    final allHorizonRows = _filterDecisionRows(
+      _decisionRows,
+      includeAllHorizons: true,
+    );
     final summary = DecisionStatistics.summarize(rows);
+    final diagnostics = DecisionScoreDiagnostics.analyze(
+      rows,
+      readinessRows: allHorizonRows,
+    );
     return RefreshIndicator(
       onRefresh: _loadDecisionRows,
       child: ListView(
@@ -318,19 +331,20 @@ class ArchiveScreenState extends State<ArchiveScreen>
             horizon: _decisionHorizon,
             onHorizonChanged: (horizon) {
               setState(() => _decisionHorizon = horizon);
-              _loadDecisionRows();
             },
           ),
           const SizedBox(height: 8),
           const Text(
-            '决策命中：事后回溯 1/3/5 交易日方向命中率，用于判断评分合理性、优化评分逻辑。',
+            '盘前决策以证据日收盘为锚点：1日验证当日收盘，3/5日验证信号持续性。',
             style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.5),
           ),
           const SizedBox(height: 12),
           _buildDecisionAnalysis(rows),
           const SizedBox(height: 12),
+          DecisionScoreDiagnosticsPanel(diagnostics: diagnostics),
+          const SizedBox(height: 12),
           const Text(
-            '胜率趋势：按归档日的有效命中率变化，50% 为随机基准；优化评分后应收敛并稳定高于基准。',
+            '趋势优先展示多空平衡，缺少双侧样本时回退 Alpha 命中；中性稳定不与 50% 随机线比较。',
             style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.5),
           ),
           const SizedBox(height: 8),
@@ -338,15 +352,16 @@ class ArchiveScreenState extends State<ArchiveScreen>
           const SizedBox(height: 12),
           _buildAutoCleanControl(),
           const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               OutlinedButton.icon(
                 onPressed: _exportToCsv,
                 icon: const Icon(Icons.ios_share, size: 16),
                 label: const Text('导出决策CSV'),
               ),
-              const SizedBox(width: 8),
               OutlinedButton.icon(
                 onPressed: _deleteAllDecision,
                 icon: const Icon(Icons.delete_sweep, size: 16),
@@ -356,11 +371,10 @@ class ArchiveScreenState extends State<ArchiveScreen>
                   side: BorderSide(color: Colors.red.withOpacity(0.5)),
                 ),
               ),
-              const SizedBox(width: 8),
               OutlinedButton.icon(
                 onPressed: _backfillDecision,
                 icon: const Icon(Icons.sync, size: 16),
-                label: const Text('补录缺失决策'),
+                label: const Text('回溯补录缺失'),
               ),
             ],
           ),
@@ -374,17 +388,19 @@ class ArchiveScreenState extends State<ArchiveScreen>
                       _decisionFiltersActive()
                           ? Icons.filter_alt_off_outlined
                           : Icons.insights_outlined,
-                      size: 48, color: const Color(0xFF30363D)),
+                      size: 48,
+                      color: const Color(0xFF30363D)),
                   const SizedBox(height: 12),
                   Text(
-                    _decisionFiltersActive()
-                        ? '无匹配记录，试试调整筛选条件'
-                        : (_decisionSourceGroup == 'mine'
-                            ? '尚未留档任何股票'
-                            : '暂无新模型评估数据'),
-                    style: const TextStyle(color: Colors.white54, fontSize: 14)),
-                  if (!_decisionFiltersActive())
-                    const SizedBox(height: 8),
+                      _decisionFiltersActive()
+                          ? '无匹配记录，试试调整筛选条件'
+                          : (_decisionSourceGroup ==
+                                  DecisionArchiveSourceGroup.manual
+                              ? '尚无盘前 V3 留档'
+                              : '暂无新模型评估数据'),
+                      style:
+                          const TextStyle(color: Colors.white54, fontSize: 14)),
+                  if (!_decisionFiltersActive()) const SizedBox(height: 8),
                   if (!_decisionFiltersActive())
                     const Text(
                       '在个股详情页点“留档”，或在自选页点“归档”，\n'
@@ -409,9 +425,10 @@ class ArchiveScreenState extends State<ArchiveScreen>
   /// 分组 / 今日筛选控制行。
   Widget _buildDecisionGroupControls() {
     final today = TradingDateUtils.normalizeToTradeDate(DateTime.now());
-    final todayCount = _filterDecisionRows(_decisionRows)
-        .where((r) => _sameDay(r.snapshot.signalTradeDate, today))
-        .length;
+    final todayCount = _filterDecisionRows(
+      _decisionRows,
+      applyDateFilters: false,
+    ).where((r) => _sameDay(r.snapshot.signalTradeDate, today)).length;
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -430,16 +447,37 @@ class ArchiveScreenState extends State<ArchiveScreen>
         FilterChip(
           label: Text(_decisionTodayOnly ? '今日归档 ✓' : '今日归档'),
           selected: _decisionTodayOnly,
-          onSelected: (v) => setState(() => _decisionTodayOnly = v),
+          onSelected: (value) => setState(() {
+            _decisionTodayOnly = value;
+            if (value) _decisionPeriodDays = 0;
+          }),
           backgroundColor: const Color(0xFF161B22),
           selectedColor: const Color(0xFF58A6FF).withOpacity(0.25),
           labelStyle: TextStyle(
-            color: _decisionTodayOnly
-                ? const Color(0xFF58A6FF)
-                : Colors.white70,
+            color:
+                _decisionTodayOnly ? const Color(0xFF58A6FF) : Colors.white70,
             fontSize: 12,
           ),
           visualDensity: VisualDensity.compact,
+        ),
+        ...<int>[0, 30, 60, 90].map(
+          (days) => FilterChip(
+            label: Text(days == 0 ? '全部日期' : '$days天'),
+            selected: !_decisionTodayOnly && _decisionPeriodDays == days,
+            onSelected: (_) => setState(() {
+              _decisionTodayOnly = false;
+              _decisionPeriodDays = days;
+            }),
+            backgroundColor: const Color(0xFF161B22),
+            selectedColor: const Color(0xFF58A6FF).withValues(alpha: 0.25),
+            labelStyle: TextStyle(
+              color: !_decisionTodayOnly && _decisionPeriodDays == days
+                  ? const Color(0xFF58A6FF)
+                  : Colors.white70,
+              fontSize: 12,
+            ),
+            visualDensity: VisualDensity.compact,
+          ),
         ),
         Text('今日 $todayCount 只',
             style: const TextStyle(color: Colors.white38, fontSize: 11)),
@@ -455,14 +493,15 @@ class ArchiveScreenState extends State<ArchiveScreen>
       groups.putIfAbsent(key, () => []).add(r);
     }
     final keys = groups.keys.toList()..sort((a, b) => b.compareTo(a));
-    final todayKey = _dateKey(
-        TradingDateUtils.normalizeToTradeDate(DateTime.now()));
+    final todayKey =
+        _dateKey(TradingDateUtils.normalizeToTradeDate(DateTime.now()));
     final children = <Widget>[];
     for (final key in keys) {
       final group = groups[key]!;
       final s = DecisionStatistics.summarize(group);
       final isToday = key == todayKey;
-      final hit = s.effectiveHitRate;
+      final hit = s.balancedEffectiveHitRate ?? s.alphaHitRate;
+      final hitLabel = s.balancedEffectiveHitRate != null ? '多空平衡' : 'Alpha命中';
       children.add(
         Container(
           margin: const EdgeInsets.only(top: 12, bottom: 4),
@@ -480,9 +519,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
             children: [
               Text(key,
                   style: TextStyle(
-                      color: isToday
-                          ? const Color(0xFF58A6FF)
-                          : Colors.white70,
+                      color: isToday ? const Color(0xFF58A6FF) : Colors.white70,
                       fontWeight: FontWeight.w600,
                       fontSize: 13)),
               if (isToday) ...[
@@ -492,7 +529,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
               ],
               const Spacer(),
               Text(
-                '有效命中 ${hit == null ? "--" : "${(hit * 100).toStringAsFixed(1)}%"}'
+                '$hitLabel ${hit == null ? "--" : "${(hit * 100).toStringAsFixed(1)}%"}'
                 ' · ${group.length} 只',
                 style: const TextStyle(color: Colors.white54, fontSize: 12),
               ),
@@ -510,15 +547,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
   /// P1-2: 按方向 / 市场状态分段展示有效命中率（柱状图）+ 校准摘要（Brier/ECE），
   /// 支持 30/60/90 天周期过滤。用于判断"哪类行情下评分更准"，是优化评分逻辑的依据。
   Widget _buildDecisionAnalysis(List<DecisionStatisticsRow> rows) {
-    final period = _decisionPeriodDays;
-    var filtered = rows;
-    if (period > 0) {
-      final cutoff = TradingDateUtils.normalizeToTradeDate(DateTime.now())
-          .subtract(Duration(days: period));
-      filtered = rows
-          .where((r) => !r.snapshot.signalTradeDate.isBefore(cutoff))
-          .toList();
-    }
+    final filtered = rows;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -531,27 +560,12 @@ class ArchiveScreenState extends State<ArchiveScreen>
               segments: const [
                 ButtonSegment(value: 'direction', label: Text('按方向')),
                 ButtonSegment(value: 'regime', label: Text('按市场状态')),
+                ButtonSegment(value: 'phase', label: Text('按阶段')),
               ],
               selected: {_decisionSegmentBy},
               showSelectedIcon: false,
               onSelectionChanged: (v) =>
                   setState(() => _decisionSegmentBy = v.first),
-            ),
-            ...<int>[0, 30, 60, 90].map(
-              (d) => FilterChip(
-                label: Text(d == 0 ? '全部' : '$d天'),
-                selected: _decisionPeriodDays == d,
-                onSelected: (_) => setState(() => _decisionPeriodDays = d),
-                backgroundColor: const Color(0xFF161B22),
-                selectedColor: const Color(0xFF58A6FF).withOpacity(0.25),
-                labelStyle: TextStyle(
-                  color: _decisionPeriodDays == d
-                      ? const Color(0xFF58A6FF)
-                      : Colors.white70,
-                  fontSize: 12,
-                ),
-                visualDensity: VisualDensity.compact,
-              ),
             ),
           ],
         ),
@@ -577,15 +591,29 @@ class ArchiveScreenState extends State<ArchiveScreen>
   Widget _buildSegmentedHitRateBar(List<DecisionStatisticsRow> rows) {
     final groups = <String, List<DecisionStatisticsRow>>{};
     for (final r in rows) {
-      final key = _decisionSegmentBy == 'direction'
-          ? _directionLabel(r.snapshot.direction)
-          : _marketRegimeLabel(r.snapshot.marketRegime);
+      final key = switch (_decisionSegmentBy) {
+        'direction' => _directionLabel(r.snapshot.direction),
+        'phase' => _signalPhaseLabel(r.snapshot.signalPhase),
+        _ => _marketRegimeLabel(r.snapshot.marketRegime),
+      };
       groups.putIfAbsent(key, () => []).add(r);
     }
     final data = groups.entries
-        .map((e) =>
-            (e.key, DecisionStatistics.summarize(e.value).effectiveHitRate, e.value.length))
-        .where((d) => d.$3 > 0)
+        .map((e) {
+          final summary = DecisionStatistics.summarize(e.value);
+          final metric = _decisionSegmentBy == 'direction'
+              ? switch (e.value.first.snapshot.direction) {
+                  RecommendationDirection.bullish =>
+                    summary.bullishEffectiveHitRate,
+                  RecommendationDirection.neutral =>
+                    summary.neutralStabilityRate,
+                  RecommendationDirection.bearish =>
+                    summary.bearishEffectiveHitRate,
+                }
+              : summary.balancedEffectiveHitRate ?? summary.alphaHitRate;
+          return (e.key, metric, e.value.length);
+        })
+        .where((d) => d.$2 != null && d.$3 > 0)
         .toList();
     if (data.isEmpty) return const SizedBox.shrink();
     return Container(
@@ -604,9 +632,8 @@ class ArchiveScreenState extends State<ArchiveScreen>
             final i = entry.key;
             final d = entry.value;
             final hit = d.$2 ?? 0.0;
-            final color = hit >= 0.5
-                ? const Color(0xFF4caf50)
-                : const Color(0xFFef5350);
+            final color =
+                hit >= 0.5 ? const Color(0xFF4caf50) : const Color(0xFFef5350);
             return BarChartGroupData(
               x: i,
               barRods: [
@@ -647,13 +674,16 @@ class ArchiveScreenState extends State<ArchiveScreen>
                   return Padding(
                     padding: const EdgeInsets.only(top: 4),
                     child: Text(data[i].$1,
-                        style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 10)),
                   );
                 },
               ),
             ),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles:
+                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles:
+                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           ),
           borderData: FlBorderData(show: false),
         ),
@@ -671,12 +701,30 @@ class ArchiveScreenState extends State<ArchiveScreen>
     }
     final entries = byDate.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
+    final summaries = entries
+        .map((entry) => (entry, DecisionStatistics.summarize(entry.value)))
+        .toList(growable: false);
+    final useBalanced = summaries.isNotEmpty &&
+        summaries.every((item) => item.$2.balancedEffectiveHitRate != null);
+    final showBinaryReference =
+        _decisionDirection != RecommendationDirection.neutral;
     final points = entries
-        .map((e) => (
-              e.key,
-              DecisionStatistics.summarize(e.value).effectiveHitRate,
-              e.value.length
-            ))
+        .map((e) {
+          final summary = DecisionStatistics.summarize(e.value);
+          final metric = switch (_decisionDirection) {
+            RecommendationDirection.bullish => summary.bullishEffectiveHitRate,
+            RecommendationDirection.bearish => summary.bearishEffectiveHitRate,
+            RecommendationDirection.neutral => summary.neutralStabilityRate,
+            null => useBalanced
+                ? summary.balancedEffectiveHitRate
+                : summary.alphaHitRate,
+          };
+          return (
+            e.key,
+            metric,
+            e.value.length,
+          );
+        })
         .where((d) => d.$2 != null)
         .toList();
     if (points.length < 2) {
@@ -688,8 +736,8 @@ class ArchiveScreenState extends State<ArchiveScreen>
     }
     final dataCount = points.length;
     final values = points.map((d) => (d.$2! * 100)).toList();
-    final spots = List.generate(
-        dataCount, (i) => FlSpot(i.toDouble(), values[i]));
+    final spots =
+        List.generate(dataCount, (i) => FlSpot(i.toDouble(), values[i]));
     return Container(
       height: 170,
       padding: const EdgeInsets.fromLTRB(4, 8, 12, 4),
@@ -739,18 +787,18 @@ class ArchiveScreenState extends State<ArchiveScreen>
                 color: const Color(0xFF58A6FF).withOpacity(0.08),
               ),
             ),
-            // 随机基准 50% 参考线
-            LineChartBarData(
-              spots: [
-                FlSpot(0, 50),
-                FlSpot((dataCount - 1).toDouble(), 50),
-              ],
-              isCurved: false,
-              color: Colors.white24,
-              barWidth: 0.8,
-              dotData: const FlDotData(show: false),
-              dashArray: const [4, 4],
-            ),
+            if (showBinaryReference)
+              LineChartBarData(
+                spots: [
+                  FlSpot(0, 50),
+                  FlSpot((dataCount - 1).toDouble(), 50),
+                ],
+                isCurved: false,
+                color: Colors.white24,
+                barWidth: 0.8,
+                dotData: const FlDotData(show: false),
+                dashArray: const [4, 4],
+              ),
           ],
           gridData: FlGridData(
             show: true,
@@ -790,14 +838,17 @@ class ArchiveScreenState extends State<ArchiveScreen>
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
                       date.substring(5),
-                      style: const TextStyle(color: Colors.white24, fontSize: 8),
+                      style:
+                          const TextStyle(color: Colors.white24, fontSize: 8),
                     ),
                   );
                 },
               ),
             ),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles:
+                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles:
+                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           ),
           borderData: FlBorderData(show: false),
         ),
@@ -810,11 +861,20 @@ class ArchiveScreenState extends State<ArchiveScreen>
       spacing: 8,
       runSpacing: 8,
       children: [
-        SegmentedButton<String>(
+        SegmentedButton<DecisionArchiveSourceGroup>(
           segments: const [
-            ButtonSegment(value: 'mine', label: Text('我的留档')),
-            ButtonSegment(value: 'scan', label: Text('全市场扫描')),
-            ButtonSegment(value: 'all', label: Text('全部')),
+            ButtonSegment(
+              value: DecisionArchiveSourceGroup.manual,
+              label: Text('我的留档'),
+            ),
+            ButtonSegment(
+              value: DecisionArchiveSourceGroup.scan,
+              label: Text('全市场扫描'),
+            ),
+            ButtonSegment(
+              value: DecisionArchiveSourceGroup.all,
+              label: Text('全部'),
+            ),
           ],
           selected: {_decisionSourceGroup},
           showSelectedIcon: false,
@@ -828,7 +888,6 @@ class ArchiveScreenState extends State<ArchiveScreen>
           labelOf: (value) => _directionLabel(value),
           onChanged: (value) {
             setState(() => _decisionDirection = value);
-            _loadDecisionRows();
           },
         ),
         _buildDecisionFilterDropdown<MarketRegime>(
@@ -838,8 +897,14 @@ class ArchiveScreenState extends State<ArchiveScreen>
           labelOf: (value) => _marketRegimeLabel(value),
           onChanged: (value) {
             setState(() => _decisionMarketRegime = value);
-            _loadDecisionRows();
           },
+        ),
+        _buildDecisionFilterDropdown<DecisionSignalPhase>(
+          value: _decisionSignalPhase,
+          hint: '阶段',
+          items: DecisionSignalPhase.values,
+          labelOf: _signalPhaseLabel,
+          onChanged: (value) => setState(() => _decisionSignalPhase = value),
         ),
         _buildDecisionFilterDropdown<String>(
           value: _decisionModelVersion,
@@ -848,32 +913,65 @@ class ArchiveScreenState extends State<ArchiveScreen>
           labelOf: (value) => _modelVersionLabel(value),
           onChanged: (value) {
             setState(() => _decisionModelVersion = value);
-            _loadDecisionRows();
           },
+        ),
+        FilterChip(
+          label: const Text('回溯补录'),
+          selected: _decisionIncludeRetrospective,
+          onSelected: (value) =>
+              setState(() => _decisionIncludeRetrospective = value),
+          backgroundColor: const Color(0xFF161B22),
+          selectedColor: const Color(0xFFD29922).withValues(alpha: 0.2),
+          labelStyle: TextStyle(
+            color: _decisionIncludeRetrospective
+                ? const Color(0xFFD29922)
+                : Colors.white70,
+            fontSize: 12,
+          ),
+          visualDensity: VisualDensity.compact,
         ),
       ],
     );
   }
 
-  /// 按来源分组（我的留档 / 全市场扫描 / 全部）在内存中过滤决策行。
-  List<DecisionStatisticsRow> _filterDecisionRows(
-    List<DecisionStatisticsRow> rows,
-  ) {
-    switch (_decisionSourceGroup) {
-      case 'mine':
-        return rows
-            .where((r) => r.snapshot.source == ArchiveService.kManualSource)
-            .toList();
-      case 'scan':
-        return rows
-            .where((r) =>
-                r.snapshot.source == 'explore' ||
-                r.snapshot.source == 'opportunity')
-            .toList();
-      default:
-        return rows;
+  DecisionArchiveViewFilter _decisionViewFilter({
+    bool applyDateFilters = true,
+  }) {
+    DateTime? startDate;
+    DateTime? endDate;
+    if (applyDateFilters) {
+      final today = TradingDateUtils.normalizeToTradeDate(DateTime.now());
+      if (_decisionTodayOnly) {
+        startDate = today;
+        endDate = today;
+      } else if (_decisionPeriodDays > 0) {
+        startDate = today.subtract(Duration(days: _decisionPeriodDays));
+        endDate = today;
+      }
     }
+    return DecisionArchiveViewFilter(
+      horizon: _decisionHorizon,
+      sourceGroup: _decisionSourceGroup,
+      signalPhase: _decisionSignalPhase,
+      direction: _decisionDirection,
+      marketRegime: _decisionMarketRegime,
+      modelVersion: _decisionModelVersion,
+      includeRetrospective: _decisionIncludeRetrospective,
+      startTradeDate: startDate,
+      endTradeDate: endDate,
+    );
   }
+
+  /// 汇总、诊断、列表和导出共用同一筛选对象。
+  List<DecisionStatisticsRow> _filterDecisionRows(
+    List<DecisionStatisticsRow> rows, {
+    bool includeAllHorizons = false,
+    bool applyDateFilters = true,
+  }) =>
+      _decisionViewFilter(applyDateFilters: applyDateFilters).apply(
+        rows,
+        includeAllHorizons: includeAllHorizons,
+      );
 
   Widget _buildDecisionFilterDropdown<T>({
     required T? value,
@@ -930,9 +1028,21 @@ class ArchiveScreenState extends State<ArchiveScreen>
     }
   }
 
+  static String _signalPhaseLabel(DecisionSignalPhase value) => switch (value) {
+        DecisionSignalPhase.preMarket => '盘前',
+        DecisionSignalPhase.intraday => '交易中',
+        DecisionSignalPhase.afterClose => '盘后',
+        DecisionSignalPhase.nonTrading => '非交易日',
+        DecisionSignalPhase.unknown => '未知',
+      };
+
   /// 数据来源 → 中文标签（动态值，未知来源回退原始字符串）
   static String _sourceLabel(String value) {
     switch (value) {
+      case 'archive':
+        return '我的留档';
+      case 'archive_backfill':
+        return '回溯补录';
       case 'explore':
         return '探索扫描';
       case 'opportunity':
@@ -947,6 +1057,8 @@ class ArchiveScreenState extends State<ArchiveScreen>
   /// 模型版本 → 中文标签（动态值，未知版本回退原始字符串）
   static String _modelVersionLabel(String value) {
     switch (value) {
+      case 'short-term-v3':
+        return '短线决策V3';
       case 'short-term-v2':
         return '短线决策V2';
       case 'direction-v1':
@@ -960,6 +1072,15 @@ class ArchiveScreenState extends State<ArchiveScreen>
       a.year == b.year && a.month == b.month && a.day == b.day;
   static String _dateKey(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  static double? _orientedResult(
+    RecommendationDirection direction,
+    double? value,
+  ) {
+    if (value == null || direction == RecommendationDirection.neutral) {
+      return null;
+    }
+    return direction == RecommendationDirection.bearish ? -value : value;
+  }
 
   Widget _buildDecisionRow(DecisionStatisticsRow row) {
     final snapshot = row.snapshot;
@@ -976,33 +1097,39 @@ class ArchiveScreenState extends State<ArchiveScreen>
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: const Color(0xFF30363D)),
         ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(child: Text('${snapshot.name} ${snapshot.code}')),
-          Text(outcome.status.name,
-              style: const TextStyle(color: Colors.white54, fontSize: 11)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(child: Text('${snapshot.name} ${snapshot.code}')),
+            Text(outcome.status.name,
+                style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          ]),
+          const SizedBox(height: 2),
+          Text(
+              '信号 ${_dateKey(snapshot.signalTradeDate)} · '
+              '证据 ${snapshot.evidenceTradeDate == null ? "--" : _dateKey(snapshot.evidenceTradeDate!)} · '
+              '${_signalPhaseLabel(snapshot.signalPhase)}',
+              style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          const SizedBox(height: 6),
+          Text(
+              '${_sourceLabel(snapshot.source)}  ${_modelVersionLabel(snapshot.modelVersion)}  '
+              '${snapshot.recommendationLabel} · ${snapshot.actionable ? "可执行" : "观察"}',
+              style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          const SizedBox(height: 6),
+          Text(
+            '${_directionLabel(snapshot.direction)}  方向 ${snapshot.directionScore.toStringAsFixed(0)}  '
+            '质量 ${snapshot.tradeQualityScore.toStringAsFixed(0)}  '
+            '风险 ${snapshot.riskScore.toStringAsFixed(0)}  '
+            '证据 ${snapshot.evidenceConfidence.toStringAsFixed(0)}',
+            style: const TextStyle(fontSize: 12),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '方向化收益 ${value(_orientedResult(snapshot.direction, outcome.forecastReturn))}  '
+            '方向化Alpha ${value(_orientedResult(snapshot.direction, outcome.alphaReturn))}  '
+            'MFE ${value(outcome.mfe)}  MAE ${value(outcome.mae)}',
+            style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
+          ),
         ]),
-        const SizedBox(height: 2),
-        Text(_dateKey(snapshot.signalTradeDate),
-            style: const TextStyle(color: Colors.white38, fontSize: 11)),
-        const SizedBox(height: 6),
-        Text('${_sourceLabel(snapshot.source)}  ${_modelVersionLabel(snapshot.modelVersion)}',
-            style: const TextStyle(color: Colors.white54, fontSize: 12)),
-        const SizedBox(height: 6),
-        Text(
-          '${_directionLabel(snapshot.direction)}  方向 ${snapshot.directionScore.toStringAsFixed(0)}  '
-          '质量 ${snapshot.tradeQualityScore.toStringAsFixed(0)}  '
-          '风险 ${snapshot.riskScore.toStringAsFixed(0)}  '
-          '证据 ${snapshot.evidenceConfidence.toStringAsFixed(0)}',
-          style: const TextStyle(fontSize: 12),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          '收益 ${value(outcome.forecastReturn)}  Alpha ${value(outcome.alphaReturn)}  '
-          'MFE ${value(outcome.mfe)}  MAE ${value(outcome.mae)}',
-          style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
-        ),
-      ]),
       ),
     );
   }
@@ -1038,7 +1165,12 @@ class ArchiveScreenState extends State<ArchiveScreen>
     if (snapshot.id != null) {
       try {
         horizonRows = await _dbService.getDecisionStatisticsRows(
+          filter: const DecisionStatisticsFilter(includeRetrospective: true),
           snapshotId: snapshot.id,
+        );
+        horizonRows.sort(
+          (left, right) =>
+              left.outcome.horizon.compareTo(right.outcome.horizon),
         );
       } catch (e) {
         debugPrint('[留档] 加载同快照多周期结果失败: $e');
@@ -1062,6 +1194,8 @@ class ArchiveScreenState extends State<ArchiveScreen>
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           children: [
             _buildDetailHeader(snapshot, row.outcome),
+            const SizedBox(height: 12),
+            DecisionSnapshotProvenanceCard(snapshot: snapshot),
             const SizedBox(height: 16),
             _buildDetailRadar(snapshot),
             const SizedBox(height: 16),
@@ -1098,7 +1232,8 @@ class ArchiveScreenState extends State<ArchiveScreen>
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(outcome.status.name,
-                  style: const TextStyle(color: Color(0xFF58A6FF), fontSize: 12)),
+                  style:
+                      const TextStyle(color: Color(0xFF58A6FF), fontSize: 12)),
             ),
           ]),
           const SizedBox(height: 6),
@@ -1150,7 +1285,9 @@ class ArchiveScreenState extends State<ArchiveScreen>
       children: [
         Text(title,
             style: const TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white70)),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.white70)),
         const SizedBox(height: 6),
         ...entries.map(
           (e) => Padding(
@@ -1159,7 +1296,8 @@ class ArchiveScreenState extends State<ArchiveScreen>
               children: [
                 Expanded(
                     child: Text(e.key,
-                        style: const TextStyle(fontSize: 12, color: Colors.white54))),
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.white54))),
                 Text(e.value.toStringAsFixed(1),
                     style: const TextStyle(fontSize: 12, color: Colors.white)),
               ],
@@ -1188,18 +1326,22 @@ class ArchiveScreenState extends State<ArchiveScreen>
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           if (p == null)
-            const Text('无预测概率', style: TextStyle(color: Colors.white54, fontSize: 12))
+            const Text('无预测概率',
+                style: TextStyle(color: Colors.white54, fontSize: 12))
           else ...[
             Row(children: [
               const Text('命中概率'),
               const SizedBox(width: 8),
               Text('${(p * 100).toStringAsFixed(1)}%',
                   style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF58A6FF))),
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF58A6FF))),
               const Spacer(),
               if (outcome.predictedSampleCount > 0)
                 Text('样本 ${outcome.predictedSampleCount}',
-                    style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                    style:
+                        const TextStyle(color: Colors.white38, fontSize: 11)),
             ]),
             if (outcome.predictedWilsonLower != null &&
                 outcome.predictedWilsonUpper != null)
@@ -1235,40 +1377,56 @@ class ArchiveScreenState extends State<ArchiveScreen>
           const Text('各周期结果',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
-          Row(
-            children: const [
-              Expanded(flex: 2, child: Text('周期', style: _kDetailTableHeader)),
-              Expanded(child: Text('状态', style: _kDetailTableHeader)),
-              Expanded(child: Text('方向', style: _kDetailTableHeader)),
-              Expanded(child: Text('收益', style: _kDetailTableHeader)),
-              Expanded(child: Text('Alpha', style: _kDetailTableHeader)),
-            ],
-          ),
-          const Divider(color: Color(0xFF30363D)),
-          for (final r in horizonRows)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                children: [
-                  Expanded(
-                      flex: 2,
-                      child: Text('${r.outcome.horizon}日',
-                          style: const TextStyle(fontSize: 12))),
-                  Expanded(
-                      child: Text(r.outcome.status.name,
-                          style: const TextStyle(fontSize: 12, color: Colors.white54))),
-                  Expanded(
-                      child: Text(hit(r.outcome.effectiveDirectionHit),
-                          style: const TextStyle(fontSize: 12))),
-                  Expanded(
-                      child: Text(num(r.outcome.forecastReturn),
-                          style: const TextStyle(fontSize: 12))),
-                  Expanded(
-                      child: Text(num(r.outcome.alphaReturn),
-                          style: const TextStyle(fontSize: 12))),
-                ],
-              ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              headingRowHeight: 34,
+              dataRowMinHeight: 38,
+              dataRowMaxHeight: 44,
+              horizontalMargin: 8,
+              columnSpacing: 16,
+              columns: const [
+                DataColumn(label: Text('周期', style: _kDetailTableHeader)),
+                DataColumn(label: Text('状态', style: _kDetailTableHeader)),
+                DataColumn(label: Text('目标日', style: _kDetailTableHeader)),
+                DataColumn(label: Text('方向化收益', style: _kDetailTableHeader)),
+                DataColumn(label: Text('方向化执行', style: _kDetailTableHeader)),
+                DataColumn(label: Text('方向化Alpha', style: _kDetailTableHeader)),
+                DataColumn(
+                    label: Text('MFE / MAE', style: _kDetailTableHeader)),
+                DataColumn(
+                    label: Text('有效 / Alpha', style: _kDetailTableHeader)),
+              ],
+              rows: [
+                for (final r in horizonRows)
+                  DataRow(cells: [
+                    DataCell(Text('${r.outcome.horizon}日')),
+                    DataCell(Text(r.outcome.status.name)),
+                    DataCell(Text(r.outcome.targetTradeDate == null
+                        ? '--'
+                        : _dateKey(r.outcome.targetTradeDate!))),
+                    DataCell(Text(num(_orientedResult(
+                      r.snapshot.direction,
+                      r.outcome.forecastReturn,
+                    )))),
+                    DataCell(Text(num(_orientedResult(
+                      r.snapshot.direction,
+                      r.outcome.executableReturn,
+                    )))),
+                    DataCell(Text(num(_orientedResult(
+                      r.snapshot.direction,
+                      r.outcome.alphaReturn,
+                    )))),
+                    DataCell(
+                        Text('${num(r.outcome.mfe)} / ${num(r.outcome.mae)}')),
+                    DataCell(Text(
+                      '${hit(r.outcome.effectiveDirectionHit)} / '
+                      '${hit(r.outcome.alphaHit)}',
+                    )),
+                  ]),
+              ],
             ),
+          ),
         ],
       ),
     );
@@ -1285,7 +1443,6 @@ class ArchiveScreenState extends State<ArchiveScreen>
       if (!mounted) return;
       setState(() {
         _archives = archives;
-        _archivesHasError = false;
       });
       // v3.2: 等待行情数据加载完毕再渲染，避免初始状态全部显示"合理"
       await _refreshCurrentPrices();
@@ -1296,7 +1453,6 @@ class ArchiveScreenState extends State<ArchiveScreen>
       debugPrint('[留档] 加载留档记录失败: $e');
       if (mounted) {
         setState(() {
-          _archivesHasError = true;
           _isLoading = false;
         });
       }
@@ -1640,8 +1796,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
             const SizedBox(height: 12),
             _cleanupOption(context, '删除 30 天前的留档', 'older30'),
             _cleanupOption(context, '删除 90 天前的留档', 'older90'),
-            _cleanupOption(context, '清空全部留档（不可恢复）', 'all',
-                danger: true),
+            _cleanupOption(context, '清空全部留档（不可恢复）', 'all', danger: true),
           ],
         ),
         actions: [
@@ -1660,8 +1815,8 @@ class ArchiveScreenState extends State<ArchiveScreen>
         n = _archives.length;
         msg = '已删除全部留档记录';
       } else {
-        n = await _dbService.deleteArchivesOlderThanDays(
-            action == 'older30' ? 30 : 90);
+        n = await _dbService
+            .deleteArchivesOlderThanDays(action == 'older30' ? 30 : 90);
         msg = '已删除 $n 条旧留档';
       }
       if (mounted) {
@@ -1757,11 +1912,18 @@ class ArchiveScreenState extends State<ArchiveScreen>
 
   /// 导出留档数据为 CSV 文件并通过系统分享
   Future<void> _exportToCsv() async {
-    final hasRows =
-        _showNewModel ? _decisionRows.isNotEmpty : _archives.isNotEmpty;
+    final decisionRowsForExport = _showNewModel
+        ? _filterDecisionRows(_decisionRows, includeAllHorizons: true)
+        : const <DecisionStatisticsRow>[];
+    final legacyRowsForExport = _showNewModel
+        ? const <ArchiveRecord>[]
+        : _getFilteredAndSortedArchives();
+    final hasRows = _showNewModel
+        ? decisionRowsForExport.isNotEmpty
+        : legacyRowsForExport.isNotEmpty;
     if (!hasRows) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('暂无留档数据可导出')),
+        const SnackBar(content: Text('当前筛选无可导出结果')),
       );
       return;
     }
@@ -1775,27 +1937,23 @@ class ArchiveScreenState extends State<ArchiveScreen>
     try {
       final now = DateTime.now();
 
-      // 使用专用导出服务生成 CSV（含 BOM 和可靠性评估）
-      final decisionRowsForExport = _showNewModel
-          ? await _dbService.getDecisionStatisticsRows(
-              filter: DecisionStatisticsFilter(
-                direction: _decisionDirection,
-                marketRegime: _decisionMarketRegime,
-                modelVersion: _decisionModelVersion,
-              ),
-            )
-          : const <DecisionStatisticsRow>[];
+      final decisionExportRows = _showNewModel
+          ? buildDecisionExportRows(decisionRowsForExport)
+          : const <DecisionExportRow>[];
       final stamp = DateFormat('yyyyMMdd_HHmmss').format(now);
       final csvContent = _showNewModel
-          ? buildDecisionCsv(buildDecisionExportRows(decisionRowsForExport))
+          ? buildDecisionCsv(decisionExportRows)
           : buildLegacyArchiveCsv(
-              records: _archives,
+              records: legacyRowsForExport,
               quoteOf: (code) => _currentQuotes[code],
               now: now,
             );
       final fileName = _showNewModel
           ? decisionExportFileName(now)
           : 'archive_export_$stamp.csv';
+      final exportCount = _showNewModel
+          ? decisionExportRows.length
+          : legacyRowsForExport.length;
 
       // 保存到临时目录（供分享使用）
       final tempDir = await getTemporaryDirectory();
@@ -1823,7 +1981,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('已导出 $fileName (${_archives.length}条)'),
+            content: Text('已导出 $fileName ($exportCount条)'),
             action: SnackBarAction(
               label: '查看路径',
               onPressed: () {
@@ -1910,8 +2068,9 @@ class ArchiveScreenState extends State<ArchiveScreen>
             child: Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
               child: const Text(
-                '实时合理：以当前价对比归档时推荐方向，实时浮动，非命中率，不用于评分准确性判断。',
-                style: TextStyle(color: Colors.white30, fontSize: 11, height: 1.5),
+                '当前价实时核对会随行情变化，不是固定周期命中率，不能用于评分校准。',
+                style:
+                    TextStyle(color: Colors.white30, fontSize: 11, height: 1.5),
               ),
             ),
           ),
@@ -2096,7 +2255,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
                                 Icon(Icons.ios_share,
                                     color: Color(0xFF58A6FF), size: 15),
                                 SizedBox(width: 4),
-                                Text('导出CSV',
+                                Text('导出实时核对CSV',
                                     style: TextStyle(
                                         color: Color(0xFF58A6FF),
                                         fontSize: 12,
@@ -2668,10 +2827,11 @@ class _BackfillDecisionDialogState extends State<_BackfillDecisionDialog> {
       db: widget.db,
       shouldCancel: () => _cancelled,
       onProgress: (done, total) {
-        if (mounted) setState(() {
-          _done = done;
-          _total = total;
-        });
+        if (mounted)
+          setState(() {
+            _done = done;
+            _total = total;
+          });
       },
     );
     if (!mounted) return;
@@ -2686,8 +2846,7 @@ class _BackfillDecisionDialogState extends State<_BackfillDecisionDialog> {
     final finished = _summary != null;
     return AlertDialog(
       backgroundColor: const Color(0xFF161B22),
-      title: const Text('补录缺失决策',
-          style: TextStyle(color: Color(0xFFF0F6FC))),
+      title: const Text('补录缺失决策', style: TextStyle(color: Color(0xFFF0F6FC))),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -2697,8 +2856,7 @@ class _BackfillDecisionDialogState extends State<_BackfillDecisionDialog> {
               style: const TextStyle(color: Color(0xFF8B949E)),
             ),
             const SizedBox(height: 12),
-            if (_total > 0)
-              LinearProgressIndicator(value: _done / _total),
+            if (_total > 0) LinearProgressIndicator(value: _done / _total),
           ] else
             Text(
               _summary!.total == 0
@@ -2712,8 +2870,7 @@ class _BackfillDecisionDialogState extends State<_BackfillDecisionDialog> {
         if (!finished)
           TextButton(
             onPressed: () => setState(() => _cancelled = true),
-            child: const Text('取消',
-                style: TextStyle(color: Color(0xFF8B949E))),
+            child: const Text('取消', style: TextStyle(color: Color(0xFF8B949E))),
           ),
       ],
     );
