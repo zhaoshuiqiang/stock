@@ -2144,6 +2144,48 @@ class ApiClient {
     }
   }
 
+  Future<List<List<dynamic>>> getIntradayKline({
+    required String secid,
+    required int klt,
+    required int lmt,
+  }) async {
+    final url = Uri.parse(
+        'https://push2his.eastmoney.com/api/qt/stock/kline/get'
+        '?secid=$secid'
+        '&fields1=f1,f2,f3,f4,f5,f6'
+        '&fields2=f51,f52,f53,f54,f55,f56,f57'
+        '&klt=$klt'
+        '&fqt=1'
+        '&beg=0&end=20500101'
+        '&lmt=$lmt');
+
+    try {
+      final response = await _httpGet(url, headers: {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
+        'Referer': 'https://quote.eastmoney.com/',
+      });
+      if (response == null) return [];
+
+      final bodyStr = response.body.trim();
+      if (bodyStr.isEmpty || bodyStr == 'null') return [];
+
+      final decoded = json.decode(bodyStr);
+      if (decoded is! Map<String, dynamic>) return [];
+
+      final klines = decoded['data']?['klines'];
+      if (klines is! List<dynamic>) return [];
+
+      return klines.map((line) {
+        if (line is! String) return <dynamic>[];
+        return line.split(',');
+      }).where((row) => row.length >= 7).toList();
+    } catch (e) {
+      debugPrint('[ApiClient] getIntradayKline 失败: $e');
+      return [];
+    }
+  }
+
   void dispose() {
     _disposed = true;
     _client.close();

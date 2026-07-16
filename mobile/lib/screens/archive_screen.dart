@@ -865,12 +865,11 @@ class ArchiveScreenState extends State<ArchiveScreen>
       showSelectedIcon: false,
       onSelectionChanged: (value) => setState(() {
         _decisionSourceGroup = value.first;
-        // v3.32: 切到扫描/全部时阶段置空（全部），避免盘中扫描快照被盘前过滤滤掉；
-        // 切回我的留档时恢复盘前语义。
-        _decisionSignalPhase =
-            _decisionSourceGroup == DecisionArchiveSourceGroup.manual
-                ? DecisionSignalPhase.preMarket
-                : null;
+        // v3.33: 所有数据源切换时阶段均置空（全部阶段）。
+        // v3.32 仅对扫描/全部置空，但我的留档仍设 preMarket，
+        // 导致盘中归档的 intraday/afterClose 记录被全部滤掉，
+        // 「我的留档」显示为空。用户可从高级筛选手动选择阶段。
+        _decisionSignalPhase = null;
       }),
     );
   }

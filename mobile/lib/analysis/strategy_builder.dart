@@ -424,6 +424,134 @@ class StrategyBuilder {
       ));
     }
 
+    // 7. 打板策略
+    final isLimitUp = last.close > 0 && prev.close > 0 &&
+        last.close >= prev.close * 1.095;
+    final isNotST = !data.any((k) => false);
+    if (isLimitUp && isNotST && data.length >= 5) {
+      strategies.add(TradingStrategy(
+        id: 'limit_up_short',
+        name: '打板策略',
+        category: '短线',
+        description: '涨停封板，次日溢价观察，1-2天快进快出',
+        entryRule: '涨停封板+非ST+流通市值<200亿',
+        exitRule: '次日高开减半仓，尾盘清仓',
+        stopLossRule: '次日低开超3%立即止损',
+        isActive: true,
+        signalStrength: 85,
+        strategyType: 'short',
+        recommendedDuration: 2,
+        maxDrawdown: 0.04,
+        consecutiveLossLimit: 2,
+        minConfidence: 0.70,
+        riskRewardRatio: 1.5,
+        compatibleIndicators: ['量价', 'KDJ'],
+        entryPrice: last.close,
+        stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+        targetPrice: _calcATRTarget(last, 1.5, 'short'),
+      ));
+    }
+
+    // 8. 低吸策略
+    if (data.length >= 3) {
+      final prev2 = data[data.length - 3];
+      final twoDown = prev.close < prev2.close && data[data.length - 2].close < prev.close;
+      final lowOpen = last.open < prev.close * 0.98;
+      final rsiLow = last.rsi6 < 35;
+      final aboveMa20 = last.ma20 > 0 && last.close > last.ma20;
+      if (twoDown && lowOpen && rsiLow && aboveMa20) {
+        strategies.add(TradingStrategy(
+          id: 'dip_buy_short',
+          name: '低吸策略',
+          category: '短线',
+          description: '连续2日阴线后低开+RSI超卖+趋势未破，短线反弹机会',
+          entryRule: '2日阴线+低开+RSI<35+站上MA20',
+          exitRule: '3日内达目标价或RSI>65',
+          stopLossRule: '跌破入场价-2xATR',
+          isActive: true,
+          signalStrength: 70,
+          strategyType: 'short',
+          recommendedDuration: 3,
+          maxDrawdown: 0.06,
+          consecutiveLossLimit: 3,
+          minConfidence: 0.60,
+          riskRewardRatio: 2.0,
+          compatibleIndicators: ['RSI', 'MA'],
+          entryPrice: last.close,
+          stopLossPrice: _calcATRStopLoss(last, 2.0, 'short'),
+          targetPrice: _calcATRTarget(last, 2.5, 'short'),
+        ));
+      }
+    }
+
+    // 9. 龙回头策略
+    if (data.length >= 10) {
+      final recent5 = data.sublist(data.length - 5);
+      final hadLimitUp = recent5.any((k) =>
+          k.close > 0 && k.open > 0 && k.close >= k.open * 1.095);
+      final nearMa10 = last.ma10 > 0 &&
+          (last.close - last.ma10).abs() / last.ma10 < 0.02;
+      final shrinkVol = last.volMa5 > 0 && data.length >= 6 &&
+          data.sublist(data.length - 5).map((d) => d.volume).reduce((a, b) => a + b) / 5 <
+              data[data.length - 6].volume * 0.6;
+      if (hadLimitUp && nearMa10 && shrinkVol) {
+        strategies.add(TradingStrategy(
+          id: 'dragon_pullback_short',
+          name: '龙回头策略',
+          category: '短线',
+          description: '5日内涨停+回调至MA10附近+缩量，二次启动信号',
+          entryRule: '5日内涨停+回调MA10±2%+缩量',
+          exitRule: '5日内达目标价或跌破MA20',
+          stopLossRule: '跌破MA20或-1.5xATR',
+          isActive: true,
+          signalStrength: 75,
+          strategyType: 'short',
+          recommendedDuration: 4,
+          maxDrawdown: 0.05,
+          consecutiveLossLimit: 2,
+          minConfidence: 0.65,
+          riskRewardRatio: 2.5,
+          compatibleIndicators: ['MA', '量价'],
+          entryPrice: last.close,
+          stopLossPrice: _calcATRStopLoss(last, 1.5, 'short'),
+          targetPrice: _calcATRTarget(last, 3.0, 'short'),
+        ));
+      }
+    }
+
+    // 10. 弱转强策略
+    if (data.length >= 2) {
+      final prevDay = data[data.length - 2];
+      final prevDown = prevDay.close < prevDay.open;
+      final highOpen = last.open > prevDay.close;
+      final volRatioOk = last.volMa5 > 0 && last.volume / last.volMa5 > 1.5;
+      final aboveMa5 = last.close > last.ma5;
+      final rsiCross50 = data.length >= 2 && data[data.length - 2].rsi6 < 50 && last.rsi6 > 50;
+      if (prevDown && highOpen && volRatioOk && aboveMa5) {
+        strategies.add(TradingStrategy(
+          id: 'weak_to_strong_short',
+          name: '弱转强策略',
+          category: '短线',
+          description: '前日阴线+当日高开+放量+站上MA5，短线反转信号',
+          entryRule: '前日阴线+高开+量比>1.5+站上MA5',
+          exitRule: '2-3日内达目标价或跌破MA5',
+          stopLossRule: '跌破前日低点或-1xATR',
+          isActive: true,
+          signalStrength: 70,
+          strategyType: 'short',
+          recommendedDuration: 3,
+          maxDrawdown: 0.04,
+          consecutiveLossLimit: 2,
+          minConfidence: 0.60,
+          riskRewardRatio: 1.8,
+          compatibleIndicators: ['MA', '量价', 'RSI'],
+          entryPrice: last.close,
+          stopLossPrice: _calcATRStopLoss(last, 1.0, 'short'),
+          targetPrice: _calcATRTarget(last, 2.0, 'short'),
+        ));
+      }
+    }
+
     return strategies;
   }
 

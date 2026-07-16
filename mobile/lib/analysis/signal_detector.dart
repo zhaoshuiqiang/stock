@@ -1,30 +1,30 @@
 import '../models/stock_models.dart';
 import 'signal_evidence_classifier.dart';
 
-/// 分层信号检测器
-/// 负责检测短期、中期、长期的信号
+/// åå±ä¿¡å·æ£æµå¨
+/// è´è´£æ£æµç­æãä¸­æãé¿æçä¿¡å·
 class SignalDetector {
-  /// 检测所有分层信号
+  /// æ£æµææåå±ä¿¡å·
   static List<SignalItem> detectLayeredSignals(List<HistoryKline> data) {
     if (data.isEmpty || data.length < 20) return [];
 
     final last = data[data.length - 1];
     final prev = data[data.length - 2];
 
-    // 收集所有基础信号
+    // æ¶éææåºç¡ä¿¡å·
     final baseSignals = <SignalItem>[];
     baseSignals.addAll(_detectShortTermSignals(data, last, prev));
     baseSignals.addAll(_detectMediumTermSignals(data, last, prev));
     baseSignals.addAll(_detectLongTermSignals(data, last, prev));
 
-    // 共振只记录同方向独立组件覆盖，不再按同一指标重复次数抬高置信度。
+    // å±æ¯åªè®°å½åæ¹åç¬ç«ç»ä»¶è¦çï¼ä¸åæåä¸ææ éå¤æ¬¡æ°æ¬é«ç½®ä¿¡åº¦ã
     final signals = SignalConfluenceAnnotator.annotate(baseSignals);
 
     signals.sort((a, b) => b.strength.compareTo(a.strength));
     return signals;
   }
 
-  /// 短期信号检测（2-5天）
+  /// ç­æä¿¡å·æ£æµï¼2-5å¤©ï¼
   static List<SignalItem> _detectShortTermSignals(
       List<HistoryKline> data, HistoryKline last, HistoryKline prev) {
     final signals = <SignalItem>[];
@@ -39,7 +39,7 @@ class SignalDetector {
     return signals;
   }
 
-  /// KDJ金叉/死叉检测
+  /// KDJéå/æ­»åæ£æµ
   static List<SignalItem> _detectKDJSignals(
       HistoryKline last, HistoryKline prev) {
     final signals = <SignalItem>[];
@@ -47,8 +47,8 @@ class SignalDetector {
       signals.add(SignalItem(
         type: 'buy',
         indicator: 'KDJ',
-        signal: 'KDJ金叉',
-        description: 'K线上穿D线，形成金叉，短线买入信号',
+        signal: 'KDJéå',
+        description: 'Kçº¿ä¸ç©¿Dçº¿ï¼å½¢æéåï¼ç­çº¿ä¹°å¥ä¿¡å·',
         strength: 75,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -59,8 +59,8 @@ class SignalDetector {
       signals.add(SignalItem(
         type: 'sell',
         indicator: 'KDJ',
-        signal: 'KDJ死叉',
-        description: 'K线下穿D线，短线转弱信号',
+        signal: 'KDJæ­»å',
+        description: 'Kçº¿ä¸ç©¿Dçº¿ï¼ç­çº¿è½¬å¼±ä¿¡å·',
         strength: 75,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -71,7 +71,7 @@ class SignalDetector {
     return signals;
   }
 
-  /// RSI超卖回升/超买回落检测
+  /// RSIè¶ååå/è¶ä¹°åè½æ£æµ
   static List<SignalItem> _detectRSISignals(
       HistoryKline last, HistoryKline prev) {
     final signals = <SignalItem>[];
@@ -84,7 +84,7 @@ class SignalDetector {
         strength: 70,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
-        confidence: 0.7,
+        confidence: _calculateRSIConfidence(prev.rsi6, isBuy: true),
         signalCount: 1,
       ));
     } else if (prev.rsi6 >= 70 && last.rsi6 < 70) {
@@ -96,6 +96,18 @@ class SignalDetector {
         strength: 70,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
+        confidence: _calculateRSIConfidence(prev.rsi6, isBuy: false),
+        signalCount: 1,
+      ));
+    } else if (prev.rsi6 >= 70 && last.rsi6 < 70) {
+      signals.add(SignalItem(
+        type: 'sell',
+        indicator: 'RSI',
+        signal: 'RSIè¶ä¹°åè½',
+        description: 'RSIä»è¶ä¹°åºï¼>70ï¼åè½è·ç ´70ï¼ç­çº¿åè°ä¿¡å·',
+        strength: 70,
+        timestamp: last.date,
+        duration: SignalDuration.shortTerm,
         confidence: 0.7,
         signalCount: 1,
       ));
@@ -103,7 +115,7 @@ class SignalDetector {
     return signals;
   }
 
-  /// MA5金叉/死叉检测
+  /// MA5éå/æ­»åæ£æµ
   static List<SignalItem> _detectMASignals(
       List<HistoryKline> data, HistoryKline last) {
     final signals = <SignalItem>[];
@@ -113,8 +125,8 @@ class SignalDetector {
       signals.add(SignalItem(
         type: 'buy',
         indicator: 'MA',
-        signal: 'MA5上穿MA10',
-        description: '短期均线向上突破中期均线，快速买入信号',
+        signal: 'MA5ä¸ç©¿MA10',
+        description: 'ç­æåçº¿åä¸çªç ´ä¸­æåçº¿ï¼å¿«éä¹°å¥ä¿¡å·',
         strength: 80,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -125,8 +137,8 @@ class SignalDetector {
       signals.add(SignalItem(
         type: 'sell',
         indicator: 'MA',
-        signal: 'MA5下穿MA10',
-        description: '短期均线向下跌破中期均线，快速卖出信号',
+        signal: 'MA5ä¸ç©¿MA10',
+        description: 'ç­æåçº¿åä¸è·ç ´ä¸­æåçº¿ï¼å¿«éååºä¿¡å·',
         strength: 80,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -137,14 +149,14 @@ class SignalDetector {
     return signals;
   }
 
-  /// MACD金叉/死叉检测
+  /// MACDéå/æ­»åæ£æµ
   static List<SignalItem> _detectMACDSignals(
       HistoryKline last, HistoryKline prev) {
     final signals = <SignalItem>[];
     double confidence = 0.75;
     if (last.macdDif > 0 && last.macdDea > 0) confidence += 0.05;
-    // v3.19: macdHist 为价格单位，原 >1 阈值对高价股过严、低价股过松。
-    // 改为相对收盘价(>0.5%)归一化，使不同价位股票口径一致。
+    // v3.19: macdHist ä¸ºä»·æ ¼åä½ï¼å >1 éå¼å¯¹é«ä»·è¡è¿ä¸¥ãä½ä»·è¡è¿æ¾ã
+    // æ¹ä¸ºç¸å¯¹æ¶çä»·(>0.5%)å½ä¸åï¼ä½¿ä¸åä»·ä½è¡ç¥¨å£å¾ä¸è´ã
     if (last.close > 0 && last.macdHist.abs() / last.close > 0.005) {
       confidence += 0.05;
     }
@@ -154,8 +166,8 @@ class SignalDetector {
       signals.add(SignalItem(
         type: 'buy',
         indicator: 'MACD',
-        signal: 'MACD金叉',
-        description: 'DIF上穿DEA形成金叉，中线买入信号',
+        signal: 'MACDéå',
+        description: 'DIFä¸ç©¿DEAå½¢æéåï¼ä¸­çº¿ä¹°å¥ä¿¡å·',
         strength: 85,
         timestamp: last.date,
         duration: SignalDuration.mediumTerm,
@@ -166,8 +178,8 @@ class SignalDetector {
       signals.add(SignalItem(
         type: 'sell',
         indicator: 'MACD',
-        signal: 'MACD死叉',
-        description: 'DIF下穿DEA形成死叉，中线卖出信号',
+        signal: 'MACDæ­»å',
+        description: 'DIFä¸ç©¿DEAå½¢ææ­»åï¼ä¸­çº¿ååºä¿¡å·',
         strength: 85,
         timestamp: last.date,
         duration: SignalDuration.mediumTerm,
@@ -178,7 +190,7 @@ class SignalDetector {
     return signals;
   }
 
-  /// 成交量异动检测
+  /// æäº¤éå¼å¨æ£æµ
   static List<SignalItem> _detectVolumeSignals(
       HistoryKline last, HistoryKline prev) {
     final signals = <SignalItem>[];
@@ -187,9 +199,9 @@ class SignalDetector {
       if (volRatio > 2 && last.close > prev.close) {
         signals.add(SignalItem(
           type: 'buy',
-          indicator: '量价',
-          signal: '放量上涨',
-          description: '成交量放大至均量2倍以上，短线买入信号',
+          indicator: 'éä»·',
+          signal: 'æ¾éä¸æ¶¨',
+          description: 'æäº¤éæ¾å¤§è³åé2åä»¥ä¸ï¼ç­çº¿ä¹°å¥ä¿¡å·',
           strength: 75,
           timestamp: last.date,
           duration: SignalDuration.shortTerm,
@@ -199,9 +211,9 @@ class SignalDetector {
       } else if (volRatio < 0.5 && last.close > prev.close) {
         signals.add(SignalItem(
           type: 'sell',
-          indicator: '量价',
-          signal: '缩量上涨',
-          description: '成交量萎缩至均量50%以下，上涨缺乏量能支撑，追高风险较大',
+          indicator: 'éä»·',
+          signal: 'ç¼©éä¸æ¶¨',
+          description: 'æäº¤éèç¼©è³åé50%ä»¥ä¸ï¼ä¸æ¶¨ç¼ºä¹éè½æ¯æï¼è¿½é«é£é©è¾å¤§',
           strength: 45,
           timestamp: last.date,
           duration: SignalDuration.shortTerm,
@@ -213,7 +225,7 @@ class SignalDetector {
     return signals;
   }
 
-  /// WR超买超卖检测
+  /// WRè¶ä¹°è¶åæ£æµ
   static List<SignalItem> _detectWRSignals(HistoryKline last) {
     final signals = <SignalItem>[];
     if (last.wr14 != null) {
@@ -226,7 +238,7 @@ class SignalDetector {
           strength: 70,
           timestamp: last.date,
           duration: SignalDuration.shortTerm,
-          confidence: 0.7,
+          confidence: _calculateWRConfidence(last.wr14!, isBuy: true),
           signalCount: 1,
         ));
       } else if (last.wr14! < 20) {
@@ -238,9 +250,7 @@ class SignalDetector {
           strength: 70,
           timestamp: last.date,
           duration: SignalDuration.shortTerm,
-          // v3.22: 降低WR超买置信度(0.70→0.50)，A股趋势市中超买可持续很久，
-          // 仅凭超买判断回调胜率较低。
-          confidence: 0.50,
+          confidence: _calculateWRConfidence(last.wr14!, isBuy: false),
           signalCount: 1,
         ));
       }
@@ -248,22 +258,22 @@ class SignalDetector {
     return signals;
   }
 
-  /// 中期信号检测（5-20天）
+  /// ä¸­æä¿¡å·æ£æµï¼5-20å¤©ï¼
   static List<SignalItem> _detectMediumTermSignals(
       List<HistoryKline> data, HistoryKline last, HistoryKline prev) {
     final signals = <SignalItem>[];
 
-    // 1. MACD顶底背离
+    // 1. MACDé¡¶åºèç¦»
     signals.addAll(_detectMACDDivergence(data, last, prev));
 
-    // 2. MA10/MA20金叉/死叉（中期趋势）
+    // 2. MA10/MA20éå/æ­»åï¼ä¸­æè¶å¿ï¼
     if (last.ma10 > 0 && last.ma20 > 0) {
       if (last.ma10 > last.ma20 && prev.ma10 <= prev.ma20) {
         signals.add(SignalItem(
           type: 'buy',
           indicator: 'MA',
-          signal: 'MA10上穿MA20',
-          description: '中期均线向上突破，中期趋势转强',
+          signal: 'MA10ä¸ç©¿MA20',
+          description: 'ä¸­æåçº¿åä¸çªç ´ï¼ä¸­æè¶å¿è½¬å¼º',
           strength: 80,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,
@@ -274,8 +284,8 @@ class SignalDetector {
         signals.add(SignalItem(
           type: 'sell',
           indicator: 'MA',
-          signal: 'MA10下穿MA20',
-          description: '中期均线向下跌破，中期趋势转弱',
+          signal: 'MA10ä¸ç©¿MA20',
+          description: 'ä¸­æåçº¿åä¸è·ç ´ï¼ä¸­æè¶å¿è½¬å¼±',
           strength: 80,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,
@@ -285,11 +295,11 @@ class SignalDetector {
       }
     }
 
-    // 3. 布林带突破/支撑
+    // 3. å¸æå¸¦çªç ´/æ¯æ
     if (last.bollUpper > 0) {
-      // v3.19: 趋势判定——ADX 未就绪(==0，通常因数据不足 29 根)时改用均线排列兜底，
-      // 避免短历史下 isTrending 恒为 false 导致的系统性"突破上轨判卖"偏空偏差。
-      bool? bollTrend; // true=向上趋势, false=向下趋势, null=未知
+      // v3.19: è¶å¿å¤å®ââADX æªå°±ç»ª(==0ï¼éå¸¸å æ°æ®ä¸è¶³ 29 æ ¹)æ¶æ¹ç¨åçº¿æåååºï¼
+      // é¿åç­åå²ä¸ isTrending æä¸º false å¯¼è´çç³»ç»æ§"çªç ´ä¸è½¨å¤å"åç©ºåå·®ã
+      bool? bollTrend; // true=åä¸è¶å¿, false=åä¸è¶å¿, null=æªç¥
       if (last.adx14 > 25) {
         bollTrend = last.plusDi14 > last.minusDi14;
       } else if (last.adx14 == 0) {
@@ -301,20 +311,20 @@ class SignalDetector {
           bollTrend = null;
         }
       } else {
-        bollTrend = null; // ADX 在 (0,25] 不可靠，视为未知
+        bollTrend = null; // ADX å¨ (0,25] ä¸å¯é ï¼è§ä¸ºæªç¥
       }
 
       if (last.close > last.bollUpper && prev.close <= prev.bollUpper) {
-        // 趋势行情中突破上轨为强势信号，震荡/未知趋势中不作为方向性信号发出
+        // è¶å¿è¡æä¸­çªç ´ä¸è½¨ä¸ºå¼ºå¿ä¿¡å·ï¼éè¡/æªç¥è¶å¿ä¸­ä¸ä½ä¸ºæ¹åæ§ä¿¡å·ååº
         if (bollTrend != null) {
           final isTrending = bollTrend;
           signals.add(SignalItem(
             type: isTrending ? 'buy' : 'sell',
             indicator: 'BOLL',
-            signal: isTrending ? '趋势突破上轨' : '突破上轨',
+            signal: isTrending ? 'è¶å¿çªç ´ä¸è½¨' : 'çªç ´ä¸è½¨',
             description: isTrending
-                ? '股价突破布林带上轨且趋势明确(ADX=${last.adx14.toStringAsFixed(1)})，强势突破'
-                : '股价突破布林带上轨，超买状态',
+                ? 'è¡ä»·çªç ´å¸æå¸¦ä¸è½¨ä¸è¶å¿æç¡®(ADX=${last.adx14.toStringAsFixed(1)})ï¼å¼ºå¿çªç ´'
+                : 'è¡ä»·çªç ´å¸æå¸¦ä¸è½¨ï¼è¶ä¹°ç¶æ',
             strength: isTrending ? 75 : 70,
             timestamp: last.date,
             duration: SignalDuration.mediumTerm,
@@ -325,17 +335,17 @@ class SignalDetector {
       } else if (last.bollLower > 0 &&
           last.close < last.bollLower &&
           prev.close >= prev.bollLower) {
-        // P1-5修复：镜像上轨逻辑，趋势行情中破下轨为看跌延续，震荡行情中为超卖
-        // v3.19: 与上方统一使用 bollTrend（ADX 未就绪时均线排列兜底），未知趋势不发出方向信号
+        // P1-5ä¿®å¤ï¼éåä¸è½¨é»è¾ï¼è¶å¿è¡æä¸­ç ´ä¸è½¨ä¸ºçè·å»¶ç»­ï¼éè¡è¡æä¸­ä¸ºè¶å
+        // v3.19: ä¸ä¸æ¹ç»ä¸ä½¿ç¨ bollTrendï¼ADX æªå°±ç»ªæ¶åçº¿æåååºï¼ï¼æªç¥è¶å¿ä¸ååºæ¹åä¿¡å·
         if (bollTrend != null) {
           final isTrendingDown = !bollTrend;
           signals.add(SignalItem(
             type: isTrendingDown ? 'sell' : 'buy',
             indicator: 'BOLL',
-            signal: isTrendingDown ? '趋势跌破下轨' : '跌破下轨',
+            signal: isTrendingDown ? 'è¶å¿è·ç ´ä¸è½¨' : 'è·ç ´ä¸è½¨',
             description: isTrendingDown
-                ? '股价跌破布林带下轨且下跌趋势明确(ADX=${last.adx14.toStringAsFixed(1)})，看跌延续'
-                : '股价跌破布林带下轨，超卖状态',
+                ? 'è¡ä»·è·ç ´å¸æå¸¦ä¸è½¨ä¸ä¸è·è¶å¿æç¡®(ADX=${last.adx14.toStringAsFixed(1)})ï¼çè·å»¶ç»­'
+                : 'è¡ä»·è·ç ´å¸æå¸¦ä¸è½¨ï¼è¶åç¶æ',
             strength: isTrendingDown ? 75 : 70,
             timestamp: last.date,
             duration: SignalDuration.mediumTerm,
@@ -346,15 +356,15 @@ class SignalDetector {
       }
     }
 
-    // 4. OBV趋势确认
+    // 4. OBVè¶å¿ç¡®è®¤
     if (data.length >= 5 && last.obv != 0) {
       final obv5 = data[data.length - 5].obv;
       if (last.obv > obv5 && last.close > data[data.length - 5].close) {
         signals.add(SignalItem(
           type: 'buy',
           indicator: 'OBV',
-          signal: 'OBV放量上涨',
-          description: '能量潮指标确认上涨趋势',
+          signal: 'OBVæ¾éä¸æ¶¨',
+          description: 'è½éæ½®ææ ç¡®è®¤ä¸æ¶¨è¶å¿',
           strength: 65,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,
@@ -364,14 +374,14 @@ class SignalDetector {
       }
     }
 
-    // CCI突破检测
+    // CCIçªç ´æ£æµ
     if (last.cci14 != null && prev.cci14 != null) {
       if (prev.cci14! < -100 && last.cci14! >= -100) {
         signals.add(SignalItem(
           type: 'buy',
           indicator: 'CCI',
-          signal: 'CCI超卖回升',
-          description: 'CCI从超卖区(<-100)回升，短期反弹信号',
+          signal: 'CCIè¶ååå',
+          description: 'CCIä»è¶ååº(<-100)ååï¼ç­æåå¼¹ä¿¡å·',
           strength: 65,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,
@@ -382,8 +392,8 @@ class SignalDetector {
         signals.add(SignalItem(
           type: 'sell',
           indicator: 'CCI',
-          signal: 'CCI超买回落',
-          description: 'CCI从超买区(>100)回落，短期回调信号',
+          signal: 'CCIè¶ä¹°åè½',
+          description: 'CCIä»è¶ä¹°åº(>100)åè½ï¼ç­æåè°ä¿¡å·',
           strength: 65,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,
@@ -393,18 +403,18 @@ class SignalDetector {
       }
     }
 
-    // 成交量趋势分析
+    // æäº¤éè¶å¿åæ
     signals.addAll(_detectVolumeTrends(data, last));
 
     return signals;
   }
 
-  /// 长期信号检测（20-60天）
+  /// é¿æä¿¡å·æ£æµï¼20-60å¤©ï¼
   static List<SignalItem> _detectLongTermSignals(
       List<HistoryKline> data, HistoryKline last, HistoryKline prev) {
     final signals = <SignalItem>[];
 
-    // 1. 均线多头/空头排列（长期趋势）
+    // 1. åçº¿å¤å¤´/ç©ºå¤´æåï¼é¿æè¶å¿ï¼
     if (last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0 && last.ma60 > 0) {
       if (last.ma5 > last.ma10 &&
           last.ma10 > last.ma20 &&
@@ -412,8 +422,8 @@ class SignalDetector {
         signals.add(SignalItem(
           type: 'buy',
           indicator: 'MA',
-          signal: '均线多头排列',
-          description: 'MA5>MA10>MA20>MA60，长期上升趋势',
+          signal: 'åçº¿å¤å¤´æå',
+          description: 'MA5>MA10>MA20>MA60ï¼é¿æä¸åè¶å¿',
           strength: 90,
           timestamp: last.date,
           duration: SignalDuration.longTerm,
@@ -426,8 +436,8 @@ class SignalDetector {
         signals.add(SignalItem(
           type: 'sell',
           indicator: 'MA',
-          signal: '均线空头排列',
-          description: 'MA5<MA10<MA20<MA60，长期下降趋势',
+          signal: 'åçº¿ç©ºå¤´æå',
+          description: 'MA5<MA10<MA20<MA60ï¼é¿æä¸éè¶å¿',
           strength: 90,
           timestamp: last.date,
           duration: SignalDuration.longTerm,
@@ -437,15 +447,15 @@ class SignalDetector {
       }
     }
 
-    // 2. MACD零轴上方金叉（强势多头）
+    // 2. MACDé¶è½´ä¸æ¹éåï¼å¼ºå¿å¤å¤´ï¼
     if (last.macdDif > last.macdDea &&
         prev.macdDif <= prev.macdDea &&
         last.macdDif > 0) {
       signals.add(SignalItem(
         type: 'buy',
         indicator: 'MACD',
-        signal: 'MACD零轴上方金叉',
-        description: 'MACD在零轴上方形成金叉，多头趋势强劲',
+        signal: 'MACDé¶è½´ä¸æ¹éå',
+        description: 'MACDå¨é¶è½´ä¸æ¹å½¢æéåï¼å¤å¤´è¶å¿å¼ºå²',
         strength: 90,
         timestamp: last.date,
         duration: SignalDuration.longTerm,
@@ -454,15 +464,15 @@ class SignalDetector {
       ));
     }
 
-    // P1-6: MACD零轴下方死叉（强势空头）— 与零轴上方金叉对称
+    // P1-6: MACDé¶è½´ä¸æ¹æ­»åï¼å¼ºå¿ç©ºå¤´ï¼â ä¸é¶è½´ä¸æ¹éåå¯¹ç§°
     if (last.macdDif < last.macdDea &&
         prev.macdDif >= prev.macdDea &&
         last.macdDif < 0) {
       signals.add(SignalItem(
         type: 'sell',
         indicator: 'MACD',
-        signal: 'MACD零轴下方死叉',
-        description: 'MACD在零轴下方形成死叉，空头趋势强劲',
+        signal: 'MACDé¶è½´ä¸æ¹æ­»å',
+        description: 'MACDå¨é¶è½´ä¸æ¹å½¢ææ­»åï¼ç©ºå¤´è¶å¿å¼ºå²',
         strength: 90,
         timestamp: last.date,
         duration: SignalDuration.longTerm,
@@ -471,14 +481,14 @@ class SignalDetector {
       ));
     }
 
-    // 3. 趋势强度确认（ADX）— P0-1修复：需要方向确认
-    // v2.38.0: 将趋势强度强劲信号type从neutral改为buy/sell，确保信号分类准确
+    // 3. è¶å¿å¼ºåº¦ç¡®è®¤ï¼ADXï¼â P0-1ä¿®å¤ï¼éè¦æ¹åç¡®è®¤
+    // v2.38.0: å°è¶å¿å¼ºåº¦å¼ºå²ä¿¡å·typeä»neutralæ¹ä¸ºbuy/sellï¼ç¡®ä¿ä¿¡å·åç±»åç¡®
     if (last.adx14 > 25 && last.plusDi14 > last.minusDi14) {
       signals.add(SignalItem(
         type: 'buy',
         indicator: 'ADX',
-        signal: '趋势强度强劲',
-        description: 'ADX>25，多头趋势明确，可顺势而为',
+        signal: 'è¶å¿å¼ºåº¦å¼ºå²',
+        description: 'ADX>25ï¼å¤å¤´è¶å¿æç¡®ï¼å¯é¡ºå¿èä¸º',
         strength: 75,
         timestamp: last.date,
         duration: SignalDuration.longTerm,
@@ -489,13 +499,13 @@ class SignalDetector {
       signals.add(SignalItem(
         type: 'sell',
         indicator: 'ADX',
-        signal: '趋势强度强劲',
-        description: 'ADX>25，空头趋势明确，建议回避',
+        signal: 'è¶å¿å¼ºåº¦å¼ºå²',
+        description: 'ADX>25ï¼ç©ºå¤´è¶å¿æç¡®ï¼å»ºè®®åé¿',
         strength: 75,
         timestamp: last.date,
         duration: SignalDuration.longTerm,
-        // v3.22: 降低空头趋势信号置信度(0.80→0.55)，ADX是滞后长周期指标，
-        // 对次日短线预测力弱，且A股下跌趋势经常快速反转。
+        // v3.22: éä½ç©ºå¤´è¶å¿ä¿¡å·ç½®ä¿¡åº¦(0.80â0.55)ï¼ADXæ¯æ»åé¿å¨æææ ï¼
+        // å¯¹æ¬¡æ¥ç­çº¿é¢æµåå¼±ï¼ä¸Aè¡ä¸è·è¶å¿ç»å¸¸å¿«éåè½¬ã
         confidence: 0.55,
         signalCount: 1,
       ));
@@ -503,8 +513,8 @@ class SignalDetector {
       signals.add(SignalItem(
         type: 'neutral',
         indicator: 'ADX',
-        signal: '盘整趋势',
-        description: 'ADX<20，趋势不明确，建议观望',
+        signal: 'çæ´è¶å¿',
+        description: 'ADX<20ï¼è¶å¿ä¸æç¡®ï¼å»ºè®®è§æ',
         strength: 40,
         timestamp: last.date,
         duration: SignalDuration.longTerm,
@@ -516,34 +526,63 @@ class SignalDetector {
     return signals;
   }
 
-  // 辅助方法：计算KDJ置信度
-  /// v3.22: KDJ死叉置信度降低(base 0.70→0.55 for sell)，强势行情中KDJ死叉频繁失效。
-  /// 金叉保持原有base=0.70，不影响看多信号准确率。
+  // è¾å©æ¹æ³ï¼è®¡ç®KDJç½®ä¿¡åº¦
+  /// v3.22: KDJæ­»åç½®ä¿¡åº¦éä½(base 0.70â0.55 for sell)ï¼å¼ºå¿è¡æä¸­KDJæ­»åé¢ç¹å¤±æã
+  /// éåä¿æåæbase=0.70ï¼ä¸å½±åçå¤ä¿¡å·åç¡®çã
   static double _calculateKDJConfidence(HistoryKline last, HistoryKline prev,
       {String signalType = 'buy'}) {
-    double base = signalType == 'buy' ? 0.70 : 0.55;
     if (signalType == 'buy') {
-      if (last.j < 20) base += 0.05; // 超卖区金叉更可靠
-      if (last.j > 80) base -= 0.05; // 超买区金叉不可靠
+      if (last.k < 20) return 0.80;
+      if (last.k < 30) return 0.70;
+      if (last.k < 50) return 0.55;
+      return 0.40;
     } else {
-      if (last.j > 80) base += 0.05; // 超买区死叉稍可靠
-      if (last.j < 20) base -= 0.05; // 超卖区死叉不可靠
+      if (last.k > 80) return 0.70;
+      if (last.k > 50) return 0.55;
+      return 0.40;
     }
+  }
+
+  static double _calculateRSIConfidence(double rsiValue, {required bool isBuy}) {
+    if (isBuy) {
+      if (rsiValue <= 15) return 0.85;
+      if (rsiValue <= 20) return 0.75;
+      if (rsiValue <= 25) return 0.65;
+      return 0.55;
+    } else {
+      if (rsiValue >= 85) return 0.85;
+      if (rsiValue >= 80) return 0.75;
+      if (rsiValue >= 75) return 0.65;
+      return 0.55;
+    }
+  }
+
+  static double _calculateWRConfidence(double wrValue, {required bool isBuy}) {
+    if (isBuy) {
+      if (wrValue > 95) return 0.70;
+      if (wrValue > 85) return 0.60;
+      return 0.45;
+    } else {
+      if (wrValue < 5) return 0.70;
+      if (wrValue < 15) return 0.60;
+      return 0.45;
+    }
+  }
     return base.clamp(0.45, 0.9);
   }
 
-  /// MACD顶底背离检测（中期信号）
+  /// MACDé¡¶åºèç¦»æ£æµï¼ä¸­æä¿¡å·ï¼
   static List<SignalItem> _detectMACDDivergence(
       List<HistoryKline> data, HistoryKline last, HistoryKline prev) {
     final signals = <SignalItem>[];
     if (data.length < 30) return signals;
 
-    // 寻找局部高点和低点
+    // å¯»æ¾å±é¨é«ç¹åä½ç¹
     final searchRange = data.sublist(data.length - 30);
     final highPeaks = _findLocalPeaks(searchRange, findHighs: true);
     final lowPeaks = _findLocalPeaks(searchRange, findHighs: false);
 
-    // 顶背离：股价创新高但DIF不创新高
+    // é¡¶èç¦»ï¼è¡ä»·åæ°é«ä½DIFä¸åæ°é«
     if (highPeaks.length >= 2) {
       final p1 = highPeaks[highPeaks.length - 2];
       final p2 = highPeaks[highPeaks.length - 1];
@@ -552,8 +591,8 @@ class SignalDetector {
         signals.add(SignalItem(
           type: 'sell',
           indicator: 'MACD',
-          signal: 'MACD顶背离',
-          description: '股价创新高但DIF未创新高，上涨动能衰竭',
+          signal: 'MACDé¡¶èç¦»',
+          description: 'è¡ä»·åæ°é«ä½DIFæªåæ°é«ï¼ä¸æ¶¨å¨è½è¡°ç«­',
           strength: 85,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,
@@ -563,7 +602,7 @@ class SignalDetector {
       }
     }
 
-    // 底背离：股价创新低但DIF不创新低
+    // åºèç¦»ï¼è¡ä»·åæ°ä½ä½DIFä¸åæ°ä½
     if (lowPeaks.length >= 2) {
       final p1 = lowPeaks[lowPeaks.length - 2];
       final p2 = lowPeaks[lowPeaks.length - 1];
@@ -572,8 +611,8 @@ class SignalDetector {
         signals.add(SignalItem(
           type: 'buy',
           indicator: 'MACD',
-          signal: 'MACD底背离',
-          description: '股价创新低但DIF未创新低，下跌动能减弱',
+          signal: 'MACDåºèç¦»',
+          description: 'è¡ä»·åæ°ä½ä½DIFæªåæ°ä½ï¼ä¸è·å¨è½åå¼±',
           strength: 85,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,
@@ -586,7 +625,7 @@ class SignalDetector {
     return signals;
   }
 
-  /// 寻找局部峰值
+  /// å¯»æ¾å±é¨å³°å¼
   static List<int> _findLocalPeaks(List<HistoryKline> data,
       {required bool findHighs, int minSeparation = 5}) {
     final peaks = <int>[];
@@ -614,16 +653,16 @@ class SignalDetector {
     return peaks;
   }
 
-  // 辅助方法：计算MA置信度
+  // è¾å©æ¹æ³ï¼è®¡ç®MAç½®ä¿¡åº¦
   static double _calculateMAConfidence(
       HistoryKline last, HistoryKline prev, List<HistoryKline> data) {
     double base = 0.75;
     if (last.close > last.ma10 && last.volume > last.volMa5 * 1.2)
-      base += 0.05; // 量价配合
+      base += 0.05; // éä»·éå
     return base.clamp(0.7, 0.9);
   }
 
-  /// 跳空缺口检测
+  /// è·³ç©ºç¼ºå£æ£æµ
   static List<SignalItem> _detectGapSignals(
       List<HistoryKline> data, HistoryKline last, HistoryKline prev) {
     final signals = <SignalItem>[];
@@ -632,14 +671,14 @@ class SignalDetector {
     final gapUpSize = (last.low - prev.high) / prev.high * 100;
     final gapDownSize = (prev.low - last.high) / prev.low * 100;
 
-    // 向上跳空（中缺口以上>2%才生成信号）
+    // åä¸è·³ç©ºï¼ä¸­ç¼ºå£ä»¥ä¸>2%æçæä¿¡å·ï¼
     if (gapUpSize > 2) {
-      final level = gapUpSize > 5 ? '大' : '中';
+      final level = gapUpSize > 5 ? 'å¤§' : 'ä¸­';
       signals.add(SignalItem(
         type: 'buy',
-        indicator: '缺口',
-        signal: '向上跳空突破',
-        description: '${level}缺口${gapUpSize.toStringAsFixed(1)}%，跳空高开突破，短线强势信号',
+        indicator: 'ç¼ºå£',
+        signal: 'åä¸è·³ç©ºçªç ´',
+        description: '${level}ç¼ºå£${gapUpSize.toStringAsFixed(1)}%ï¼è·³ç©ºé«å¼çªç ´ï¼ç­çº¿å¼ºå¿ä¿¡å·',
         strength: gapUpSize > 5 ? 85 : 75,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -648,15 +687,15 @@ class SignalDetector {
       ));
     }
 
-    // 向下跳空（中缺口以上>2%才生成信号）
+    // åä¸è·³ç©ºï¼ä¸­ç¼ºå£ä»¥ä¸>2%æçæä¿¡å·ï¼
     if (gapDownSize > 2) {
-      final level = gapDownSize > 5 ? '大' : '中';
+      final level = gapDownSize > 5 ? 'å¤§' : 'ä¸­';
       signals.add(SignalItem(
         type: 'sell',
-        indicator: '缺口',
-        signal: '向下跳空破位',
+        indicator: 'ç¼ºå£',
+        signal: 'åä¸è·³ç©ºç ´ä½',
         description:
-            '${level}缺口${gapDownSize.toStringAsFixed(1)}%，跳空低开破位，短线弱势信号',
+            '${level}ç¼ºå£${gapDownSize.toStringAsFixed(1)}%ï¼è·³ç©ºä½å¼ç ´ä½ï¼ç­çº¿å¼±å¿ä¿¡å·',
         strength: gapDownSize > 5 ? 85 : 75,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -668,7 +707,7 @@ class SignalDetector {
     return signals;
   }
 
-  /// K线形态识别
+  /// Kçº¿å½¢æè¯å«
   static List<SignalItem> _detectCandlestickPatterns(
       List<HistoryKline> data, HistoryKline last, HistoryKline prev) {
     final signals = <SignalItem>[];
@@ -685,7 +724,7 @@ class SignalDetector {
     final prevBullish = prev.close > prev.open;
     final prevBearish = prev.close < prev.open;
 
-    // 判断趋势（近5日涨跌）
+    // å¤æ­è¶å¿ï¼è¿5æ¥æ¶¨è·ï¼
     bool inDowntrend = false;
     bool inUptrend = false;
     if (data.length >= 6) {
@@ -698,16 +737,16 @@ class SignalDetector {
       }
     }
 
-    // 锤子线（底部反转）- 小实体、长下影线、下跌趋势中
+    // é¤å­çº¿ï¼åºé¨åè½¬ï¼- å°å®ä½ãé¿ä¸å½±çº¿ãä¸è·è¶å¿ä¸­
     if (bodyPct < 1.0 &&
         lowerShadow > body * 2 &&
         upperShadow < body * 0.5 &&
         inDowntrend) {
       signals.add(SignalItem(
         type: 'buy',
-        indicator: 'K线形态',
-        signal: '底部锤子线',
-        description: '小实体+长下影线，下跌趋势中出现，底部反转信号',
+        indicator: 'Kçº¿å½¢æ',
+        signal: 'åºé¨é¤å­çº¿',
+        description: 'å°å®ä½+é¿ä¸å½±çº¿ï¼ä¸è·è¶å¿ä¸­åºç°ï¼åºé¨åè½¬ä¿¡å·',
         strength: 70,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -716,16 +755,16 @@ class SignalDetector {
       ));
     }
 
-    // 吊颈线（顶部反转）- 小实体、长下影线、上涨趋势中
+    // åé¢çº¿ï¼é¡¶é¨åè½¬ï¼- å°å®ä½ãé¿ä¸å½±çº¿ãä¸æ¶¨è¶å¿ä¸­
     if (bodyPct < 1.0 &&
         lowerShadow > body * 2 &&
         upperShadow < body * 0.5 &&
         inUptrend) {
       signals.add(SignalItem(
         type: 'sell',
-        indicator: 'K线形态',
-        signal: '顶部吊颈线',
-        description: '小实体+长下影线，上涨趋势中出现，顶部反转信号',
+        indicator: 'Kçº¿å½¢æ',
+        signal: 'é¡¶é¨åé¢çº¿',
+        description: 'å°å®ä½+é¿ä¸å½±çº¿ï¼ä¸æ¶¨è¶å¿ä¸­åºç°ï¼é¡¶é¨åè½¬ä¿¡å·',
         strength: 70,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -734,14 +773,14 @@ class SignalDetector {
       ));
     }
 
-    // 乌云盖顶（顶部反转）- 前阳后阴、高开低走
+    // ä¹äºçé¡¶ï¼é¡¶é¨åè½¬ï¼- åé³åé´ãé«å¼ä½èµ°
     if (prevBullish && isBearish) {
       if (last.open > prev.high && last.close < (prev.open + prev.close) / 2) {
         signals.add(SignalItem(
           type: 'sell',
-          indicator: 'K线形态',
-          signal: '乌云盖顶',
-          description: '前日阳线后今日高开低走收阴，收盘低于前日实体中点，顶部反转信号',
+          indicator: 'Kçº¿å½¢æ',
+          signal: 'ä¹äºçé¡¶',
+          description: 'åæ¥é³çº¿åä»æ¥é«å¼ä½èµ°æ¶é´ï¼æ¶çä½äºåæ¥å®ä½ä¸­ç¹ï¼é¡¶é¨åè½¬ä¿¡å·',
           strength: 75,
           timestamp: last.date,
           duration: SignalDuration.shortTerm,
@@ -751,14 +790,14 @@ class SignalDetector {
       }
     }
 
-    // 刺透形态（底部反转）- 前阴后阳、低开高走
+    // åºéå½¢æï¼åºé¨åè½¬ï¼- åé´åé³ãä½å¼é«èµ°
     if (prevBearish && isBullish) {
       if (last.open < prev.low && last.close > (prev.open + prev.close) / 2) {
         signals.add(SignalItem(
           type: 'buy',
-          indicator: 'K线形态',
-          signal: '刺透形态',
-          description: '前日阴线后今日低开高走收阳，收盘高于前日实体中点，底部反转信号',
+          indicator: 'Kçº¿å½¢æ',
+          signal: 'åºéå½¢æ',
+          description: 'åæ¥é´çº¿åä»æ¥ä½å¼é«èµ°æ¶é³ï¼æ¶çé«äºåæ¥å®ä½ä¸­ç¹ï¼åºé¨åè½¬ä¿¡å·',
           strength: 75,
           timestamp: last.date,
           duration: SignalDuration.shortTerm,
@@ -768,9 +807,9 @@ class SignalDetector {
       }
     }
 
-    // ──�� 多日形态识别（3-5日） ──────────────────────────────
+    // ââï¿½ï¿½ å¤æ¥å½¢æè¯å«ï¼3-5æ¥ï¼ ââââââââââââââââââââââââââââââ
 
-    // 阳包阴（看涨吞没）- 当前阳线实体完全吞没前阴线实体
+    // é³åé´ï¼çæ¶¨åæ²¡ï¼- å½åé³çº¿å®ä½å®å¨åæ²¡åé´çº¿å®ä½
     if (isBullish && prevBearish) {
       final prevBody = prev.open - prev.close;
       if (body > prevBody &&
@@ -779,9 +818,9 @@ class SignalDetector {
         final strength = body > prevBody * 1.5 ? 80 : 75;
         signals.add(SignalItem(
           type: 'buy',
-          indicator: 'K线形态',
-          signal: '阳包阴',
-          description: '当前阳线实体完全吞没前日阴线实体，看涨反转信号',
+          indicator: 'Kçº¿å½¢æ',
+          signal: 'é³åé´',
+          description: 'å½åé³çº¿å®ä½å®å¨åæ²¡åæ¥é´çº¿å®ä½ï¼çæ¶¨åè½¬ä¿¡å·',
           strength: strength,
           timestamp: last.date,
           duration: SignalDuration.shortTerm,
@@ -791,7 +830,7 @@ class SignalDetector {
       }
     }
 
-    // 阴包阳（看跌吞没）- 当前阴线实体完全吞没前阳线实体
+    // é´åé³ï¼çè·åæ²¡ï¼- å½åé´çº¿å®ä½å®å¨åæ²¡åé³çº¿å®ä½
     if (isBearish && prevBullish) {
       final prevBody = prev.close - prev.open;
       if (body > prevBody &&
@@ -800,9 +839,9 @@ class SignalDetector {
         final strength = body > prevBody * 1.5 ? 80 : 75;
         signals.add(SignalItem(
           type: 'sell',
-          indicator: 'K线形态',
-          signal: '阴包阳',
-          description: '当前阴线实体完全吞没前日阳线实体，看跌反转信号',
+          indicator: 'Kçº¿å½¢æ',
+          signal: 'é´åé³',
+          description: 'å½åé´çº¿å®ä½å®å¨åæ²¡åæ¥é³çº¿å®ä½ï¼çè·åè½¬ä¿¡å·',
           strength: strength,
           timestamp: last.date,
           duration: SignalDuration.shortTerm,
@@ -812,18 +851,18 @@ class SignalDetector {
       }
     }
 
-    // 十字星（多空均衡）- 实体极小，上下影线对称
+    // åå­æï¼å¤ç©ºåè¡¡ï¼- å®ä½æå°ï¼ä¸ä¸å½±çº¿å¯¹ç§°
     if (bodyPct < 0.3) {
       final shadowRatio = upperShadow > 0 ? lowerShadow / upperShadow : 999;
       final isDoji = shadowRatio > 0.7 && shadowRatio < 1.4;
       if (isDoji) {
-        // 高位十字星 = 见顶信号
+        // é«ä½åå­æ = è§é¡¶ä¿¡å·
         if (inUptrend && last.close > last.ma10) {
           signals.add(SignalItem(
             type: 'sell',
-            indicator: 'K线形态',
-            signal: '高位十字星',
-            description: '上涨趋势中出现十字星，多空分歧加大，警惕回调',
+            indicator: 'Kçº¿å½¢æ',
+            signal: 'é«ä½åå­æ',
+            description: 'ä¸æ¶¨è¶å¿ä¸­åºç°åå­æï¼å¤ç©ºåæ­§å å¤§ï¼è­¦æåè°',
             strength: 65,
             timestamp: last.date,
             duration: SignalDuration.shortTerm,
@@ -831,13 +870,13 @@ class SignalDetector {
             signalCount: 1,
           ));
         }
-        // 低位十字星 = 见底信号
+        // ä½ä½åå­æ = è§åºä¿¡å·
         if (inDowntrend && last.close < last.ma10) {
           signals.add(SignalItem(
             type: 'buy',
-            indicator: 'K线形态',
-            signal: '低位十字星',
-            description: '下跌趋势中出现十字星，卖盘衰竭，关注反弹',
+            indicator: 'Kçº¿å½¢æ',
+            signal: 'ä½ä½åå­æ',
+            description: 'ä¸è·è¶å¿ä¸­åºç°åå­æï¼åçè¡°ç«­ï¼å³æ³¨åå¼¹',
             strength: 65,
             timestamp: last.date,
             duration: SignalDuration.shortTerm,
@@ -848,12 +887,12 @@ class SignalDetector {
       }
     }
 
-    // 三阳开泰（Three White Soldiers）- 连续3日阳线上涨
-    // 启明星（Morning Star）和黄昏星（Evening Star）- 3日反转形态
+    // ä¸é³å¼æ³°ï¼Three White Soldiersï¼- è¿ç»­3æ¥é³çº¿ä¸æ¶¨
+    // å¯ææï¼Morning Starï¼åé»ææï¼Evening Starï¼- 3æ¥åè½¬å½¢æ
     if (data.length >= 3) {
-      final pp = data[data.length - 3]; // 前前日
+      final pp = data[data.length - 3]; // ååæ¥
 
-      // 三阳开泰：连续3日阳线、实体递增、收盘创近期新高
+      // ä¸é³å¼æ³°ï¼è¿ç»­3æ¥é³çº¿ãå®ä½éå¢ãæ¶çåè¿ææ°é«
       if (isBullish && prevBullish && pp.close > pp.open) {
         final ppBody = pp.close - pp.open;
         final prevBody = prev.close - prev.open;
@@ -861,14 +900,14 @@ class SignalDetector {
             body > prevBody * 0.5 &&
             last.close > prev.close &&
             prev.close > pp.close) {
-          // 确认趋势向上
+          // ç¡®è®¤è¶å¿åä¸
           final inTrend =
               last.ma5 > 0 && last.close > last.ma5 && last.ma5 > last.ma10;
           signals.add(SignalItem(
             type: 'buy',
-            indicator: 'K线形态',
-            signal: '三阳开泰',
-            description: '连续3日阳线递增上涨，趋势强势${inTrend ? '' : "，但均线需确认"}',
+            indicator: 'Kçº¿å½¢æ',
+            signal: 'ä¸é³å¼æ³°',
+            description: 'è¿ç»­3æ¥é³çº¿éå¢ä¸æ¶¨ï¼è¶å¿å¼ºå¿${inTrend ? '' : "ï¼ä½åçº¿éç¡®è®¤"}',
             strength: inTrend ? 85 : 75,
             timestamp: last.date,
             duration: SignalDuration.shortTerm,
@@ -878,7 +917,7 @@ class SignalDetector {
         }
       }
 
-      // 三只乌鸦：连续3日阴线下跌、收盘创近期新低
+      // ä¸åªä¹é¸¦ï¼è¿ç»­3æ¥é´çº¿ä¸è·ãæ¶çåè¿ææ°ä½
       if (isBearish && prevBearish && pp.close < pp.open) {
         final ppBody = pp.open - pp.close;
         final prevBody = prev.open - prev.close;
@@ -888,9 +927,9 @@ class SignalDetector {
             prev.close < pp.close) {
           signals.add(SignalItem(
             type: 'sell',
-            indicator: 'K线形态',
-            signal: '三只乌鸦',
-            description: '连续3日阴线递增下跌，趋势弱势',
+            indicator: 'Kçº¿å½¢æ',
+            signal: 'ä¸åªä¹é¸¦',
+            description: 'è¿ç»­3æ¥é´çº¿éå¢ä¸è·ï¼è¶å¿å¼±å¿',
             strength: 80,
             timestamp: last.date,
             duration: SignalDuration.shortTerm,
@@ -900,7 +939,7 @@ class SignalDetector {
         }
       }
 
-      // 启明星（Morning Star）- 阴线 + 小实体(星线) + 阳线突破阴线实体中点
+      // å¯ææï¼Morning Starï¼- é´çº¿ + å°å®ä½(æçº¿) + é³çº¿çªç ´é´çº¿å®ä½ä¸­ç¹
       if (pp.close < pp.open && isBullish) {
         final ppBody = pp.open - pp.close;
         final prevBodySmall = (prev.close - prev.open).abs() / prev.open * 100;
@@ -909,9 +948,9 @@ class SignalDetector {
             last.close > (pp.open + pp.close) / 2) {
           signals.add(SignalItem(
             type: 'buy',
-            indicator: 'K线形态',
-            signal: '启明星',
-            description: '3日反转形态：阴→星→阳，阳线收盘突破阴线实体中点，底部反转信号',
+            indicator: 'Kçº¿å½¢æ',
+            signal: 'å¯ææ',
+            description: '3æ¥åè½¬å½¢æï¼é´âæâé³ï¼é³çº¿æ¶ççªç ´é´çº¿å®ä½ä¸­ç¹ï¼åºé¨åè½¬ä¿¡å·',
             strength: 80,
             timestamp: last.date,
             duration: SignalDuration.shortTerm,
@@ -921,7 +960,7 @@ class SignalDetector {
         }
       }
 
-      // 黄昏星（Evening Star）- 阳线 + 小实体(星线) + 阴线跌入阳线实体
+      // é»ææï¼Evening Starï¼- é³çº¿ + å°å®ä½(æçº¿) + é´çº¿è·å¥é³çº¿å®ä½
       if (pp.close > pp.open && isBearish) {
         final ppBody = pp.close - pp.open;
         final prevBodySmall = (prev.close - prev.open).abs() / prev.open * 100;
@@ -930,9 +969,9 @@ class SignalDetector {
             last.close < (pp.open + pp.close) / 2) {
           signals.add(SignalItem(
             type: 'sell',
-            indicator: 'K线形态',
-            signal: '黄昏星',
-            description: '3日反转形态：阳→星→阴，阴线收盘跌破阳线实体中点，顶部反转信号',
+            indicator: 'Kçº¿å½¢æ',
+            signal: 'é»ææ',
+            description: '3æ¥åè½¬å½¢æï¼é³âæâé´ï¼é´çº¿æ¶çè·ç ´é³çº¿å®ä½ä¸­ç¹ï¼é¡¶é¨åè½¬ä¿¡å·',
             strength: 80,
             timestamp: last.date,
             duration: SignalDuration.shortTerm,
@@ -946,7 +985,7 @@ class SignalDetector {
     return signals;
   }
 
-  /// 成交量趋势分析
+  /// æäº¤éè¶å¿åæ
   static List<SignalItem> _detectVolumeTrends(
       List<HistoryKline> data, HistoryKline last) {
     final signals = <SignalItem>[];
@@ -959,9 +998,9 @@ class SignalDetector {
     final priceChange10d =
         (last.close / data[data.length - 11].close - 1) * 100;
 
-    // 吸筹形态：10日下跌>5% + 前期量能递减(排除近3日) + 近3日企稳放量
+    // å¸ç­¹å½¢æï¼10æ¥ä¸è·>5% + åæéè½éå(æé¤è¿3æ¥) + è¿3æ¥ä¼ç¨³æ¾é
     if (priceChange10d < -5) {
-      // 检查第-4到-7天量能递减（排除近3天的企稳放量阶段）
+      // æ£æ¥ç¬¬-4å°-7å¤©éè½éåï¼æé¤è¿3å¤©çä¼ç¨³æ¾éé¶æ®µï¼
       bool volDeclining = recent10.length >= 7;
       for (int i = 4; i < 8 && i < recent10.length - 1; i++) {
         if (recent10[recent10.length - i].volume >=
@@ -978,10 +1017,10 @@ class SignalDetector {
       if (volDeclining && avgVol3 > avgVol5 * 1.2 && priceStable) {
         signals.add(SignalItem(
           type: 'buy',
-          indicator: '量价趋势',
-          signal: '主力吸筹迹象',
+          indicator: 'éä»·è¶å¿',
+          signal: 'ä¸»åå¸ç­¹è¿¹è±¡',
           description:
-              '下跌${priceChange10d.toStringAsFixed(1)}%后量能萎缩递减，近3日企稳且量能放大，主力可能在吸筹',
+              'ä¸è·${priceChange10d.toStringAsFixed(1)}%åéè½èç¼©éåï¼è¿3æ¥ä¼ç¨³ä¸éè½æ¾å¤§ï¼ä¸»åå¯è½å¨å¸ç­¹',
           strength: 70,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,
@@ -991,7 +1030,7 @@ class SignalDetector {
       }
     }
 
-    // 派发形态：10日上涨>5% + 量能递减 + 近3日缩量
+    // æ´¾åå½¢æï¼10æ¥ä¸æ¶¨>5% + éè½éå + è¿3æ¥ç¼©é
     if (priceChange10d > 5) {
       bool volDeclining = true;
       for (int i = 1; i < 5; i++) {
@@ -1005,10 +1044,10 @@ class SignalDetector {
       if (volDeclining && avgVol3 < last.volMa5 * 0.7) {
         signals.add(SignalItem(
           type: 'sell',
-          indicator: '量价趋势',
-          signal: '主力派发迹象',
+          indicator: 'éä»·è¶å¿',
+          signal: 'ä¸»åæ´¾åè¿¹è±¡',
           description:
-              '上涨${priceChange10d.toStringAsFixed(1)}%但量能持续萎缩，近3日缩量至均量70%以下，主力可能在派发',
+              'ä¸æ¶¨${priceChange10d.toStringAsFixed(1)}%ä½éè½æç»­èç¼©ï¼è¿3æ¥ç¼©éè³åé70%ä»¥ä¸ï¼ä¸»åå¯è½å¨æ´¾å',
           strength: 70,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,
@@ -1018,7 +1057,7 @@ class SignalDetector {
       }
     }
 
-    // 地量见底：成交量创近20日最低 + 价格在MA20附近或下方
+    // å°éè§åºï¼æäº¤éåè¿20æ¥æä½ + ä»·æ ¼å¨MA20éè¿æä¸æ¹
     final minVol20 = data
         .sublist(data.length - 20)
         .map((d) => d.volume)
@@ -1028,10 +1067,10 @@ class SignalDetector {
         last.close <= last.ma20 * 1.02) {
       signals.add(SignalItem(
         type: 'buy',
-        indicator: '量价趋势',
-        signal: '地量见底',
+        indicator: 'éä»·è¶å¿',
+        signal: 'å°éè§åº',
         description:
-            '成交量创近20日新低，价格在MA20(${last.ma20.toStringAsFixed(2)})附近，卖盘枯竭',
+            'æäº¤éåè¿20æ¥æ°ä½ï¼ä»·æ ¼å¨MA20(${last.ma20.toStringAsFixed(2)})éè¿ï¼åçæ¯ç«­',
         strength: 65,
         timestamp: last.date,
         duration: SignalDuration.mediumTerm,
@@ -1071,8 +1110,8 @@ class SignalDetector {
       signals.add(SignalItem(
         type: 'buy',
         indicator: 'MACD',
-        signal: 'MACD金叉预警',
-        description: 'DIF快速接近DEA，即将形成金叉，提前关注',
+        signal: 'MACDéåé¢è­¦',
+        description: 'DIFå¿«éæ¥è¿DEAï¼å³å°å½¢æéåï¼æåå³æ³¨',
         strength: 55,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -1083,8 +1122,8 @@ class SignalDetector {
       signals.add(SignalItem(
         type: 'sell',
         indicator: 'MACD',
-        signal: 'MACD死叉预警',
-        description: 'DIF快速接近DEA，即将形成死叉，提前警惕',
+        signal: 'MACDæ­»åé¢è­¦',
+        description: 'DIFå¿«éæ¥è¿DEAï¼å³å°å½¢ææ­»åï¼æåè­¦æ',
         strength: 55,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -1108,8 +1147,8 @@ class SignalDetector {
       signals.add(SignalItem(
         type: 'buy',
         indicator: 'KDJ',
-        signal: 'KDJ金叉预警',
-        description: 'K线快速接近D线，即将形成金叉，提前关注',
+        signal: 'KDJéåé¢è­¦',
+        description: 'Kçº¿å¿«éæ¥è¿Dçº¿ï¼å³å°å½¢æéåï¼æåå³æ³¨',
         strength: 50,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -1120,8 +1159,8 @@ class SignalDetector {
       signals.add(SignalItem(
         type: 'sell',
         indicator: 'KDJ',
-        signal: 'KDJ死叉预警',
-        description: 'K线快速接近D线，即将形成死叉，提前警惕',
+        signal: 'KDJæ­»åé¢è­¦',
+        description: 'Kçº¿å¿«éæ¥è¿Dçº¿ï¼å³å°å½¢ææ­»åï¼æåè­¦æ',
         strength: 50,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
@@ -1150,8 +1189,8 @@ class SignalDetector {
         signals.add(SignalItem(
           type: 'sell',
           indicator: 'MACD',
-          signal: 'MACD顶背离预警',
-          description: '价格接近前高但MACD未创新高，上涨动能减弱',
+          signal: 'MACDé¡¶èç¦»é¢è­¦',
+          description: 'ä»·æ ¼æ¥è¿åé«ä½MACDæªåæ°é«ï¼ä¸æ¶¨å¨è½åå¼±',
           strength: 55,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,
@@ -1169,8 +1208,8 @@ class SignalDetector {
         signals.add(SignalItem(
           type: 'buy',
           indicator: 'MACD',
-          signal: 'MACD底背离预警',
-          description: '价格接近前低但MACD未创新低，下跌动能减弱',
+          signal: 'MACDåºèç¦»é¢è­¦',
+          description: 'ä»·æ ¼æ¥è¿åä½ä½MACDæªåæ°ä½ï¼ä¸è·å¨è½åå¼±',
           strength: 55,
           timestamp: last.date,
           duration: SignalDuration.mediumTerm,

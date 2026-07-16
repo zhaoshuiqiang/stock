@@ -3,29 +3,29 @@ import 'package:flutter/foundation.dart';
 import '../models/stock_models.dart';
 import 'indicators.dart';
 
-// ═══════════════════════════════════════════════════════════════════
-// 回测配置
-// ═══════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// åæµéç½®
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-/// 回测配置 — 控制成本模型、涨跌停规则、数据校验开关
+/// åæµéç½® â æ§å¶ææ¬æ¨¡åãæ¶¨è·åè§åãæ°æ®æ ¡éªå¼å³
 class BacktestConfig {
-  /// 佣金费率（默认万2.5，双向）
+  /// ä½£éè´¹çï¼é»è®¤ä¸2.5ï¼ååï¼
   final double commissionRate;
-  /// 印花税费率（默认千1，仅卖出）
+  /// å°è±ç¨è´¹çï¼é»è®¤å1ï¼ä»ååºï¼
   final double stampTaxRate;
-  /// 过户费率（默认万分之0.2，双向）
+  /// è¿æ·è´¹çï¼é»è®¤ä¸åä¹0.2ï¼ååï¼
   final double transferRate;
-  /// 滑点估算（默认0.1%）
+  /// æ»ç¹ä¼°ç®ï¼é»è®¤0.1%ï¼
   final double slippageRate;
-  /// 涨跌停幅度（默认10% 主板）
+  /// æ¶¨è·åå¹åº¦ï¼é»è®¤10% ä¸»æ¿ï¼
   final double limitPct;
-  /// 是否扣除交易成本
+  /// æ¯å¦æ£é¤äº¤æææ¬
   final bool deductCost;
-  /// 是否跳过涨跌停不可执行的交易
+  /// æ¯å¦è·³è¿æ¶¨è·åä¸å¯æ§è¡çäº¤æ
   final bool skipLimitTrade;
-  /// 是否跳过脏数据（停牌/一字板）
+  /// æ¯å¦è·³è¿èæ°æ®ï¼åç/ä¸å­æ¿ï¼
   final bool skipDirtyData;
-  /// 最小佣金（元），低于此按此收取
+  /// æå°ä½£éï¼åï¼ï¼ä½äºæ­¤ææ­¤æ¶å
   final double minCommission;
 
   const BacktestConfig({
@@ -40,69 +40,69 @@ class BacktestConfig {
     this.minCommission = 5.0,
   });
 
-  /// A股主板默认配置（±10%）
+  /// Aè¡ä¸»æ¿é»è®¤éç½®ï¼Â±10%ï¼
   static const aStock = BacktestConfig();
 
-  /// 科创/创业板（±20%）
+  /// ç§å/åä¸æ¿ï¼Â±20%ï¼
   static const chiNext = BacktestConfig(limitPct: 0.20);
 
-  /// 旧版兼容模式（无成本、无限制）
+  /// æ§çå¼å®¹æ¨¡å¼ï¼æ ææ¬ãæ éå¶ï¼
   static const legacy = BacktestConfig(
     deductCost: false,
     skipLimitTrade: false,
     skipDirtyData: false,
   );
 
-  /// 根据股票代码自动推断涨跌停幅度
+  /// æ ¹æ®è¡ç¥¨ä»£ç èªå¨æ¨æ­æ¶¨è·åå¹åº¦
   static double inferLimitPct(String? stockCode) {
     if (stockCode == null) return 0.10;
     if (stockCode.startsWith('688') || stockCode.startsWith('300')) return 0.20;
-    if (stockCode.startsWith('8') || stockCode.startsWith('4')) return 0.30; // 北交所
-    return 0.10; // 主板
+    if (stockCode.startsWith('8') || stockCode.startsWith('4')) return 0.30; // åäº¤æ
+    return 0.10; // ä¸»æ¿
   }
 
   factory BacktestConfig.forCode(String? stockCode) {
     return BacktestConfig(limitPct: inferLimitPct(stockCode));
   }
 
-  /// 单边买入成本率
+  /// åè¾¹ä¹°å¥ææ¬ç
   double get buyCostRate => commissionRate + transferRate + slippageRate;
-  /// 单边卖出成本率（含印花税）
+  /// åè¾¹ååºææ¬çï¼å«å°è±ç¨ï¼
   double get sellCostRate => commissionRate + stampTaxRate + transferRate + slippageRate;
-  /// 往返总成本率
+  /// å¾è¿æ»ææ¬ç
   double get roundTripCostRate => buyCostRate + sellCostRate;
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// K线数据校验工具
-// ═══════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// Kçº¿æ°æ®æ ¡éªå·¥å·
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 class KlineValidator {
-  /// 涨跌停价格（基于前日收盘价）
+  /// æ¶¨è·åä»·æ ¼ï¼åºäºåæ¥æ¶çä»·ï¼
   static double limitUpPrice(double prevClose, double limitPct) => prevClose * (1 + limitPct);
   static double limitDownPrice(double prevClose, double limitPct) => prevClose * (1 - limitPct);
 
-  /// 是否为涨停日 — 收盘价触及涨停价，买不进
+  /// æ¯å¦ä¸ºæ¶¨åæ¥ â æ¶çä»·è§¦åæ¶¨åä»·ï¼ä¹°ä¸è¿
   static bool isLimitUp(HistoryKline kline, HistoryKline prev, double limitPct) {
     final upPrice = limitUpPrice(prev.close, limitPct);
-    // 收盘价/最高价接近涨停价即为涨停（容忍千分一误差）
+    // æ¶çä»·/æé«ä»·æ¥è¿æ¶¨åä»·å³ä¸ºæ¶¨åï¼å®¹å¿ååä¸è¯¯å·®ï¼
     return kline.close >= upPrice * 0.999 || kline.high >= upPrice * 0.999;
   }
 
-  /// 是否为跌停日 — 收[盘价触及跌停价，卖不出
+  /// æ¯å¦ä¸ºè·åæ¥ â æ¶[çä»·è§¦åè·åä»·ï¼åä¸åº
   static bool isLimitDown(HistoryKline kline, HistoryKline prev, double limitPct) {
     final downPrice = limitDownPrice(prev.close, limitPct);
     return kline.close <= downPrice * 1.001 || kline.low <= downPrice * 1.001;
   }
 
-  /// 开盘即封板 — 开盘价直接涨停/跌停，全天无法交易
+  /// å¼çå³å°æ¿ â å¼çä»·ç´æ¥æ¶¨å/è·åï¼å¨å¤©æ æ³äº¤æ
   static bool isOpenAtLimit(HistoryKline kline, HistoryKline prev, double limitPct) {
     final upPrice = limitUpPrice(prev.close, limitPct);
     final downPrice = limitDownPrice(prev.close, limitPct);
     return kline.open >= upPrice * 0.999 || kline.open <= downPrice * 1.001;
   }
 
-  /// 一字板 — open==high==low==close 且封板
+  /// ä¸å­æ¿ â open==high==low==close ä¸å°æ¿
   static bool isYiZiBan(HistoryKline kline, HistoryKline prev, double limitPct) {
     if (prev.close <= 0) return false;
     final isFlat = kline.open == kline.high &&
@@ -113,9 +113,9 @@ class KlineValidator {
     return chgPct.abs() >= limitPct - 0.005;
   }
 
-  /// 疑似停牌 — 连续无交易量的静止K线
+  /// çä¼¼åç â è¿ç»­æ äº¤æéçéæ­¢Kçº¿
   static bool isSuspension(HistoryKline kline, HistoryKline prev) {
-    // 成交量几乎为0 或 价格完全不变且成交量极低
+    // æäº¤éå ä¹ä¸º0 æ ä»·æ ¼å®å¨ä¸åä¸æäº¤éæä½
     if (kline.volume <= 0) return true;
     if (kline.volume < 100 &&
         kline.open == prev.close &&
@@ -127,11 +127,11 @@ class KlineValidator {
     return false;
   }
 
-  /// 是否为脏数据（停牌、一字板、异常跳变）
+  /// æ¯å¦ä¸ºèæ°æ®ï¼åçãä¸å­æ¿ãå¼å¸¸è·³åï¼
   static bool isDirty(HistoryKline kline, HistoryKline prev, double limitPct) {
     if (isSuspension(kline, prev)) return true;
     if (isYiZiBan(kline, prev, limitPct)) return true;
-    // 单日涨跌幅超过涨跌停限制（可能是数据错误或除权未复权）
+    // åæ¥æ¶¨è·å¹è¶è¿æ¶¨è·åéå¶ï¼å¯è½æ¯æ°æ®éè¯¯æé¤ææªå¤æï¼
     if (prev.close > 0 &&
         (kline.close - prev.close).abs() / prev.close > limitPct + 0.02) {
       return true;
@@ -139,10 +139,10 @@ class KlineValidator {
     return false;
   }
 
-  /// 检测数据是否经过前复权处理
-  /// 通过检查涨跌幅一致性来判断：原始数据的 changePct 应等于 (close-preClose)/preClose
+  /// æ£æµæ°æ®æ¯å¦ç»è¿åå¤æå¤ç
+  /// éè¿æ£æ¥æ¶¨è·å¹ä¸è´æ§æ¥å¤æ­ï¼åå§æ°æ®ç changePct åºç­äº (close-preClose)/preClose
   static bool checkForwardAdjusted(List<HistoryKline> data) {
-    if (data.length < 20) return true; // 数据太少，无法判断，假设已复权
+    if (data.length < 20) return true; // æ°æ®å¤ªå°ï¼æ æ³å¤æ­ï¼åè®¾å·²å¤æ
     final sampleSize = (data.length * 0.3).toInt().clamp(10, 50);
     int mismatchCount = 0;
     for (int i = data.length - sampleSize; i < data.length - 1; i++) {
@@ -151,30 +151,30 @@ class KlineValidator {
       if (yesterday.close <= 0) continue;
       final calcChgPct = (today.close - yesterday.close) / yesterday.close * 100;
       final diff = (calcChgPct - today.changePct).abs();
-      // 如果计算值和API返回值差异超过 1%，说明可能未复权
+      // å¦æè®¡ç®å¼åAPIè¿åå¼å·®å¼è¶è¿ 1%ï¼è¯´æå¯è½æªå¤æ
       if (diff > 1.0 && today.changePct.abs() < 10) {
         mismatchCount++;
       }
     }
-    // 超过 20% 的样本不一致 -> 大概率未复权
+    // è¶è¿ 20% çæ ·æ¬ä¸ä¸è´ -> å¤§æ¦çæªå¤æ
     return mismatchCount / sampleSize <= 0.2;
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// 回测校验元数据
-// ═══════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// åæµæ ¡éªåæ°æ®
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-/// 回测校验过程的元数据
+/// åæµæ ¡éªè¿ç¨çåæ°æ®
 class BacktestValidationMeta {
-  final bool lookAheadSafe;           // 前视偏差安全（T+1执行）
-  final bool limitSimulated;          // 涨跌停模拟已启用
-  final bool costDeducted;            // 交易成本已扣除
-  final bool forwardAdjusted;         // 数据确认前复权
-  final bool dirtySkipped;            // 脏数据已跳过
-  final int skippedSignals;           // 因校验跳过的信号数
-  final int skippedTrades;            // 因涨跌停跳过的交易数
-  final List<String> warnings;        // 警告信息
+  final bool lookAheadSafe;           // åè§åå·®å®å¨ï¼T+1æ§è¡ï¼
+  final bool limitSimulated;          // æ¶¨è·åæ¨¡æå·²å¯ç¨
+  final bool costDeducted;            // äº¤æææ¬å·²æ£é¤
+  final bool forwardAdjusted;         // æ°æ®ç¡®è®¤åå¤æ
+  final bool dirtySkipped;            // èæ°æ®å·²è·³è¿
+  final int skippedSignals;           // å æ ¡éªè·³è¿çä¿¡å·æ°
+  final int skippedTrades;            // å æ¶¨è·åè·³è¿çäº¤ææ°
+  final List<String> warnings;        // è­¦åä¿¡æ¯
 
   BacktestValidationMeta({
     this.lookAheadSafe = false,
@@ -210,11 +210,11 @@ class BacktestValidationMeta {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// 回测结果
-// ═══════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// åæµç»æ
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-/// 回测结果
+/// åæµç»æ
 class BacktestResult {
   final int totalSignals;
   final int winningTrades;
@@ -226,11 +226,11 @@ class BacktestResult {
   final double maxDrawdown;
   final double totalReturn;
   final List<double> tradeReturns;
-  /// 新增：校验元数据
+  /// æ°å¢ï¼æ ¡éªåæ°æ®
   final BacktestValidationMeta? validationMeta;
-  /// Sharpe 比率（年化，基于逐笔交易收益率）
+  /// Sharpe æ¯çï¼å¹´åï¼åºäºéç¬äº¤ææ¶ççï¼
   final double? sharpeRatio;
-  /// Calmar 比率（年化收益率 / 最大回撤）
+  /// Calmar æ¯çï¼å¹´åæ¶çç / æå¤§åæ¤ï¼
   final double? calmarRatio;
 
   BacktestResult({
@@ -284,17 +284,17 @@ class BacktestResult {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// Walk-Forward 分析结果
-// ═══════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// Walk-Forward åæç»æ
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 class WalkForwardResult {
   final int totalWindows;
   final int passedWindows;
   final double inSampleAvgReturn;
   final double outOfSampleAvgReturn;
-  final double windowStdDev;          // 各窗口OOS收益的标准差 (pp)
-  final List<double> windowReturns;   // 各窗口OOS收益率
+  final double windowStdDev;          // åçªå£OOSæ¶ççæ åå·® (pp)
+  final List<double> windowReturns;   // åçªå£OOSæ¶çç
   final bool isOverfit;
   final String verdict;
 
@@ -310,44 +310,44 @@ class WalkForwardResult {
   });
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// 回测引擎
-// ═══════════════════════════════════════════════════════════════════
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// åæµå¼æ
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 class BacktestEngine {
-  /// 全局默认配置（可通过 setConfig 修改）
+  /// å¨å±é»è®¤éç½®ï¼å¯éè¿ setConfig ä¿®æ¹ï¼
   static BacktestConfig config = BacktestConfig.aStock;
 
-  // ═══════════════════════════════════════════════════════════
-  // 配置
-  // �══════════════════════════════════════════════════════════
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // éç½®
+  // ï¿½ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
   static void setConfig(BacktestConfig cfg) {
     config = cfg;
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 通用回测执行器 — 消除 6 个策略的重复代码
-  // ═══════════════════════════════════════════════════════════
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // éç¨åæµæ§è¡å¨ â æ¶é¤ 6 ä¸ªç­ç¥çéå¤ä»£ç 
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   //
-  // 核心修正：
-  //   P0-1 前视偏差：T日信号 → T+1日 open 价执行
-  //   P0-2 涨跌停：买入跳过涨停日，卖出跳过跌停日
-  //   P1-3 交易成本：扣除佣金 + 印花税 + 滑点
-  //   P1-5 脏数据：跳过停牌/一字板
+  // æ ¸å¿ä¿®æ­£ï¼
+  //   P0-1 åè§åå·®ï¼Tæ¥ä¿¡å· â T+1æ¥ open ä»·æ§è¡
+  //   P0-2 æ¶¨è·åï¼ä¹°å¥è·³è¿æ¶¨åæ¥ï¼ååºè·³è¿è·åæ¥
+  //   P1-3 äº¤æææ¬ï¼æ£é¤ä½£é + å°è±ç¨ + æ»ç¹
+  //   P1-5 èæ°æ®ï¼è·³è¿åç/ä¸å­æ¿
   //
-  // 已知局限：
-  //   - 脏数据跳过仅阻止当日交易，但已预计算的指标（MA/MACD等）
-  //     仍受脏数据日价格影响，可能污染后续日的信号判断。
-  //     这是预计算架构的固有取舍——如需完全隔离需在循环内重算指标。
+  // å·²ç¥å±éï¼
+  //   - èæ°æ®è·³è¿ä»é»æ­¢å½æ¥äº¤æï¼ä½å·²é¢è®¡ç®çææ ï¼MA/MACDç­ï¼
+  //     ä»åèæ°æ®æ¥ä»·æ ¼å½±åï¼å¯è½æ±¡æåç»­æ¥çä¿¡å·å¤æ­ã
+  //     è¿æ¯é¢è®¡ç®æ¶æçåºæåèââå¦éå®å¨éç¦»éå¨å¾ªç¯åéç®ææ ã
   //
-  // 参数：
-  //   [data]  K线数据
-  //   [minBars] 最小K线数要求
-  //   [prepare] 指标计算函数
-  //   [isEntry] 入场信号判断 (prev, curr) -> bool
-  //   [isExit]  出场信号判断 (prev, curr) -> bool
-  //   [atrMultiplier] ATR止损倍数，0 = 不启用ATR止损
+  // åæ°ï¼
+  //   [data]  Kçº¿æ°æ®
+  //   [minBars] æå°Kçº¿æ°è¦æ±
+  //   [prepare] ææ è®¡ç®å½æ°
+  //   [isEntry] å¥åºä¿¡å·å¤æ­ (prev, curr) -> bool
+  //   [isExit]  åºåºä¿¡å·å¤æ­ (prev, curr) -> bool
+  //   [atrMultiplier] ATRæ­¢æåæ°ï¼0 = ä¸å¯ç¨ATRæ­¢æ
   //
 
   static BacktestResult _runGenericBacktest({
@@ -365,60 +365,60 @@ class BacktestEngine {
 
     final tradeReturns = <double>[];
     double? buyPrice;
-    double peakCloseSinceEntry = 0; // P1-7: 持仓期间最高收盘价，用于追踪止损
+    double peakCloseSinceEntry = 0; // P1-7: æä»æé´æé«æ¶çä»·ï¼ç¨äºè¿½è¸ªæ­¢æ
     double peakEquity = 1.0;
     double currentEquity = 1.0;
     double maxDrawdown = 0;
     int skippedSignals = 0;
     int skippedTrades = 0;
 
-    // T+1 执行修正：遍历到 length-2，因为需要 i+1 (next day) 来执行
+    // T+1 æ§è¡ä¿®æ­£ï¼éåå° length-2ï¼å ä¸ºéè¦ i+1 (next day) æ¥æ§è¡
     for (int i = 1; i < calcData.length - 1; i++) {
       final prev = calcData[i - 1];
       final curr = calcData[i];
-      final next = calcData[i + 1]; // T+1 执行日
+      final next = calcData[i + 1]; // T+1 æ§è¡æ¥
 
-      // ---- 脏数据跳过 ----
+      // ---- èæ°æ®è·³è¿ ----
       if (config.skipDirtyData && KlineValidator.isDirty(curr, prev, config.limitPct)) {
         skippedSignals++;
         continue;
       }
 
-      // ---- 入场信号 ----
+      // ---- å¥åºä¿¡å· ----
       if (isEntry(prev, curr) && buyPrice == null) {
-        // 检查 T+1 执行日是否能买入（非涨停/非开盘即封板）
+        // æ£æ¥ T+1 æ§è¡æ¥æ¯å¦è½ä¹°å¥ï¼éæ¶¨å/éå¼çå³å°æ¿ï¼
         if (config.skipLimitTrade &&
             (KlineValidator.isLimitUp(next, curr, config.limitPct) ||
              KlineValidator.isOpenAtLimit(next, curr, config.limitPct))) {
           skippedTrades++;
-          continue; // 买入失败，跳过此信号
+          continue; // ä¹°å¥å¤±è´¥ï¼è·³è¿æ­¤ä¿¡å·
         }
-        buyPrice = next.open; // ← T+1 开盘价执行
-        peakCloseSinceEntry = next.open; // P1-7: 初始化持仓最高价
+        buyPrice = next.open; // â T+1 å¼çä»·æ§è¡
+        peakCloseSinceEntry = next.open; // P1-7: åå§åæä»æé«ä»·
         continue;
       }
 
-      // P1-8: 持仓时每根K线更新权益回撤（捕捉日内最大回撤）
+      // P1-8: æä»æ¶æ¯æ ¹Kçº¿æ´æ°æçåæ¤ï¼æææ¥åæå¤§åæ¤ï¼
       if (buyPrice != null) {
         if (curr.close > peakCloseSinceEntry) peakCloseSinceEntry = curr.close;
-        // 用当前收盘价计算浮盈权益，更新回撤
+        // ç¨å½åæ¶çä»·è®¡ç®æµ®çæçï¼æ´æ°åæ¤
         final unrealizedEquity = currentEquity * (1 + _safeReturnPct(buyPrice, curr.close));
         if (unrealizedEquity > peakEquity) peakEquity = unrealizedEquity;
         final floatingDd = (peakEquity - unrealizedEquity) / peakEquity;
         if (floatingDd > maxDrawdown) maxDrawdown = floatingDd;
       }
 
-      // ---- 出场信号（仅持仓时） ----
+      // ---- åºåºä¿¡å·ï¼ä»æä»æ¶ï¼ ----
       if (isExit(prev, curr) && buyPrice != null) {
-        // 检查 T+1 执行日是否能卖出（非跌停）
+        // æ£æ¥ T+1 æ§è¡æ¥æ¯å¦è½ååºï¼éè·åï¼
         if (config.skipLimitTrade &&
             KlineValidator.isLimitDown(next, curr, config.limitPct)) {
           skippedTrades++;
-          // 不出场，继续持有（等下一个可卖出日）
+          // ä¸åºåºï¼ç»§ç»­ææï¼ç­ä¸ä¸ä¸ªå¯ååºæ¥ï¼
           continue;
         }
-        // 内联平仓逻辑
-        final returnPct = _safeReturnPct(buyPrice, next.open); // ← T+1 开盘价执行
+        // åèå¹³ä»é»è¾
+        final returnPct = _safeReturnPct(buyPrice, next.open); // â T+1 å¼çä»·æ§è¡
         final netReturn = _applyCost(returnPct);
         tradeReturns.add(netReturn);
         currentEquity *= (1 + netReturn);
@@ -429,13 +429,13 @@ class BacktestEngine {
         continue;
       }
 
-      // ---- ATR 止损（持仓时） ----
-      // P1-7修复：追踪止损，锚定持仓期间最高收盘价而非固定buyPrice
-      // ATR扩大时止损上移（趋近peakClose），风险管理正确收紧
+      // ---- ATR æ­¢æï¼æä»æ¶ï¼ ----
+      // P1-7ä¿®å¤ï¼è¿½è¸ªæ­¢æï¼éå®æä»æé´æé«æ¶çä»·èéåºå®buyPrice
+      // ATRæ©å¤§æ¶æ­¢æä¸ç§»ï¼è¶è¿peakCloseï¼ï¼é£é©ç®¡çæ­£ç¡®æ¶ç´§
       if (buyPrice != null && atrMultiplier > 0 && curr.atr14 > 0) {
         final atrStop = peakCloseSinceEntry - curr.atr14 * atrMultiplier;
         if (curr.low <= atrStop) {
-          // 跌停日无法止损卖出
+          // è·åæ¥æ æ³æ­¢æååº
           if (config.skipLimitTrade &&
               KlineValidator.isLimitDown(curr, prev, config.limitPct)) {
             skippedTrades++;
@@ -455,7 +455,7 @@ class BacktestEngine {
       }
     }
 
-    // 仍有持仓 → 按最后一天收盘价平仓
+    // ä»ææä» â ææåä¸å¤©æ¶çä»·å¹³ä»
     if (buyPrice != null) {
       final last = calcData.last;
       final returnPct = _safeReturnPct(buyPrice, last.close);
@@ -469,13 +469,13 @@ class BacktestEngine {
 
     final result = _buildResult(tradeReturns, currentEquity, maxDrawdown);
 
-    // 计算风险指标（Sharpe / Calmar）
+    // è®¡ç®é£é©ææ ï¼Sharpe / Calmarï¼
     final (sharpe, _, calmar) = _calculateRiskMetrics(tradeReturns);
 
-    // 附加校验元数据
+    // éå æ ¡éªåæ°æ®
     final warnings = <String>[];
     if (!KlineValidator.checkForwardAdjusted(calcData)) {
-      warnings.add('数据可能未前复权，建议使用前复权K线数据');
+      warnings.add('æ°æ®å¯è½æªåå¤æï¼å»ºè®®ä½¿ç¨åå¤æKçº¿æ°æ®');
     }
 
     return BacktestResult(
@@ -504,11 +504,11 @@ class BacktestEngine {
     );
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 各策略方法（薄封装）
-  // ═══════════════════════════════════════════════════════════
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // åç­ç¥æ¹æ³ï¼èå°è£ï¼
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-  /// MACD金叉买入 / MACD死叉卖出
+  /// MACDéåä¹°å¥ / MACDæ­»åååº
   static BacktestResult backtestMACDCross(List<HistoryKline> data) {
     return _runGenericBacktest(
       data: data,
@@ -519,7 +519,7 @@ class BacktestEngine {
     );
   }
 
-  /// MA5上穿MA10 金叉策略
+  /// MA5ä¸ç©¿MA10 éåç­ç¥
   static BacktestResult backtestMACross(List<HistoryKline> data) {
     return _runGenericBacktest(
       data: data,
@@ -530,7 +530,7 @@ class BacktestEngine {
     );
   }
 
-  /// KDJ超卖金叉回测（KDJ<30区域K上穿D买入，死叉卖出/ATR止损）
+  /// KDJè¶åéååæµï¼KDJ<30åºåKä¸ç©¿Dä¹°å¥ï¼æ­»åååº/ATRæ­¢æï¼
   static BacktestResult backtestKDJOversoldCross(List<HistoryKline> data) {
     if (data.length < 30) return _emptyResult();
 
@@ -551,7 +551,7 @@ class BacktestEngine {
     );
   }
 
-  /// RSI超卖反弹回测（RSI6≤30反弹买入，RSI6<50卖出）
+  /// RSIè¶ååå¼¹åæµï¼RSI6â¤30åå¼¹ä¹°å¥ï¼RSI6<50ååºï¼
   static BacktestResult backtestRSIOversoldRecovery(List<HistoryKline> data) {
     return _runGenericBacktest(
       data: data,
@@ -566,7 +566,7 @@ class BacktestEngine {
     );
   }
 
-  /// 布林带下轨支撑回测（触及下轨反弹买入，回到中轨卖出）
+  /// å¸æå¸¦ä¸è½¨æ¯æåæµï¼è§¦åä¸è½¨åå¼¹ä¹°å¥ï¼åå°ä¸­è½¨ååºï¼
   static BacktestResult backtestBollSupport(List<HistoryKline> data) {
     return _runGenericBacktest(
       data: data,
@@ -581,7 +581,7 @@ class BacktestEngine {
     );
   }
 
-  /// 均线多头排列回测（MA5>MA10>MA20形成多头排列买入，MA5下破MA10卖出）
+  /// åçº¿å¤å¤´æååæµï¼MA5>MA10>MA20å½¢æå¤å¤´æåä¹°å¥ï¼MA5ä¸ç ´MA10ååºï¼
   static BacktestResult backtestMAMultiHead(List<HistoryKline> data) {
     return _runGenericBacktest(
       data: data,
@@ -600,56 +600,197 @@ class BacktestEngine {
     );
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 交易成本计算
-  // ═══════════════════════════════════════════════════════════
+  static BacktestResult backtestHammerReversal(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcRSI(d, [6]); return calcATR(r); },
+      isEntry: (p, c) {
+        final body = (c.close - c.open).abs();
+        final lowerShadow = c.open < c.close ? c.open - c.low : c.close - c.low;
+        final upperShadow = c.high - c.close > c.high - c.open ? c.high - c.close : c.high - c.open;
+        if (lowerShadow < body * 2 || upperShadow > body * 0.5) return false;
+        return true;
+      },
+      isExit: (p, c) => c.rsi6 > 65,
+      atrMultiplier: 1.5,
+    );
+  }
 
-  /// 扣除交易成本后的净收益率（乘法模型）
-  /// netReturn = (1 + grossReturn) × (1 - costRate) - 1
-  /// 比减法模型更精确：成本等比缩放收益，而非固定扣除
+  static BacktestResult backtestBullishEngulfing(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcRSI(d, [6]); return calcATR(r); },
+      isEntry: (p, c) => p.close < p.open && c.close > c.open && c.close > p.open && c.open < p.close,
+      isExit: (p, c) => c.rsi6 > 65,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestBearishEngulfing(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcRSI(d, [6]); return calcATR(r); },
+      isEntry: (p, c) => p.close > p.open && c.close < c.open && c.close < p.open && c.open > p.close,
+      isExit: (p, c) => c.rsi6 < 35,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestPiercingPattern(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30, prepare: (d) => calcATR(d),
+      isEntry: (p, c) {
+        if (p.close >= p.open || c.close <= c.open) return false;
+        return c.close > (p.open + p.close) / 2 && c.open < p.close;
+      },
+      isExit: (p, c) => c.close > p.high,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestDarkCloudCover(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30, prepare: (d) => calcATR(d),
+      isEntry: (p, c) {
+        if (p.close <= p.open || c.close >= c.open) return false;
+        return c.close < (p.open + p.close) / 2 && c.open > p.close;
+      },
+      isExit: (p, c) => c.close < p.low,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestMorningStar(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcRSI(d, [6]); return calcATR(r); },
+      isEntry: (p, c) => p.close < p.open && (p.close - p.open).abs() < p.close * 0.01 && c.close > c.open && c.close > p.open,
+      isExit: (p, c) => c.rsi6 > 60,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestEveningStar(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcRSI(d, [6]); return calcATR(r); },
+      isEntry: (p, c) => p.close > p.open && (p.close - p.open).abs() < p.close * 0.01 && c.close < c.open && c.close < p.open,
+      isExit: (p, c) => c.rsi6 < 40,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestDojiReversal(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30, prepare: (d) => calcATR(d),
+      isEntry: (p, c) {
+        final body = (c.close - c.open).abs();
+        final range = c.high - c.low;
+        return range > 0 && body / range < 0.1;
+      },
+      isExit: (p, c) => c.close > p.high || c.close < p.low,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestGapUpBuy(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30, prepare: (d) => calcATR(d),
+      isEntry: (p, c) => p.close > 0 && c.open > p.high && (c.open - p.close) / p.close > 0.02,
+      isExit: (p, c) => c.close < p.low,
+      atrMultiplier: 1.0,
+    );
+  }
+
+  static BacktestResult backtestGapDownFill(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30, prepare: (d) => calcATR(d),
+      isEntry: (p, c) => p.close > 0 && c.open < p.low && (p.close - c.open) / p.close > 0.02,
+      isExit: (p, c) => c.close > p.low,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestWROversold(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcWR(d); return calcATR(r); },
+      isEntry: (p, c) => (p.wr14 ?? 0) > 80 && (c.wr14 ?? 0) < (p.wr14 ?? 0),
+      isExit: (p, c) => (c.wr14 ?? 0) < 20,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestCCIOversold(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcCCI(d); return calcATR(r); },
+      isEntry: (p, c) => (p.cci14 ?? 0) < -100 && (c.cci14 ?? 0) > (p.cci14 ?? 0),
+      isExit: (p, c) => (c.cci14 ?? 0) > 100,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestCCIBreakout(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcCCI(d); return calcATR(r); },
+      isEntry: (p, c) => (p.cci14 ?? 0) < 0 && (c.cci14 ?? 0) > 100,
+      isExit: (p, c) => (c.cci14 ?? 0) < 0,
+      atrMultiplier: 1.5,
+    );
+  }
+
+// âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // äº¤æææ¬è®¡ç®
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+
+  /// æ£é¤äº¤æææ¬åçåæ¶ççï¼ä¹æ³æ¨¡åï¼
+  /// netReturn = (1 + grossReturn) Ã (1 - costRate) - 1
+  /// æ¯åæ³æ¨¡åæ´ç²¾ç¡®ï¼ææ¬ç­æ¯ç¼©æ¾æ¶çï¼èéåºå®æ£é¤
   static double _applyCost(double grossReturn) {
     if (!config.deductCost) return grossReturn;
     return (1 + grossReturn) * (1 - config.roundTripCostRate) - 1;
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 综合回测与策略评估
-  // ═══════════════════════════════════════════════════════════
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // ç»¼ååæµä¸ç­ç¥è¯ä¼°
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-  /// 全策略回测
+  /// å¨ç­ç¥åæµ
   static Map<String, BacktestResult> megaBacktest(List<HistoryKline> data) {
     if (data.length < 60) return {};
 
     final results = <String, BacktestResult>{};
-    try { results['MACD交叉'] = backtestMACDCross(data); } catch (e) { debugPrint('[回测] MACD交叉策略失败: $e'); }
-    try { results['MA金叉'] = backtestMACross(data); } catch (e) { debugPrint('[回测] MA金叉策略失败: $e'); }
-    try { results['KDJ超卖'] = backtestKDJOversoldCross(data); } catch (e) { debugPrint('[回测] KDJ超卖策略失败: $e'); }
-    try { results['RSI超卖'] = backtestRSIOversoldRecovery(data); } catch (e) { debugPrint('[回测] RSI超卖策略失败: $e'); }
-    try { results['布林支撑'] = backtestBollSupport(data); } catch (e) { debugPrint('[回测] 布林支撑策略失败: $e'); }
-    try { results['均线多头'] = backtestMAMultiHead(data); } catch (e) { debugPrint('[回测] 均线多头策略失败: $e'); }
+    try { results['MACDäº¤å'] = backtestMACDCross(data); } catch (e) { debugPrint('[åæµ] MACDäº¤åç­ç¥å¤±è´¥: $e'); }
+    try { results['MAéå'] = backtestMACross(data); } catch (e) { debugPrint('[åæµ] MAéåç­ç¥å¤±è´¥: $e'); }
+    try { results['KDJè¶å'] = backtestKDJOversoldCross(data); } catch (e) { debugPrint('[åæµ] KDJè¶åç­ç¥å¤±è´¥: $e'); }
+    try { results['RSIè¶å'] = backtestRSIOversoldRecovery(data); } catch (e) { debugPrint('[åæµ] RSIè¶åç­ç¥å¤±è´¥: $e'); }
+    try { results['å¸ææ¯æ'] = backtestBollSupport(data); } catch (e) { debugPrint('[åæµ] å¸ææ¯æç­ç¥å¤±è´¥: $e'); }
+    try { results['åçº¿å¤å¤´'] = backtestMAMultiHead(data); } catch (e) { debugPrint('[åæµ] åçº¿å¤å¤´ç­ç¥å¤±è´¥: $e'); }
 
     return results;
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // P2-6: Walk-Forward 滚动窗口回测（过度拟合检测）
-  // ═══════════════════════════════════════════════════════════
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // P2-6: Walk-Forward æ»å¨çªå£åæµï¼è¿åº¦æåæ£æµï¼
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-  /// Walk-Forward 滚动窗口回测
+  /// Walk-Forward æ»å¨çªå£åæµ
   ///
-  /// 将数据分割为多个滚动窗口，每窗口用前N日训练（样本内），后M日测试（样本外��。
-  /// 如果 OOS 收益远小于 IS 收益，或分年标准差过大 → 疑似过拟合
+  /// å°æ°æ®åå²ä¸ºå¤ä¸ªæ»å¨çªå£ï¼æ¯çªå£ç¨åNæ¥è®­ç»ï¼æ ·æ¬åï¼ï¼åMæ¥æµè¯ï¼æ ·æ¬å¤ï¿½ï¿½ã
+  /// å¦æ OOS æ¶çè¿å°äº IS æ¶çï¼æåå¹´æ åå·®è¿å¤§ â çä¼¼è¿æå
   static WalkForwardResult walkForwardBacktest(
     List<HistoryKline> data, {
-    int windowSize = 120,   // 每窗口样本内天数
-    int testSize = 60,      // 每窗口样本外天数（须≥60以支持megaBacktest最小数据量）
+    int windowSize = 120,   // æ¯çªå£æ ·æ¬åå¤©æ°
+    int testSize = 60,      // æ¯çªå£æ ·æ¬å¤å¤©æ°ï¼é¡»â¥60ä»¥æ¯æmegaBacktestæå°æ°æ®éï¼
   }) {
     if (data.length < windowSize + testSize) {
       return WalkForwardResult(
         totalWindows: 0, passedWindows: 0,
         inSampleAvgReturn: 0, outOfSampleAvgReturn: 0,
         windowStdDev: 0, windowReturns: [],
-        isOverfit: false, verdict: '数据不足，无法进行Walk-Forward分析(需≥${windowSize + testSize}根K线)',
+        isOverfit: false, verdict: 'æ°æ®ä¸è¶³ï¼æ æ³è¿è¡Walk-Forwardåæ(éâ¥${windowSize + testSize}æ ¹Kçº¿)',
       );
     }
 
@@ -659,7 +800,7 @@ class BacktestEngine {
     int windowCount = 0;
     int passedWindows = 0;
 
-    // 滚动窗口
+    // æ»å¨çªå£
     for (int start = 0; start + windowSize + testSize <= data.length; start += testSize) {
       windowCount++;
       final isData = data.sublist(start, start + windowSize);
@@ -667,7 +808,7 @@ class BacktestEngine {
 
       final isResults = megaBacktest(isData);
       if (isResults.isEmpty) continue;
-      // IS：找出样本内表现最佳的策略（totalSignals≥3）
+      // ISï¼æ¾åºæ ·æ¬åè¡¨ç°æä½³çç­ç¥ï¼totalSignalsâ¥3ï¼
       String? isBestStrategyName;
       double isBestReturn = -double.infinity;
       for (final entry in isResults.entries) {
@@ -680,8 +821,8 @@ class BacktestEngine {
 
       final oosResults = megaBacktest(oosData);
       if (oosResults.isEmpty) continue;
-      // OOS：评估同一个策略在样本外的表现（与 IS 对称比较）
-      // 若该策略在 OOS 无信号，记为 0（策略不适用）
+      // OOSï¼è¯ä¼°åä¸ä¸ªç­ç¥å¨æ ·æ¬å¤çè¡¨ç°ï¼ä¸ IS å¯¹ç§°æ¯è¾ï¼
+      // è¥è¯¥ç­ç¥å¨ OOS æ ä¿¡å·ï¼è®°ä¸º 0ï¼ç­ç¥ä¸éç¨ï¼
       final oosSameStrategy = oosResults[isBestStrategyName];
       final oosReturn = (oosSameStrategy != null && oosSameStrategy.totalSignals > 0)
           ? oosSameStrategy.totalReturn
@@ -698,7 +839,7 @@ class BacktestEngine {
         totalWindows: 0, passedWindows: 0,
         inSampleAvgReturn: 0, outOfSampleAvgReturn: 0,
         windowStdDev: 0, windowReturns: [],
-        isOverfit: false, verdict: 'Walk-Forward分析���败',
+        isOverfit: false, verdict: 'Walk-Forwardåæï¿½ï¿½ï¿½è´¥',
       );
     }
 
@@ -706,21 +847,21 @@ class BacktestEngine {
     final oosAvg = totalOosReturn / windowCount;
     final oosStd = _calcStdDev(windowReturns);
 
-    // 过拟合判断：
-    // 1. 样本外收益显著低于样本内（IS/OOS > 3 倍）
-    // 2. 分年标准差过大（> 2pp，表示表现不稳定）
+    // è¿æåå¤æ­ï¼
+    // 1. æ ·æ¬å¤æ¶çæ¾èä½äºæ ·æ¬åï¼IS/OOS > 3 åï¼
+    // 2. åå¹´æ åå·®è¿å¤§ï¼> 2ppï¼è¡¨ç¤ºè¡¨ç°ä¸ç¨³å®ï¼
     final overfitRatio = isAvg > 0 && oosAvg > 0 ? isAvg / oosAvg : (isAvg > 0 ? 999.0 : 0);
     final isOverfit = overfitRatio > 3.0 || oosStd > 2.0;
 
     String verdict;
     if (isOverfit && overfitRatio > 3.0) {
-      verdict = '疑似过拟合：样本内收益(${isAvg.toStringAsFixed(1)}%)远超样本外(${oosAvg.toStringAsFixed(1)}%)，策略泛化能力不足';
+      verdict = 'çä¼¼è¿æåï¼æ ·æ¬åæ¶ç(${isAvg.toStringAsFixed(1)}%)è¿è¶æ ·æ¬å¤(${oosAvg.toStringAsFixed(1)}%)ï¼ç­ç¥æ³åè½åä¸è¶³';
     } else if (isOverfit && oosStd > 2.0) {
-      verdict = '疑似过拟合：分年标准差${oosStd.toStringAsFixed(2)}pp过大，策略表现不稳定';
+      verdict = 'çä¼¼è¿æåï¼åå¹´æ åå·®${oosStd.toStringAsFixed(2)}ppè¿å¤§ï¼ç­ç¥è¡¨ç°ä¸ç¨³å®';
     } else if (oosAvg < 0) {
-      verdict = '策略样本外表现不佳(${oosAvg.toStringAsFixed(1)}%)，建议优化信号条件';
+      verdict = 'ç­ç¥æ ·æ¬å¤è¡¨ç°ä¸ä½³(${oosAvg.toStringAsFixed(1)}%)ï¼å»ºè®®ä¼åä¿¡å·æ¡ä»¶';
     } else {
-      verdict = '策略稳健：样本内${isAvg.toStringAsFixed(1)}% / 样本外${oosAvg.toStringAsFixed(1)}%，分年标准差${oosStd.toStringAsFixed(2)}pp';
+      verdict = 'ç­ç¥ç¨³å¥ï¼æ ·æ¬å${isAvg.toStringAsFixed(1)}% / æ ·æ¬å¤${oosAvg.toStringAsFixed(1)}%ï¼åå¹´æ åå·®${oosStd.toStringAsFixed(2)}pp';
     }
 
     return WalkForwardResult(
@@ -742,7 +883,7 @@ class BacktestEngine {
     return sqrt(variance);
   }
 
-  /// 分年绩效分析（用于过度拟合检测）
+  /// åå¹´ç»©æåæï¼ç¨äºè¿åº¦æåæ£æµï¼
   static Map<int, double> yearlyPerformance(List<HistoryKline> data) {
     final yearly = <int, List<double>>{};
     for (final k in data) {
@@ -760,18 +901,18 @@ class BacktestEngine {
     return result;
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 仓位管理校验（P2-7: 马丁加仓检测）
-  // ═══════════════════════════════════════════════════════════
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // ä»ä½ç®¡çæ ¡éªï¼P2-7: é©¬ä¸å ä»æ£æµï¼
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-  /// 仓位分析 — 检测是否存在马丁加仓（逐笔加仓）行为
+  /// ä»ä½åæ â æ£æµæ¯å¦å­å¨é©¬ä¸å ä»ï¼éç¬å ä»ï¼è¡ä¸º
   static String positionAnalysis(Map<String, BacktestResult> results) {
     final buf = StringBuffer();
     for (final entry in results.entries) {
       final trades = entry.value.tradeReturns;
       if (trades.length < 5) continue;
 
-      // 检测连续亏损加仓模式
+      // æ£æµè¿ç»­äºæå ä»æ¨¡å¼
       int consecutiveLosses = 0;
       int maxConsecutiveLoss = 0;
       bool martingaleWarning = false;
@@ -782,7 +923,7 @@ class BacktestEngine {
           if (consecutiveLosses > maxConsecutiveLoss) {
             maxConsecutiveLoss = consecutiveLosses;
           }
-          // 连续亏损且亏损幅度递增 → 疑似马丁
+          // è¿ç»­äºæä¸äºæå¹åº¦éå¢ â çä¼¼é©¬ä¸
           if (prevLoss != null && r.abs() > prevLoss.abs() * 1.5) {
             martingaleWarning = true;
           }
@@ -794,117 +935,117 @@ class BacktestEngine {
       }
 
       if (martingaleWarning) {
-        buf.writeln('${entry.key}: 警告—疑似马丁加仓模式（连续亏损幅度递增）');
+        buf.writeln('${entry.key}: è­¦åâçä¼¼é©¬ä¸å ä»æ¨¡å¼ï¼è¿ç»­äºæå¹åº¦éå¢ï¼');
       }
       if (maxConsecutiveLoss >= 4) {
-        buf.writeln('${entry.key}: 最大连续亏损$maxConsecutiveLoss次，需关注风险控制');
+        buf.writeln('${entry.key}: æå¤§è¿ç»­äºæ$maxConsecutiveLossæ¬¡ï¼éå³æ³¨é£é©æ§å¶');
       }
     }
-    if (buf.isEmpty) buf.write('仓位管理正常：未检测到马丁加仓模式');
+    if (buf.isEmpty) buf.write('ä»ä½ç®¡çæ­£å¸¸ï¼æªæ£æµå°é©¬ä¸å ä»æ¨¡å¼');
     return buf.toString();
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 回测校验报告（输出类似截图中的验证列表）
-  // ═══════════════════════════════════════════════════════════
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // åæµæ ¡éªæ¥åï¼è¾åºç±»ä¼¼æªå¾ä¸­çéªè¯åè¡¨ï¼
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-  /// 生成回测校验报告
+  /// çæåæµæ ¡éªæ¥å
   static String validationReport(Map<String, BacktestResult> results, {
     WalkForwardResult? wfResult,
     String? stockCode,
     List<HistoryKline>? rawData,
   }) {
-    if (results.isEmpty) return '无回测数据，无法生成校验报告';
+    if (results.isEmpty) return 'æ åæµæ°æ®ï¼æ æ³çææ ¡éªæ¥å';
 
-    // 从任一结果中获取元数据
+    // ä»ä»»ä¸ç»æä¸­è·ååæ°æ®
     final meta = results.values.first.validationMeta;
     final isAdjusted = rawData != null ? KlineValidator.checkForwardAdjusted(rawData) : (meta?.forwardAdjusted ?? true);
 
     final buf = StringBuffer();
-    buf.writeln('════════════ 回测校验报告 ════════════');
+    buf.writeln('ââââââââââââ åæµæ ¡éªæ¥å ââââââââââââ');
 
-    // 01 未来函数
+    // 01 æªæ¥å½æ°
     if (meta?.lookAheadSafe == true) {
-      buf.writeln('✔ 未来函数  | 特征使用T日收盘数据，目标使用T+1日开盘执行');
+      buf.writeln('â æªæ¥å½æ°  | ç¹å¾ä½¿ç¨Tæ¥æ¶çæ°æ®ï¼ç®æ ä½¿ç¨T+1æ¥å¼çæ§è¡');
     } else {
-      buf.writeln('✘ 未来函数  | 警告：可能使用了未来数据');
+      buf.writeln('â æªæ¥å½æ°  | è­¦åï¼å¯è½ä½¿ç¨äºæªæ¥æ°æ®');
     }
 
-    // 02 马丁加仓
+    // 02 é©¬ä¸å ä»
     if (results.values.any((r) => r.tradeReturns.length >= 5)) {
       final pos = positionAnalysis(results);
-      if (pos.contains('正常')) {
-        buf.writeln('✔ 马丁加仓  | 静态仓位管理，未检测到马丁加仓');
+      if (pos.contains('æ­£å¸¸')) {
+        buf.writeln('â é©¬ä¸å ä»  | éæä»ä½ç®¡çï¼æªæ£æµå°é©¬ä¸å ä»');
       } else {
-        buf.writeln('⚠ 马丁加仓  | 检测到疑似加仓模式，详见仓位分析');
+        buf.writeln('â  é©¬ä¸å ä»  | æ£æµå°çä¼¼å ä»æ¨¡å¼ï¼è¯¦è§ä»ä½åæ');
       }
     } else {
-      buf.writeln('✔ 马丁加仓  | 静态仓位管理（每笔等仓）');
+      buf.writeln('â é©¬ä¸å ä»  | éæä»ä½ç®¡çï¼æ¯ç¬ç­ä»ï¼');
     }
 
-    // 03 过度拟合
+    // 03 è¿åº¦æå
     if (wfResult != null) {
       final stdDisplay = (wfResult.windowStdDev > 0
           ? (wfResult.windowStdDev).toStringAsFixed(2)
           : 'N/A');
-      buf.writeln('${wfResult.isOverfit ? "⚠" : "✔"} 过度拟合  | '
-          '分年标准差${stdDisplay}pp '
+      buf.writeln('${wfResult.isOverfit ? "â " : "â"} è¿åº¦æå  | '
+          'åå¹´æ åå·®${stdDisplay}pp '
           '| IS:${wfResult.inSampleAvgReturn.toStringAsFixed(1)}% '
           'OOS:${wfResult.outOfSampleAvgReturn.toStringAsFixed(1)}%');
       buf.writeln('           | ${wfResult.verdict}');
     } else {
-      buf.writeln('⚠ 过度拟合  | 未执行Walk-Forward分析，无法评估');
+      buf.writeln('â  è¿åº¦æå  | æªæ§è¡Walk-Forwardåæï¼æ æ³è¯ä¼°');
     }
 
-    // 04 完整成本
+    // 04 å®æ´ææ¬
     if (meta?.costDeducted == true) {
-      buf.writeln('✔ 完整成本  | 佣金${(config.commissionRate * 10000).toStringAsFixed(1)}‱ '
-          '+ 印花税${(config.stampTaxRate * 1000).toStringAsFixed(1)}‰(卖) '
-          '+ 过户费${(config.transferRate * 100000).toStringAsFixed(0)}‱ '
-          '+ 滑点${(config.slippageRate * 1000).toStringAsFixed(1)}‰');
-      buf.writeln('           | 注意：最低佣金${config.minCommission.toStringAsFixed(0)}元/笔未在百分比模型中体现，小额交易实际成本更高');
+      buf.writeln('â å®æ´ææ¬  | ä½£é${(config.commissionRate * 10000).toStringAsFixed(1)}â± '
+          '+ å°è±ç¨${(config.stampTaxRate * 1000).toStringAsFixed(1)}â°(å) '
+          '+ è¿æ·è´¹${(config.transferRate * 100000).toStringAsFixed(0)}â± '
+          '+ æ»ç¹${(config.slippageRate * 1000).toStringAsFixed(1)}â°');
+      buf.writeln('           | æ³¨æï¼æä½ä½£é${config.minCommission.toStringAsFixed(0)}å/ç¬æªå¨ç¾åæ¯æ¨¡åä¸­ä½ç°ï¼å°é¢äº¤æå®éææ¬æ´é«');
     } else {
-      buf.writeln('✘ 完整成本  | 未扣除交易成本，收益为毛收益');
+      buf.writeln('â å®æ´ææ¬  | æªæ£é¤äº¤æææ¬ï¼æ¶çä¸ºæ¯æ¶ç');
     }
 
-    // 05 复权除权
+    // 05 å¤æé¤æ
     if (isAdjusted) {
-      buf.writeln('✔ 复权除权  | 数据检测为前复权 / 无除权影响');
+      buf.writeln('â å¤æé¤æ  | æ°æ®æ£æµä¸ºåå¤æ / æ é¤æå½±å');
     } else {
-      buf.writeln('✘ 复权除权  | 警告：K线数据可能未前复权，除权日价格跳空影响信号');
+      buf.writeln('â å¤æé¤æ  | è­¦åï¼Kçº¿æ°æ®å¯è½æªåå¤æï¼é¤ææ¥ä»·æ ¼è·³ç©ºå½±åä¿¡å·');
     }
 
-    // 06 前视偏差
+    // 06 åè§åå·®
     if (meta?.lookAheadSafe == true) {
-      buf.writeln('✔ 前视偏差  | T日收盘信号→T+1日开盘执行，无look-ahead');
+      buf.writeln('â åè§åå·®  | Tæ¥æ¶çä¿¡å·âT+1æ¥å¼çæ§è¡ï¼æ look-ahead');
     } else {
-      buf.writeln('✘ 前视偏差  | T日收盘信号→T日收盘执行，存在前视偏差');
+      buf.writeln('â åè§åå·®  | Tæ¥æ¶çä¿¡å·âTæ¥æ¶çæ§è¡ï¼å­å¨åè§åå·®');
     }
 
-    // 07 幸存者偏差
-    buf.writeln('⚠ 幸存者偏差  | 当前为单股回测，多股组合时需过滤退市/ST');
+    // 07 å¹¸å­èåå·®
+    buf.writeln('â  å¹¸å­èåå·®  | å½åä¸ºåè¡åæµï¼å¤è¡ç»åæ¶éè¿æ»¤éå¸/ST');
 
-    // 08 涨跌停模拟
+    // 08 æ¶¨è·åæ¨¡æ
     if (meta?.limitSimulated == true) {
-      buf.writeln('✔ 涨跌停模拟 | 涨停${(config.limitPct * 100).toStringAsFixed(0)}%买不进 '
-          '/ 跌停${(config.limitPct * 100).toStringAsFixed(0)}%卖不出 '
-          '| 跳过${meta?.skippedTrades ?? 0}笔不可执行交易');
+      buf.writeln('â æ¶¨è·åæ¨¡æ | æ¶¨å${(config.limitPct * 100).toStringAsFixed(0)}%ä¹°ä¸è¿ '
+          '/ è·å${(config.limitPct * 100).toStringAsFixed(0)}%åä¸åº '
+          '| è·³è¿${meta?.skippedTrades ?? 0}ç¬ä¸å¯æ§è¡äº¤æ');
     } else {
-      buf.writeln('✘ 涨跌停模拟 | 未启用，所有价格均可成交');
+      buf.writeln('â æ¶¨è·åæ¨¡æ | æªå¯ç¨ï¼ææä»·æ ¼åå¯æäº¤');
     }
 
-    // 09 交易日历
-    buf.writeln('✔ 交易日历  | K线API仅返回交易日数据，无周末信号');
+    // 09 äº¤ææ¥å
+    buf.writeln('â äº¤ææ¥å  | Kçº¿APIä»è¿åäº¤ææ¥æ°æ®ï¼æ å¨æ«ä¿¡å·');
 
-    // 10 脏数据
+    // 10 èæ°æ®
     if (meta?.dirtySkipped == true) {
-      buf.writeln('✔ 脏数据    | 停牌/一字板已排除 '
-          '| 跳过${meta?.skippedSignals ?? 0}个异常K线');
+      buf.writeln('â èæ°æ®    | åç/ä¸å­æ¿å·²æé¤ '
+          '| è·³è¿${meta?.skippedSignals ?? 0}ä¸ªå¼å¸¸Kçº¿');
     } else {
-      buf.writeln('✘ 脏数据    | 未启用数据过滤，包含停牌/一字板信号');
+      buf.writeln('â èæ°æ®    | æªå¯ç¨æ°æ®è¿æ»¤ï¼åå«åç/ä¸å­æ¿ä¿¡å·');
     }
 
-    // 汇总
+    // æ±æ»
     final passes = [
       meta?.lookAheadSafe == true,
       !(wfResult?.isOverfit ?? true),
@@ -914,12 +1055,12 @@ class BacktestEngine {
       meta?.dirtySkipped == true,
     ].where((t) => t).length;
 
-    const total = 6; // 前6项为引擎层面可控
-    buf.writeln('──────────────────────────────────────');
-    buf.writeln('校验通过: $passes/$total');
+    const total = 6; // å6é¡¹ä¸ºå¼æå±é¢å¯æ§
+    buf.writeln('ââââââââââââââââââââââââââââââââââââââ');
+    buf.writeln('æ ¡éªéè¿: $passes/$total');
 
     if (meta?.warnings != null && meta!.warnings.isNotEmpty) {
-      buf.writeln('警告:');
+      buf.writeln('è­¦å:');
       for (final w in meta.warnings) {
         buf.writeln('  - $w');
       }
@@ -928,9 +1069,9 @@ class BacktestEngine {
     return buf.toString();
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 策略置信度调整（回测反馈闭环）
-  // ═══════════════════════════════════════════════════════════
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // ç­ç¥ç½®ä¿¡åº¦è°æ´ï¼åæµåé¦é­ç¯ï¼
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
   static double getStrategyConfidenceAdjustment(
     String strategyName,
@@ -973,57 +1114,57 @@ class BacktestEngine {
     return sorted;
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 格式化输出
-  // ═══════════════════════════════════════════════════════════
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // æ ¼å¼åè¾åº
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
   static String formatResult(BacktestResult result) {
     if (result.totalSignals == 0) {
-      return '回测数据不足，无法生成有效结果';
+      return 'åæµæ°æ®ä¸è¶³ï¼æ æ³çæææç»æ';
     }
     final meta = result.validationMeta;
-    final costNote = meta?.costDeducted == true ? '(已扣成本)' : '(毛收益)';
-    return '信号总数: ${result.totalSignals}\n'
-        '胜率: ${(result.winRate * 100).toStringAsFixed(1)}%\n'
-        '盈利次数: ${result.winningTrades} | 亏损次数: ${result.losingTrades}\n'
-        '平均盈利: ${result.avgWinPct.toStringAsFixed(2)}% | 平均亏损: ${result.avgLossPct.toStringAsFixed(2)}%\n'
-        '盈亏比: ${!result.profitFactor.isFinite ? "全胜" : (result.profitFactor > 0 ? result.profitFactor.toStringAsFixed(2) : "N/A")}\n'
-        '总收益$costNote: ${result.totalReturn.toStringAsFixed(2)}%\n'
-        '最大回撤: ${(result.maxDrawdown * 100).toStringAsFixed(2)}%';
+    final costNote = meta?.costDeducted == true ? '(å·²æ£ææ¬)' : '(æ¯æ¶ç)';
+    return 'ä¿¡å·æ»æ°: ${result.totalSignals}\n'
+        'èç: ${(result.winRate * 100).toStringAsFixed(1)}%\n'
+        'çå©æ¬¡æ°: ${result.winningTrades} | äºææ¬¡æ°: ${result.losingTrades}\n'
+        'å¹³åçå©: ${result.avgWinPct.toStringAsFixed(2)}% | å¹³åäºæ: ${result.avgLossPct.toStringAsFixed(2)}%\n'
+        'çäºæ¯: ${!result.profitFactor.isFinite ? "å¨è" : (result.profitFactor > 0 ? result.profitFactor.toStringAsFixed(2) : "N/A")}\n'
+        'æ»æ¶ç$costNote: ${result.totalReturn.toStringAsFixed(2)}%\n'
+        'æå¤§åæ¤: ${(result.maxDrawdown * 100).toStringAsFixed(2)}%';
   }
 
   static String getBacktestSummary(Map<String, BacktestResult> results) {
-    if (results.isEmpty) return '回测数据不足';
+    if (results.isEmpty) return 'åæµæ°æ®ä¸è¶³';
 
     final ranking = getStrategyPerformanceRanking(results);
-    if (ranking.isEmpty) return '无可信策略回测结果';
+    if (ranking.isEmpty) return 'æ å¯ä¿¡ç­ç¥åæµç»æ';
 
     final best = ranking.first;
     final bestResult = results[best.key]!;
 
     final winRateStr = (bestResult.winRate * 100).toStringAsFixed(0);
     final pfStr = bestResult.profitFactor == double.infinity
-        ? '全胜'
+        ? 'å¨è'
         : bestResult.profitFactor.toStringAsFixed(2);
 
     final buf = StringBuffer();
-    buf.writeln('最佳策略: ${best.key} (胜率$winRateStr% 盈亏比$pfStr)');
-    buf.writeln('历史回测: ${bestResult.totalSignals}笔交易'
-        ' | 总收益${bestResult.totalReturn.toStringAsFixed(1)}%'
-        ' | 最大回撤${(bestResult.maxDrawdown * 100).toStringAsFixed(1)}%');
+    buf.writeln('æä½³ç­ç¥: ${best.key} (èç$winRateStr% çäºæ¯$pfStr)');
+    buf.writeln('åå²åæµ: ${bestResult.totalSignals}ç¬äº¤æ'
+        ' | æ»æ¶ç${bestResult.totalReturn.toStringAsFixed(1)}%'
+        ' | æå¤§åæ¤${(bestResult.maxDrawdown * 100).toStringAsFixed(1)}%');
 
     if (ranking.length >= 2) {
       final second = results[ranking[1].key]!;
-      buf.write('次优: ${ranking[1].key} '
-          '(胜率${(second.winRate * 100).toStringAsFixed(0)}% '
-          '总收益${second.totalReturn.toStringAsFixed(1)}%)');
+      buf.write('æ¬¡ä¼: ${ranking[1].key} '
+          '(èç${(second.winRate * 100).toStringAsFixed(0)}% '
+          'æ»æ¶ç${second.totalReturn.toStringAsFixed(1)}%)');
     }
     return buf.toString();
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 内部工具方法
-  // ═══════════════════════════════════════════════════════════
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // åé¨å·¥å·æ¹æ³
+  // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
   static BacktestResult _emptyResult() {
     return BacktestResult(
@@ -1034,7 +1175,7 @@ class BacktestEngine {
   }
 
   static BacktestResult _buildResult(List<double> tradeReturns, double currentEquity, double maxDrawdown) {
-    // 单次遍历计算所有统计量（避免 4 次 where/reduce）
+    // åæ¬¡éåè®¡ç®ææç»è®¡éï¼é¿å 4 æ¬¡ where/reduceï¼
     int winningTrades = 0;
     int losingTrades = 0;
     double grossProfit = 0;
@@ -1076,10 +1217,10 @@ class BacktestEngine {
     return (sellPrice - buyPrice) / buyPrice;
   }
 
-  /// 风险指标计算：基于逐笔交易收益率计算 Sharpe / MaxDD / Calmar
+  /// é£é©ææ è®¡ç®ï¼åºäºéç¬äº¤ææ¶ççè®¡ç® Sharpe / MaxDD / Calmar
   ///
-  /// 返回 (sharpeRatio, maxDrawdown, calmarRatio)
-  /// - maxDrawdown 为负值 (e.g. -0.15 = 15% 回撤)
+  /// è¿å (sharpeRatio, maxDrawdown, calmarRatio)
+  /// - maxDrawdown ä¸ºè´å¼ (e.g. -0.15 = 15% åæ¤)
   static (double?, double?, double?) _calculateRiskMetrics(List<double> returns) {
     if (returns.length < 2) return (null, null, null);
 

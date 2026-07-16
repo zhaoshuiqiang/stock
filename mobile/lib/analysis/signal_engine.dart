@@ -33,6 +33,8 @@ import 'next_session_predictor.dart';
 import 'signal_detector.dart';
 import 'short_term_decision_engine.dart';
 import 'short_term_direction_model.dart';
+import 'intraday_analyzer.dart';
+import 'structure_transition_detector.dart';
 
 /// 向后兼容：检测特有信号（量价背离、布林收口）
 List<SignalItem> detectSignals(List<HistoryKline> data) {
@@ -248,29 +250,29 @@ String? mapSignalToBacktestKey(String signalName) {
 
     // ── 暂无回测映射（保留 null 显式标记） ──
     '放量上涨': null,
-    'WR超卖': null,
+    'WR超卖': 'WR超卖',
     'OBV放量上涨': null,
-    'CCI超卖回升': null,
-    '向上跳空突破': null,
-    '底部锤子线': null,
-    '刺透形态': null,
-    '阳包阴': null,
-    '低位十字星': null,
+    'CCI超卖回升': 'CCI超卖',
+    '向上跳空突破': '向上跳空',
+    '底部锤子线': '锤子线反转',
+    '刺透形态': '刺透形态',
+    '阳包阴': '阳包阴',
+    '低位十字星': '十字星反转',
     '三阳开泰': null,
-    '启明星': null,
+    '启明星': '启明星',
     '主力吸筹迹象': null,
     '地量见底': null,
     '趋势突破上轨': null,
-    'WR超买': null,
-    'CCI超买回落': null,
+    'WR超买': 'WR超卖',
+    'CCI超买回落': 'CCI超卖',
     '缩量上涨': null,
-    '向下跳空破位': null,
-    '顶部吊颈线': null,
-    '乌云盖顶': null,
-    '阴包阳': null,
-    '高位十字星': null,
+    '向下跳空破位': '向下跳空回补',
+    '顶部吊颈线': '锤子线反转',
+    '乌云盖顶': '乌云盖顶',
+    '阴包阳': '阴包阳',
+    '高位十字星': '十字星反转',
     '三只乌鸦': null,
-    '黄昏星': null,
+    '黄昏星': '黄昏星',
     '主力派发迹象': null,
     '趋势强度强劲': null,
     '盘整趋势': null,
@@ -293,6 +295,7 @@ AnalysisResult generateAnalysis(
   void Function(String status, int progress)? onAIProgress,
   bool autoTriggerAI = false,
   bool enableAsyncSideEffects = true,
+  IntradayProfile? intradayProfile,
 }) {
   if (data.isEmpty) {
     return AnalysisResult(
@@ -350,6 +353,18 @@ AnalysisResult generateAnalysis(
 
   // 1a. 市场结构分析 (Phase 1)
   final marketStructure = MarketStructureAnalyzer.analyze(data);
+
+  // 1a+. 结构转换检测
+  StructureTransition? structureTransition;
+  if (quote != null) {
+    try {
+      structureTransition = StructureTransitionDetector.detect(
+        quote.code, data, marketStructure,
+      );
+    } catch (e) {
+      debugPrint('[信号引擎] 结构转换检测失败: $e');
+    }
+  }
 
   // 1b. 分位值分析 (Phase 4)
   final percentile = PercentileAnalyzer.analyze(data, quote);
@@ -412,6 +427,7 @@ AnalysisResult generateAnalysis(
     industryRSScore: percentile.industryRSScore,
     sectorName: sectorName ?? quote?.sectorName,
     sectorAnalysis: sectorAnalysis,
+    intradayProfile: intradayProfile,
   );
 
   // 6. 推荐理由（见下方步骤13，全部上下文就绪后生成）
@@ -421,6 +437,17 @@ AnalysisResult generateAnalysis(
 
   // 8. 机会识别
   final opportunities = OpportunityIdentifier.identify(buySignals);
+
+  // 8a. 机会评分（5维评估+信号协同）
+  final opportunityScore = OpportunityIdentifier.evaluate(
+    buySignals: buySignals,
+    sellSignals: sellSignals,
+    klineData: data,
+    quote: quote,
+    marketStructure: marketStructure,
+    marketContext: marketContext,
+    riskRewardRatio: tradeLevels['risk_reward_ratio'] as double?,
+  );
 
   // 9. 操作建议（见下方，全部上下文就绪后生成）
 
@@ -733,6 +760,8 @@ AnalysisResult generateAnalysis(
     shortTermDecision: shortTermDecision,
     recommendationDecision: recommendationDecision,
     directionForecast: directionForecast,
+    opportunityScore: opportunityScore,
+    intradayProfile: intradayProfile,
   );
 }
 

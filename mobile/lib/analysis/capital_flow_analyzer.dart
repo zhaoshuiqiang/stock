@@ -7,10 +7,13 @@ class CapitalFlowResult {
   final double flowTrend;
   final String trendLabel;
   final List<String> signals;
+  final double continuityScore;
+  final String? accumulationPattern;
 
   CapitalFlowResult({
     required this.score, required this.mainNetFlow5d, required this.mainNetFlow10d,
     required this.flowTrend, required this.trendLabel, required this.signals,
+    this.continuityScore = 0, this.accumulationPattern,
   });
 }
 
@@ -106,8 +109,56 @@ class CapitalFlowAnalyzer {
     else if (flowTrend < -0.5) tl = '资金持续流出';
     else if (flowTrend < -0.1) tl = '资金温和流出';
 
+    double contScore = 0;
+    String? accumPattern;
+    if (klineData.length >= 5) {
+      final recent5 = klineData.sublist(klineData.length - 5);
+      int consecutiveInflow = 0;
+      int consecutiveOutflow = 0;
+      for (final k in recent5.reversed) {
+        final isInflow = k.close > k.open && k.volume > (k.volMa5 > 0 ? k.volMa5 : k.volume);
+        final isOutflow = k.close < k.open && k.volume > (k.volMa5 > 0 ? k.volMa5 : k.volume);
+        if (isInflow && consecutiveOutflow == 0) consecutiveInflow++;
+        else if (isOutflow && consecutiveInflow == 0) consecutiveOutflow++;
+        else break;
+      }
+      if (consecutiveInflow >= 5) { contScore = 2.5; signals.add('连续5日主力净流入'); }
+      else if (consecutiveInflow >= 3) { contScore = 1.5; signals.add('连续${consecutiveInflow}日主力净流入'); }
+      else if (consecutiveInflow >= 2) { contScore = 0.8; signals.add('连续2日主力净流入'); }
+      if (consecutiveOutflow >= 5) { contScore = -2.5; signals.add('连续5日主力净流出'); }
+      else if (consecutiveOutflow >= 3) { contScore = -1.5; signals.add('连续${consecutiveOutflow}日主力净流出'); }
+      else if (consecutiveOutflow >= 2) { contScore = -0.8; signals.add('连续2日主力净流出'); }
+      score += contScore;
+
+      if (klineData.length >= 20) {
+        final recent20 = klineData.sublist(klineData.length - 20);
+        final high20 = recent20.map((k) => k.high).reduce((a, b) => a > b ? a : b);
+        final low20 = recent20.map((k) => k.low).reduce((a, b) => a < b ? a : b);
+        final range20 = low20 > 0 ? (high20 - low20) / low20 : 0.0;
+        final upVol = recent20.where((k) => k.close > k.open).map((k) => k.volume).fold(0.0, (a, b) => a + b);
+        final downVol = recent20.where((k) => k.close <= k.open).map((k) => k.volume).fold(0.0, (a, b) => a + b);
+        final obvRising = klineData.last.obv > klineData[klineData.length - 5].obv;
+        if (range20 < 0.10 && upVol > downVol && obvRising) {
+          score += 1.2; signals.add('横盘吸筹：20日振幅${(range20 * 100).toStringAsFixed(1)}%+OBV上升');
+          accumPattern = 'sideways';
+        }
+      }
+
+      if (klineData.length >= 5) {
+        final last3 = klineData.sublist(klineData.length - 3);
+        final allDown = last3.every((k) => k.close < k.open);
+        final volDeclining = last3.length >= 2 && last3[0].volume >= last3[1].volume && last3[1].volume >= last3[2].volume;
+        final obvNotDeclining = klineData.last.obv >= klineData[klineData.length - 3].obv;
+        if (allDown && volDeclining && obvNotDeclining) {
+          score += 1.0; signals.add('打压吸筹：连续阴线+量递减+OBV不降');
+          accumPattern = 'smash';
+        }
+      }
+    }
+
     score = score.clamp(0.0, 10.0);
     return CapitalFlowResult(score: score, mainNetFlow5d: mainNetFlow5d, mainNetFlow10d: mainNetFlow10d,
-        flowTrend: flowTrend, trendLabel: tl, signals: signals);
+        flowTrend: flowTrend, trendLabel: tl, signals: signals,
+        continuityScore: contScore, accumulationPattern: accumPattern);
   }
 }

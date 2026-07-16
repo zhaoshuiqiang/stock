@@ -32,6 +32,12 @@ class ComprehensiveScorer {
   static const double fundWeight = 0.07;
   static const double structWeight = 0.04;
 
+  static const double stTechWeight = 0.40;
+  static const double stCapWeight = 0.25;
+  static const double stRealWeight = 0.20;
+  static const double stConfWeight = 0.10;
+  static const double stStructWeight = 0.05;
+
   /// 精确ST检测（避免EAST/WEST等误判）
   static bool isSTStock(String name) => name.startsWith('ST') || name.startsWith('*ST');
 
@@ -51,6 +57,8 @@ class ComprehensiveScorer {
     bool? isBullAlign,
     String? sectorName,
     List<SectorAnalysis>? sectorAnalysis,
+    String preferredDuration = 'mediumTerm',
+    IntradayProfile? intradayProfile,
   }) {
     FundamentalScore? fundamentalScore;
     double fundamentalScoreValue = 5.0;
@@ -75,13 +83,23 @@ class ComprehensiveScorer {
     //        降低基本面/结构权重，提升技术/资金/实时/情绪权重，使评分与留档胜率评估周期匹配
     // v2.37: 评分评审后微调 — 结构2%→4%(ADX/MA布局对短线择时影响显著)，
     //        基本面5%→7%(避免极端高估低估个股被短线信号掩盖)，技术35%→33%、实时18%→16%(等比例让出)
-    double techW=techWeight, capW=capWeight, realW=realWeight, confW=confWeight, sentW=sentWeight, fundW=fundWeight, structW=structWeight;
+    final isShortTerm = preferredDuration == 'shortTerm';
+    double techW, capW, realW, confW, sentW, fundW, structW;
+    if (isShortTerm) {
+      techW=stTechWeight; capW=stCapWeight; realW=stRealWeight; confW=stConfWeight; sentW=0; fundW=0; structW=stStructWeight;
+    } else {
+      techW=techWeight; capW=capWeight; realW=realWeight; confW=confWeight; sentW=sentWeight; fundW=fundWeight; structW=structWeight;
+    }
     final hasFund = fundamentalScore != null, hasSent = newsSentiment != null, hasCapital = capitalFlowScore != null;
-    if (!hasFund && !hasSent && !hasCapital) { techW=0.50; realW=0.25; confW=0.18; structW=0.07; capW=sentW=fundW=0; }
-    else if (!hasFund && !hasSent) { techW=0.40; capW=0.22; realW=0.19; confW=0.14; structW=0.05; sentW=fundW=0; }
-    else if (!hasFund) { techW=0.35; capW=0.20; realW=0.17; confW=0.13; sentW=0.11; structW=0.04; fundW=0; }
-    else if (!hasSent) { techW=0.37; capW=0.20; realW=0.18; confW=0.13; fundW=0.08; structW=0.04; sentW=0; }
-    else if (!hasCapital) { techW=0.40; realW=0.20; confW=0.15; sentW=0.12; fundW=0.09; structW=0.04; capW=0; }
+    if (isShortTerm) {
+      if (!hasCapital) { techW += 0.05; realW += 0.05; capW = 0; }
+    } else {
+      if (!hasFund && !hasSent && !hasCapital) { techW=0.50; realW=0.25; confW=0.18; structW=0.07; capW=sentW=fundW=0; }
+      else if (!hasFund && !hasSent) { techW=0.40; capW=0.22; realW=0.19; confW=0.14; structW=0.05; sentW=fundW=0; }
+      else if (!hasFund) { techW=0.35; capW=0.20; realW=0.17; confW=0.13; sentW=0.11; structW=0.04; fundW=0; }
+      else if (!hasSent) { techW=0.37; capW=0.20; realW=0.18; confW=0.13; fundW=0.08; structW=0.04; sentW=0; }
+      else if (!hasCapital) { techW=0.40; realW=0.20; confW=0.15; sentW=0.12; fundW=0.09; structW=0.04; capW=0; }
+    }
 
     // v2.30: 熊市基本面权重提升 — 下跌市中低估值防守价值更大
     if (marketContext != null && marketContext.avgChangePct < -0.5 && fundW > 0) {
@@ -94,6 +112,11 @@ class ComprehensiveScorer {
     }
 
     var rawScore = (technicalScore*techW + capitalScoreValue*capW + sentimentScoreValue*sentW + realtimeScore*realW + confluenceScore*confW + fundamentalScoreValue*fundW + structureScoreValue*structW).clamp(0.0, 10.0);
+
+    if (isShortTerm && intradayProfile != null) {
+      final blendedRealtime = realtimeScore * 0.5 + intradayProfile.intradayScore * 0.5;
+      rawScore = (technicalScore*techW + capitalScoreValue*capW + sentimentScoreValue*sentW + blendedRealtime*realW + confluenceScore*confW + fundamentalScoreValue*fundW + structureScoreValue*structW).clamp(0.0, 10.0);
+    }
 
     // v2.30: 行业RS折扣 — 行业内排名靠后的"强信号"是补涨陷阱
     if (industryRSScore != null && industryRSScore < 0.30) {

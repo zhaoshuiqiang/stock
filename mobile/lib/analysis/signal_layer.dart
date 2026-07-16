@@ -59,6 +59,9 @@ class SignalLayer {
 
     signals.addAll(_detectVolumePriceDivergence(data));
     signals.addAll(_detectBollSqueezeBreakout(data));
+    signals.addAll(_detectShrinkAccumulationBreakout(data));
+    signals.addAll(_detectBottomConsecutiveUp(data));
+    signals.addAll(_detectGapFill(data));
 
     signals.sort((a, b) => b.strength.compareTo(a.strength));
     return signals;
@@ -206,6 +209,92 @@ class SignalLayer {
       }
     }
 
+    return signals;
+  }
+
+  static List<SignalItem> _detectShrinkAccumulationBreakout(List<HistoryKline> data) {
+    final signals = <SignalItem>[];
+    if (data.length < 20) return signals;
+    final last = data[data.length - 1];
+    final prev = data[data.length - 2];
+    final volMa5 = data.sublist(data.length - 5).map((d) => d.volume).reduce((a, b) => a + b) / 5;
+    final volMa20 = data.sublist(data.length - 20).map((d) => d.volume).reduce((a, b) => a + b) / 20;
+    if (volMa20 > 0 && volMa5 < volMa20 * 0.6 && last.volMa5 > 0) {
+      final volRatio = last.volume / last.volMa5;
+      if (volRatio > 2.0 && last.close > last.open) {
+        signals.add(SignalItem(
+          type: 'buy',
+          indicator: 'composite',
+          signal: '缩量蓄势突破',
+          description: '5日均量仅为20日均量的${(volMa5 / volMa20 * 100).toStringAsFixed(0)}%，当日放量突破，蓄势后启动',
+          strength: 80,
+          timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.80,
+          signalCount: 2,
+        ));
+      }
+    }
+    return signals;
+  }
+
+  static List<SignalItem> _detectBottomConsecutiveUp(List<HistoryKline> data) {
+    final signals = <SignalItem>[];
+    if (data.length < 5) return signals;
+    final recent3 = data.sublist(data.length - 3);
+    int upCount = 0;
+    bool volIncreasing = true;
+    bool priceIncreasing = true;
+    for (int i = 0; i < recent3.length; i++) {
+      if (recent3[i].close > recent3[i].open) upCount++;
+      if (i > 0) {
+        if (recent3[i].volume <= recent3[i - 1].volume) volIncreasing = false;
+        if (recent3[i].close <= recent3[i - 1].close) priceIncreasing = false;
+      }
+    }
+    if (upCount >= 2 && volIncreasing && priceIncreasing) {
+      final last = data.last;
+      final ref = data[data.length - 5];
+      final dropped = ref.close > 0 ? (last.close / ref.close - 1) * 100 : 0.0;
+      signals.add(SignalItem(
+        type: 'buy',
+        indicator: 'composite',
+        signal: '底部连阳',
+        description: '3日内${upCount}阳且量价递增，短线反转信号${dropped < -5 ? "（前期跌幅${dropped.toStringAsFixed(1)}%）" : ""}',
+        strength: 75,
+        timestamp: last.date,
+        duration: SignalDuration.shortTerm,
+        confidence: 0.75,
+        signalCount: 2,
+      ));
+    }
+    return signals;
+  }
+
+  static List<SignalItem> _detectGapFill(List<HistoryKline> data) {
+    final signals = <SignalItem>[];
+    if (data.length < 5) return signals;
+    for (int i = data.length - 3; i < data.length - 1; i++) {
+      if (i < 1) continue;
+      final gapUp = data[i].low - data[i - 1].high;
+      final gapUpPct = data[i - 1].high > 0 ? gapUp / data[i - 1].high * 100 : 0.0;
+      if (gapUpPct > 2) {
+        final last = data.last;
+        if (last.low <= data[i - 1].high) {
+          signals.add(SignalItem(
+            type: 'sell',
+            indicator: '缺口',
+            signal: '跳空回补',
+            description: '${gapUpPct.toStringAsFixed(1)}%向上跳空后回补缺口，假突破信号',
+            strength: 70,
+            timestamp: last.date,
+            duration: SignalDuration.shortTerm,
+            confidence: 0.70,
+            signalCount: 1,
+          ));
+        }
+      }
+    }
     return signals;
   }
 }

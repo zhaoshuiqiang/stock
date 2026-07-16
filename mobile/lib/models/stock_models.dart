@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import '../analysis/strategy_engine.dart';
 import '../analysis/backtest_engine.dart';
 import '../analysis/market_structure_analyzer.dart';
@@ -1002,6 +1003,7 @@ class SignalItem {
   final double? confidence; // 推荐可信度（0.0-1.0）
   final int signalCount; // 共振信号数量（多指标共振度）
   final DateTime? freshTime; // 指标新鲜度（最近3-5天）
+  final DateTime? detectedAt; // 信号检测时间（用于衰减计算）
 
   SignalItem({
     required this.type,
@@ -1015,7 +1017,38 @@ class SignalItem {
     this.confidence,
     this.signalCount = 1,
     this.freshTime,
+    this.detectedAt,
   });
+
+  double get effectiveConfidence {
+    if (confidence == null) return 0.5;
+    if (detectedAt == null) return confidence!;
+    final days = DateTime.now().difference(detectedAt!).inDays;
+    if (days <= 0) return confidence!;
+    final decayRate = _decayRateForIndicator(indicator);
+    return (confidence! * exp(-days * decayRate)).clamp(0.1, 1.0);
+  }
+
+  static double _decayRateForIndicator(String indicator) {
+    switch (indicator) {
+      case 'KDJ':
+      case 'RSI':
+        return 0.5;
+      case 'MA':
+      case 'MACD':
+        return 0.3;
+      case '缺口':
+        return 0.2;
+      case 'K线形态':
+        return 0.7;
+      case '背离':
+        return 0.15;
+      case '均线排列':
+        return 0.1;
+      default:
+        return 0.4;
+    }
+  }
 
   factory SignalItem.fromJson(Map<String, dynamic> json) {
     final descValue = json['desc'] ?? json['description'] ?? '';
@@ -1036,10 +1069,13 @@ class SignalItem {
           : null,
       signalCount: json['signal_count'] is int ? json['signal_count'] : 1,
       freshTime: json['fresh_time'] != null
-          ? DateTime.tryParse(json['fresh_time'])
+           ? DateTime.tryParse(json['fresh_time'])
+           : null,
+      detectedAt: json['detected_at'] != null
+          ? DateTime.tryParse(json['detected_at'])
           : null,
-    );
-  }
+     );
+   }
 
   static SignalDuration? _parseDuration(dynamic value) {
     if (value == null) return null;
@@ -1076,6 +1112,7 @@ class SignalItem {
       'confidence': confidence?.toDouble(),
       'signal_count': signalCount,
       'fresh_time': freshTime?.toIso8601String(),
+      'detected_at': detectedAt?.toIso8601String(),
     };
   }
 
@@ -1091,6 +1128,7 @@ class SignalItem {
     double? confidence,
     int? signalCount,
     DateTime? freshTime,
+    DateTime? detectedAt,
   }) {
     return SignalItem(
       type: type ?? this.type,
@@ -1104,8 +1142,151 @@ class SignalItem {
       confidence: confidence ?? this.confidence,
       signalCount: signalCount ?? this.signalCount,
       freshTime: freshTime ?? this.freshTime,
+      detectedAt: detectedAt ?? this.detectedAt,
     );
   }
+}
+
+enum OpportunityGrade { A, B, C, D }
+
+class SignalSynergy {
+  final String signalA;
+  final String signalB;
+  final bool isSynergistic;
+  final double scoreDelta;
+
+  const SignalSynergy({
+    required this.signalA,
+    required this.signalB,
+    required this.isSynergistic,
+    required this.scoreDelta,
+  });
+}
+
+class OpportunityScore {
+  final double totalScore;
+  final OpportunityGrade grade;
+  final double signalStrength;
+  final double capitalScore;
+  final double timingScore;
+  final double riskRewardScore;
+  final double liquidityScore;
+  final List<SignalSynergy> synergies;
+  final String primarySignal;
+  final String? secondarySignal;
+  final double timeDecayFactor;
+
+  const OpportunityScore({
+    required this.totalScore,
+    required this.grade,
+    required this.signalStrength,
+    required this.capitalScore,
+    required this.timingScore,
+    required this.riskRewardScore,
+    required this.liquidityScore,
+    this.synergies = const [],
+    this.primarySignal = '',
+    this.secondarySignal,
+    this.timeDecayFactor = 1.0,
+  });
+
+  static OpportunityGrade gradeFromScore(double score) {
+    if (score >= 80) return OpportunityGrade.A;
+    if (score >= 60) return OpportunityGrade.B;
+    if (score >= 40) return OpportunityGrade.C;
+    return OpportunityGrade.D;
+  }
+}
+
+enum IntradayPattern {
+  earlyRallyAndFade,
+  lowOpenAndRally,
+  sidewaysLateRally,
+  sidewaysLateDrop,
+  steadyClimb,
+  steadyDecline,
+  volatile,
+  unknown,
+}
+
+class IntradayKline {
+  final DateTime time;
+  final double open;
+  final double close;
+  final double high;
+  final double low;
+  final double volume;
+  final double amount;
+
+  const IntradayKline({
+    required this.time,
+    required this.open,
+    required this.close,
+    required this.high,
+    required this.low,
+    required this.volume,
+    required this.amount,
+  });
+
+  bool get isUp => close > open;
+  bool get isDown => close < open;
+  double get changePct => open > 0 ? (close - open) / open : 0;
+  double get amplitude => open > 0 ? (high - low) / open : 0;
+
+  factory IntradayKline.fromApi(List<dynamic> row) {
+    return IntradayKline(
+      time: DateTime.tryParse(row[0]?.toString() ?? '') ?? DateTime.now(),
+      open: (row[1] as num?)?.toDouble() ?? 0,
+      close: (row[2] as num?)?.toDouble() ?? 0,
+      high: (row[3] as num?)?.toDouble() ?? 0,
+      low: (row[4] as num?)?.toDouble() ?? 0,
+      volume: (row[5] as num?)?.toDouble() ?? 0,
+      amount: (row[6] as num?)?.toDouble() ?? 0,
+    );
+  }
+}
+
+class IntradaySignal {
+  final String type;
+  final String name;
+  final DateTime time;
+  final double confidence;
+  final String description;
+
+  const IntradaySignal({
+    required this.type,
+    required this.name,
+    required this.time,
+    required this.confidence,
+    required this.description,
+  });
+}
+
+class IntradayProfile {
+  final IntradayPattern pattern;
+  final double volumeDistribution;
+  final double momentumScore;
+  final double speedScore;
+  final List<IntradaySignal> signals;
+  final double intradayScore;
+
+  const IntradayProfile({
+    required this.pattern,
+    required this.volumeDistribution,
+    required this.momentumScore,
+    required this.speedScore,
+    required this.signals,
+    required this.intradayScore,
+  });
+
+  factory IntradayProfile.unknown() => const IntradayProfile(
+        pattern: IntradayPattern.unknown,
+        volumeDistribution: 0.5,
+        momentumScore: 5.0,
+        speedScore: 5.0,
+        signals: [],
+        intradayScore: 5.0,
+      );
 }
 
 /// 基本面评分 - 参考 TradingAgents Fundamental Analyst
@@ -1435,6 +1616,10 @@ class AnalysisResult {
   /// Batch 4 短线方向预测（方向 + 概率 + 持有期 + 可解释证据）
   final DirectionForecast? directionForecast;
 
+  final OpportunityScore? opportunityScore;
+
+  final IntradayProfile? intradayProfile;
+
   AnalysisResult({
     this.quote,
     this.indicators = const {},
@@ -1472,6 +1657,8 @@ class AnalysisResult {
     this.shortTermDecision,
     this.recommendationDecision,
     this.directionForecast,
+    this.opportunityScore,
+    this.intradayProfile,
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {
