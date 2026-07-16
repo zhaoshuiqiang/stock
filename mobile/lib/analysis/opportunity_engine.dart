@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import '../api/api_client.dart';
 import '../api/market_context_provider.dart';
 import '../core/stock_code_utils.dart';
@@ -344,13 +346,16 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
   /// [refreshPending] 内含批量网络请求，可能耗时较长，故在结果落库并通知 UI 完成后异步进行。
   Future<void> _runDecisionSideEffects(List<AnalysisResult> analysisList) async {
     try {
-      await captureDecisionBatchForTesting(
+      final batchResult = await captureDecisionBatchForTesting(
         analyses: analysisList,
         source: 'opportunity',
         tracker: DecisionTracker(),
         signalTradeDate: DateTime.now(),
         benchmarkCode: '000300',
       );
+      debugPrint(
+          'OpportunityEngine.decisionTracking: 成功 ${batchResult.success} 条，'
+          '失败 ${batchResult.failed} 条');
     } catch (_) {}
 
     // 1.15: capture 后评估 pending outcomes，否则 decision_outcomes 永远为 pending

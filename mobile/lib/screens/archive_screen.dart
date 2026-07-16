@@ -71,8 +71,9 @@ class ArchiveScreenState extends State<ArchiveScreen>
   RecommendationDirection? _decisionDirection;
   MarketRegime? _decisionMarketRegime;
   String? _decisionModelVersion = kDefaultDecisionArchiveFilter.modelVersion;
-  DecisionSignalPhase? _decisionSignalPhase =
-      kDefaultDecisionArchiveFilter.signalPhase;
+  // v3.32: 默认阶段改为 null（全部阶段），避免盘中市场扫描快照被默认 preMarket
+  // 过滤全部滤掉，导致「全市场扫描」显示为空。仅 manual 数据源保留盘前语义。
+  DecisionSignalPhase? _decisionSignalPhase = null;
   bool _decisionIncludeRetrospective =
       kDefaultDecisionArchiveFilter.includeRetrospective;
   DecisionArchiveSourceGroup _decisionSourceGroup =
@@ -195,7 +196,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
       _decisionDirection != null ||
       _decisionMarketRegime != null ||
       _decisionModelVersion != ShortTermDecisionEngine.modelVersion ||
-      _decisionSignalPhase != DecisionSignalPhase.preMarket ||
+      _decisionSignalPhase != null ||
       _decisionIncludeRetrospective ||
       _decisionSourceGroup != DecisionArchiveSourceGroup.manual ||
       _decisionTodayOnly ||
@@ -322,9 +323,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
           _buildDecisionErrorIfNeeded(),
           _buildModeSwitch(),
           const SizedBox(height: 12),
-          _buildDecisionFilters(),
-          const SizedBox(height: 8),
-          _buildDecisionGroupControls(),
+          _buildSourceSegmented(),
           const SizedBox(height: 12),
           DecisionArchiveSummary(
             summary: summary,
@@ -339,18 +338,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
             style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.5),
           ),
           const SizedBox(height: 12),
-          _buildDecisionAnalysis(rows),
-          const SizedBox(height: 12),
-          DecisionScoreDiagnosticsPanel(diagnostics: diagnostics),
-          const SizedBox(height: 12),
-          const Text(
-            '趋势优先展示多空平衡，缺少双侧样本时回退 Alpha 命中；中性稳定不与 50% 随机线比较。',
-            style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.5),
-          ),
-          const SizedBox(height: 8),
-          _buildWinRateTrend(rows),
-          const SizedBox(height: 12),
-          _buildAutoCleanControl(),
+          _buildAdvancedSection(rows, diagnostics),
           const SizedBox(height: 12),
           Wrap(
             alignment: WrapAlignment.end,
@@ -856,31 +844,43 @@ class ArchiveScreenState extends State<ArchiveScreen>
     );
   }
 
-  Widget _buildDecisionFilters() {
+  /// 数据源分段（我的留档 / 全市场扫描 / 全部）—— 常驻首屏，切换时联动阶段过滤。
+  Widget _buildSourceSegmented() {
+    return SegmentedButton<DecisionArchiveSourceGroup>(
+      segments: const [
+        ButtonSegment(
+          value: DecisionArchiveSourceGroup.manual,
+          label: Text('我的留档'),
+        ),
+        ButtonSegment(
+          value: DecisionArchiveSourceGroup.scan,
+          label: Text('全市场扫描'),
+        ),
+        ButtonSegment(
+          value: DecisionArchiveSourceGroup.all,
+          label: Text('全部'),
+        ),
+      ],
+      selected: {_decisionSourceGroup},
+      showSelectedIcon: false,
+      onSelectionChanged: (value) => setState(() {
+        _decisionSourceGroup = value.first;
+        // v3.32: 切到扫描/全部时阶段置空（全部），避免盘中扫描快照被盘前过滤滤掉；
+        // 切回我的留档时恢复盘前语义。
+        _decisionSignalPhase =
+            _decisionSourceGroup == DecisionArchiveSourceGroup.manual
+                ? DecisionSignalPhase.preMarket
+                : null;
+      }),
+    );
+  }
+
+  /// 次级筛选（方向 / 市场状态 / 阶段 / 模型版本 / 回溯补录）—— 默认收进「高级筛选与分析」。
+  Widget _buildDecisionSecondaryFilters() {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
-        SegmentedButton<DecisionArchiveSourceGroup>(
-          segments: const [
-            ButtonSegment(
-              value: DecisionArchiveSourceGroup.manual,
-              label: Text('我的留档'),
-            ),
-            ButtonSegment(
-              value: DecisionArchiveSourceGroup.scan,
-              label: Text('全市场扫描'),
-            ),
-            ButtonSegment(
-              value: DecisionArchiveSourceGroup.all,
-              label: Text('全部'),
-            ),
-          ],
-          selected: {_decisionSourceGroup},
-          showSelectedIcon: false,
-          onSelectionChanged: (value) =>
-              setState(() => _decisionSourceGroup = value.first),
-        ),
         _buildDecisionFilterDropdown<RecommendationDirection>(
           value: _decisionDirection,
           hint: '方向',
@@ -930,6 +930,39 @@ class ArchiveScreenState extends State<ArchiveScreen>
           ),
           visualDensity: VisualDensity.compact,
         ),
+      ],
+    );
+  }
+
+  /// v3.32: 把分组控件、分段分析、诊断、趋势、自动清理收进默认折叠的进阶区，
+  /// 降低「决策命中」模式首屏认知负荷，且保留全部功能。
+  Widget _buildAdvancedSection(
+    List<DecisionStatisticsRow> rows,
+    DecisionScoreDiagnosticsResult diagnostics,
+  ) {
+    return ExpansionTile(
+      title: const Text('高级筛选与分析',
+          style: TextStyle(color: Colors.white70, fontSize: 13)),
+      initiallyExpanded: false,
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(top: 8),
+      children: [
+        _buildDecisionSecondaryFilters(),
+        const SizedBox(height: 8),
+        _buildDecisionGroupControls(),
+        const SizedBox(height: 12),
+        _buildDecisionAnalysis(rows),
+        const SizedBox(height: 12),
+        DecisionScoreDiagnosticsPanel(diagnostics: diagnostics),
+        const SizedBox(height: 12),
+        const Text(
+          '趋势优先展示多空平衡，缺少双侧样本时回退 Alpha 命中；中性稳定不与 50% 随机线比较。',
+          style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.5),
+        ),
+        const SizedBox(height: 8),
+        _buildWinRateTrend(rows),
+        const SizedBox(height: 12),
+        _buildAutoCleanControl(),
       ],
     );
   }

@@ -8,22 +8,52 @@ import 'decision_outcome_evaluator.dart';
 import 'recommendation_policy.dart';
 import 'trading_date_utils.dart';
 
-Future<void> captureDecisionBatchForTesting({
+/// 批量捕获决策快照的结果汇总。
+/// [success] 成功写入数；[failed] 失败数；[failedCodes] 失败标的代码（便于排查）。
+class CaptureBatchResult {
+  final int success;
+  final int failed;
+  final List<String> failedCodes;
+
+  const CaptureBatchResult({
+    this.success = 0,
+    this.failed = 0,
+    this.failedCodes = const [],
+  });
+}
+
+/// v3.32: 逐只捕获，单只失败不影响其余（此前任一只抛异常会中断整批且被调用方吞掉，
+/// 导致全市场扫描整批决策快照静默丢失）。返回成功/失败汇总便于排查。
+Future<CaptureBatchResult> captureDecisionBatchForTesting({
   required List<AnalysisResult> analyses,
   required String source,
   required DecisionTracker tracker,
   required DateTime signalTradeDate,
   required String benchmarkCode,
 }) async {
+  var success = 0;
+  final failedCodes = <String>[];
   for (final analysis in analyses) {
     if (analysis.shortTermDecision == null || analysis.quote == null) continue;
-    await tracker.capture(
-      analysis: analysis,
-      source: source,
-      signalTradeDate: signalTradeDate,
-      benchmarkCode: benchmarkCode,
-    );
+    try {
+      await tracker.capture(
+        analysis: analysis,
+        source: source,
+        signalTradeDate: signalTradeDate,
+        benchmarkCode: benchmarkCode,
+      );
+      success++;
+    } catch (e) {
+      final code = analysis.quote?.code ?? '?';
+      failedCodes.add(code);
+      debugPrint('captureDecisionBatch 单只失败($code): $e');
+    }
   }
+  return CaptureBatchResult(
+    success: success,
+    failed: failedCodes.length,
+    failedCodes: failedCodes,
+  );
 }
 
 /// 决策快照保留天数：超过该天数的历史快照在每次扫描后自动清理，避免表无限增长。

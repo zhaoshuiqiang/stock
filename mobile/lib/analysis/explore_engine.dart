@@ -248,13 +248,17 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
     Map<String, QuoteData> quoteCache,
   ) async {
     try {
-      await captureDecisionBatchForTesting(
+      final batchResult = await captureDecisionBatchForTesting(
         analyses: analysisList,
         source: 'explore',
         tracker: DecisionTracker(),
         signalTradeDate: DateTime.now(),
         benchmarkCode: '000300',
       );
+      debugPrint(
+          'ExploreEngine.decisionTracking: 成功 ${batchResult.success} 条，'
+          '失败 ${batchResult.failed} 条'
+          '${batchResult.failedCodes.isNotEmpty ? ' (${batchResult.failedCodes.join(",")})' : ''}');
     } catch (e) {
       debugPrint('ExploreEngine.decisionTracking: $e');
     }
