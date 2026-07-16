@@ -205,7 +205,7 @@ class OpportunityIdentifier {
   static double _calcLiquidityScore(QuoteData? quote, List<HistoryKline> data) {
     double score = 3.0;
     if (quote != null) {
-      final turnover = quote.turnoverRate;
+      final turnover = quote.turnover;
       if (turnover >= 2 && turnover <= 8) score += 4.0;
       else if (turnover >= 1 && turnover < 2) score += 2.0;
       else if (turnover > 15 || turnover < 0.5) score -= 2.0;

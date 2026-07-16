@@ -601,6 +601,148 @@ class BacktestEngine {
   }
 
   // ═══════════════════════════════════════════════════════════
+  static BacktestResult backtestHammerReversal(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcRSI(d, [6]); return calcATR(r); },
+      isEntry: (p, c) {
+        final body = (c.close - c.open).abs();
+        final lowerShadow = c.open < c.close ? c.open - c.low : c.close - c.low;
+        final upperShadow = c.high - c.close > c.high - c.open ? c.high - c.close : c.high - c.open;
+        if (lowerShadow < body * 2 || upperShadow > body * 0.5) return false;
+        return true;
+      },
+      isExit: (p, c) => c.rsi6 > 65,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestBullishEngulfing(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcRSI(d, [6]); return calcATR(r); },
+      isEntry: (p, c) => p.close < p.open && c.close > c.open && c.close > p.open && c.open < p.close,
+      isExit: (p, c) => c.rsi6 > 65,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestBearishEngulfing(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcRSI(d, [6]); return calcATR(r); },
+      isEntry: (p, c) => p.close > p.open && c.close < c.open && c.close < p.open && c.open > p.close,
+      isExit: (p, c) => c.rsi6 < 35,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestPiercingPattern(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30, prepare: (d) => calcATR(d),
+      isEntry: (p, c) {
+        if (p.close >= p.open || c.close <= c.open) return false;
+        return c.close > (p.open + p.close) / 2 && c.open < p.close;
+      },
+      isExit: (p, c) => c.close > p.high,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestDarkCloudCover(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30, prepare: (d) => calcATR(d),
+      isEntry: (p, c) {
+        if (p.close <= p.open || c.close >= c.open) return false;
+        return c.close < (p.open + p.close) / 2 && c.open > p.close;
+      },
+      isExit: (p, c) => c.close < p.low,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestMorningStar(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcRSI(d, [6]); return calcATR(r); },
+      isEntry: (p, c) => p.close < p.open && (p.close - p.open).abs() < p.close * 0.01 && c.close > c.open && c.close > p.open,
+      isExit: (p, c) => c.rsi6 > 60,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestEveningStar(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcRSI(d, [6]); return calcATR(r); },
+      isEntry: (p, c) => p.close > p.open && (p.close - p.open).abs() < p.close * 0.01 && c.close < c.open && c.close < p.open,
+      isExit: (p, c) => c.rsi6 < 40,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestDojiReversal(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30, prepare: (d) => calcATR(d),
+      isEntry: (p, c) {
+        final body = (c.close - c.open).abs();
+        final range = c.high - c.low;
+        return range > 0 && body / range < 0.1;
+      },
+      isExit: (p, c) => c.close > p.high || c.close < p.low,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestGapUpBuy(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30, prepare: (d) => calcATR(d),
+      isEntry: (p, c) => p.close > 0 && c.open > p.high && (c.open - p.close) / p.close > 0.02,
+      isExit: (p, c) => c.close < p.low,
+      atrMultiplier: 1.0,
+    );
+  }
+
+  static BacktestResult backtestGapDownFill(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30, prepare: (d) => calcATR(d),
+      isEntry: (p, c) => p.close > 0 && c.open < p.low && (p.close - c.open) / p.close > 0.02,
+      isExit: (p, c) => c.close > p.low,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestWROversold(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcWR(d); return calcATR(r); },
+      isEntry: (p, c) => (p.wr14 ?? 0) > 80 && (c.wr14 ?? 0) < (p.wr14 ?? 0),
+      isExit: (p, c) => (c.wr14 ?? 0) < 20,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestCCIOversold(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcCCI(d); return calcATR(r); },
+      isEntry: (p, c) => (p.cci14 ?? 0) < -100 && (c.cci14 ?? 0) > (p.cci14 ?? 0),
+      isExit: (p, c) => (c.cci14 ?? 0) > 100,
+      atrMultiplier: 1.5,
+    );
+  }
+
+  static BacktestResult backtestCCIBreakout(List<HistoryKline> data) {
+    return _runGenericBacktest(
+      data: data, minBars: 30,
+      prepare: (d) { var r = calcCCI(d); return calcATR(r); },
+      isEntry: (p, c) => (p.cci14 ?? 0) < 0 && (c.cci14 ?? 0) > 100,
+      isExit: (p, c) => (c.cci14 ?? 0) < 0,
+      atrMultiplier: 1.5,
+    );
+  }
+
+
   // 交易成本计算
   // ═══════════════════════════════════════════════════════════
 

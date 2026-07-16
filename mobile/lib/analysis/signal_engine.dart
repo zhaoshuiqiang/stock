@@ -438,7 +438,10 @@ AnalysisResult generateAnalysis(
   // 8. 机会识别
   final opportunities = OpportunityIdentifier.identify(buySignals);
 
-  // 8a. 机会评分（5维评估+信号协同）
+  // 8a. 交易价位（提前计算，供机会评分使用）
+  final tradeLevels = calcTradeLevels(data);
+
+  // 8b. 机会评分（5维评估+信号协同）
   final opportunityScore = OpportunityIdentifier.evaluate(
     buySignals: buySignals,
     sellSignals: sellSignals,
@@ -484,7 +487,6 @@ AnalysisResult generateAnalysis(
     debugPrint('SignalEngine.structureFilter: $e');
   }
 
-  final tradeLevels = calcTradeLevels(data);
   final decisionResult = ShortTermDecisionEngine.evaluate(
     ShortTermDecisionInput(
       data: data,
