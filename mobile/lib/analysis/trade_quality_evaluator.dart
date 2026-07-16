@@ -1,4 +1,6 @@
+import '../models/short_term_decision.dart';
 import '../models/stock_models.dart';
+import 'signal_evidence_classifier.dart';
 
 class TradeQualityResult {
   final double score;
@@ -26,6 +28,7 @@ class TradeQualityEvaluator {
   static TradeQualityResult evaluate({
     required List<HistoryKline> data,
     required List<SignalItem> directionalSignals,
+    required RecommendationDirection direction,
     QuoteData? quote,
     Map<String, dynamic>? tradeLevels,
     bool primaryStrategySupported = false,
@@ -33,9 +36,9 @@ class TradeQualityEvaluator {
   }) {
     final components = <String, double>{
       'timing': _timing(directionalSignals, now ?? DateTime.now()),
-      'volume_price': _volumePrice(data, quote),
+      'volume_price': _volumePrice(data, quote, direction),
       'liquidity_turnover': _liquidityTurnover(quote),
-      'support_reward_risk': _supportRewardRisk(tradeLevels),
+      'support_reward_risk': _supportRewardRisk(tradeLevels, direction),
       'primary_strategy_support': primaryStrategySupported ? 85 : 45,
     }.map((key, value) => MapEntry(key, _bounded(value)));
     final score = components.entries.fold<double>(
@@ -71,17 +74,27 @@ class TradeQualityEvaluator {
                   ? 60.0
                   : 35.0;
       final confidence = (signal.confidence ?? 0.6).clamp(0.0, 1.0);
-      final strength = (signal.strength / 3).clamp(0.0, 1.0);
+      final strength = (signal.strength / 100).clamp(0.0, 1.0);
       final signalScore =
           freshness * 0.5 + confidence * 100 * 0.3 + strength * 100 * 0.2;
       weighted += signalScore * durationWeight;
       totalWeight += durationWeight;
     }
-    final alignmentBonus = signals.length >= 2 ? 8.0 : 0.0;
+    final independentFamilies = signals
+        .map((signal) => SignalEvidenceClassifier.classify(signal).family)
+        .toSet()
+        .length;
+    final alignmentBonus =
+        ((independentFamilies - 1).clamp(0, 2) * 4).toDouble();
     return totalWeight == 0 ? 35 : weighted / totalWeight + alignmentBonus;
   }
 
-  static double _volumePrice(List<HistoryKline> data, QuoteData? quote) {
+  static double _volumePrice(
+    List<HistoryKline> data,
+    QuoteData? quote,
+    RecommendationDirection direction,
+  ) {
+    if (direction == RecommendationDirection.neutral) return 50;
     if (data.isEmpty) return 30;
     final last = data.last;
     final ratio = quote != null && quote.volumeRatio > 0
@@ -90,10 +103,12 @@ class TradeQualityEvaluator {
             ? last.volume / last.volMa5
             : 0.0;
     final rising = last.close >= last.open;
-    if (rising && ratio >= 1.5) return 90;
-    if (rising && ratio >= 1.1) return 72;
-    if (rising && ratio > 0) return 55;
-    if (!rising && ratio >= 1.3) return 25;
+    final confirmed =
+        direction == RecommendationDirection.bullish ? rising : !rising;
+    if (confirmed && ratio >= 1.5) return 90;
+    if (confirmed && ratio >= 1.1) return 72;
+    if (confirmed && ratio > 0) return 55;
+    if (!confirmed && ratio >= 1.3) return 25;
     return 40;
   }
 
@@ -107,7 +122,11 @@ class TradeQualityEvaluator {
     return 45;
   }
 
-  static double _supportRewardRisk(Map<String, dynamic>? tradeLevels) {
+  static double _supportRewardRisk(
+    Map<String, dynamic>? tradeLevels,
+    RecommendationDirection direction,
+  ) {
+    if (direction != RecommendationDirection.bullish) return 50;
     if (tradeLevels == null || tradeLevels.isEmpty) return 40;
     final ratio = _asDouble(tradeLevels['risk_reward_ratio']);
     var score = ratio >= 3

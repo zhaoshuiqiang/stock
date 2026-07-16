@@ -466,7 +466,6 @@ AnalysisResult generateAnalysis(
       sellSignals: sellSignals,
       marketContext: marketContext,
       marketStructure: marketStructure,
-      industryRelativeStrength: percentile.industryRSScore,
       nextDayPrediction: nextDayPrediction,
       nextSessionPrediction: nextSessionPrediction,
       tradeLevels: tradeLevels,

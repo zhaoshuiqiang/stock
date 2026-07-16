@@ -47,6 +47,7 @@ void main() {
         'liquidity': 14.0,
       });
       expect(restored.modelVersion, 'short-term-v2');
+      expect(restored.evidenceTradeDate, DateTime(2026, 7, 14));
       expect(restored.rawComprehensiveScore, 7.4);
     });
 
@@ -102,6 +103,7 @@ void main() {
       expect(copied.direction, RecommendationDirection.bearish);
       expect(copied.supportingStrategyIds, <String>['defensive_reversal']);
       expect(copied.tradeQualityScore, original.tradeQualityScore);
+      expect(copied.evidenceTradeDate, original.evidenceTradeDate);
       expect(
         () => copied.supportingStrategyIds.add('mutation'),
         throwsUnsupportedError,
@@ -384,6 +386,7 @@ ShortTermDecision _sampleDecision({
     supportingStrategyIds: supportingStrategyIds ??
         <String>['volume_confirmation', 'trend_alignment'],
     dataQualityFlags: <String>['stale_fundamentals'],
+    evidenceTradeDate: DateTime(2026, 7, 14),
     modelVersion: 'short-term-v2',
     rawComprehensiveScore: rawComprehensiveScore,
   );

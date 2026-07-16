@@ -38,7 +38,7 @@ class MarketRegimeClassifier {
       );
     }
 
-    if (!_isValid(context)) {
+    if (!_isValid(context) || _isFallbackContext(context)) {
       return _result(
         MarketRegime.unknown,
         dataQualityFlags: const <String>[marketContextInvalidFlag],
@@ -145,6 +145,17 @@ class MarketRegimeClassifier {
         context.avgChangePct.isFinite &&
         context.upCount >= 0 &&
         context.downCount >= 0;
+  }
+
+  static bool _isFallbackContext(MarketContext context) {
+    final trend = context.marketTrend.trim().toLowerCase();
+    return context.shIndexPct == 0 &&
+        context.szIndexPct == 0 &&
+        context.indexChange == 0 &&
+        context.avgChangePct == 0 &&
+        context.upCount == 0 &&
+        context.downCount == 0 &&
+        (trend.isEmpty || trend == 'neutral');
   }
 
   static bool _hasBreadthPriceDivergence(

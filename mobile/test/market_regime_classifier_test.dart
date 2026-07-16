@@ -135,6 +135,40 @@ void main() {
       expect(result.marketRegime, MarketRegime.range);
       expect(result.marketBias, 0);
     });
+
+    test('rejects the all-zero fallback context as invalid', () {
+      final result = MarketRegimeClassifier.classify(
+        _context(
+          marketTrend: 'neutral',
+          shIndexPct: 0,
+          szIndexPct: 0,
+          avgChangePct: 0,
+          upCount: 0,
+          downCount: 0,
+        ),
+      );
+
+      expect(result.marketRegime, MarketRegime.unknown);
+      expect(result.marketBias, 0);
+      expect(result.dataQualityFlags, contains('market_context_invalid'));
+    });
+
+    test('keeps a genuinely flat market with breadth as range', () {
+      final result = MarketRegimeClassifier.classify(
+        _context(
+          marketTrend: 'neutral',
+          shIndexPct: 0,
+          szIndexPct: 0,
+          avgChangePct: 0,
+          upCount: 2100,
+          downCount: 2100,
+        ),
+      );
+
+      expect(result.marketRegime, MarketRegime.range);
+      expect(
+          result.dataQualityFlags, isNot(contains('market_context_invalid')));
+    });
   });
 }
 

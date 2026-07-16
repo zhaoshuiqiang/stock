@@ -153,6 +153,6 @@ class SignalConfluenceAnnotator {
                       .toInt() ??
                   1,
             ))
-        .toList(growable: false);
+        .toList();
   }
 }

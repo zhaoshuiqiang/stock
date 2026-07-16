@@ -18,6 +18,7 @@ class ShortTermDecisionInput {
   final List<SignalItem> sellSignals;
   final MarketContext? marketContext;
   final MarketStructureResult? marketStructure;
+  @Deprecated('V3 derives relative strength from completed stock/market data')
   final double? industryRelativeStrength;
   final NextDayPredictionResult nextDayPrediction;
   final NextSessionPrediction nextSessionPrediction;
@@ -52,7 +53,7 @@ class ShortTermDecisionResult {
 }
 
 class ShortTermDecisionEngine {
-  static const String modelVersion = 'short-term-v2';
+  static const String modelVersion = 'short-term-v3';
 
   static ShortTermDecisionResult evaluate(ShortTermDecisionInput input) {
     final evidence = DirectionalEvidenceBuilder.build(
@@ -63,7 +64,8 @@ class ShortTermDecisionEngine {
         quote: input.quote,
         marketContext: input.marketContext,
         marketStructure: input.marketStructure,
-        industryRelativeStrength: input.industryRelativeStrength,
+        stockLastCompletedChangePct:
+            input.data.isEmpty ? null : input.data.last.changePct,
         nextDayPrediction: input.nextDayPrediction,
         nextSessionPrediction: input.nextSessionPrediction,
       ),
@@ -87,6 +89,7 @@ class ShortTermDecisionEngine {
     final quality = TradeQualityEvaluator.evaluate(
       data: input.data,
       directionalSignals: directionalSignals,
+      direction: direction,
       quote: input.quote,
       tradeLevels: input.tradeLevels,
       primaryStrategySupported: selection.primary != null,
@@ -110,6 +113,7 @@ class ShortTermDecisionEngine {
       primaryStrategyName: selection.primary?.name,
       supportingStrategyIds: selection.supportingIds,
       dataQualityFlags: evidence.dataQualityFlags,
+      evidenceTradeDate: input.data.isEmpty ? null : input.data.last.date,
       modelVersion: modelVersion,
       rawComprehensiveScore: input.rawComprehensiveScore,
     );
@@ -120,8 +124,10 @@ class ShortTermDecisionEngine {
   }
 
   static RecommendationDirection _directionOf(double score) {
-    if (score >= kDirectionBullishThreshold) return RecommendationDirection.bullish;
-    if (score <= kDirectionBearishThreshold) return RecommendationDirection.bearish;
+    if (score >= kDirectionBullishThreshold)
+      return RecommendationDirection.bullish;
+    if (score <= kDirectionBearishThreshold)
+      return RecommendationDirection.bearish;
     return RecommendationDirection.neutral;
   }
 }

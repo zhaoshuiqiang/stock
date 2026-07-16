@@ -17,6 +17,7 @@ void main() {
       final weak = TradeQualityEvaluator.evaluate(
         data: data,
         directionalSignals: const [],
+        direction: RecommendationDirection.bullish,
         quote: _quote(turnover: 4),
         now: now,
       );
@@ -29,6 +30,7 @@ void main() {
             freshTime: now.subtract(const Duration(days: 2)),
           ),
         ],
+        direction: RecommendationDirection.bullish,
         quote: _quote(turnover: 4, volumeRatio: 1.8),
         now: now,
       );
@@ -46,12 +48,14 @@ void main() {
       final poor = TradeQualityEvaluator.evaluate(
         data: data,
         directionalSignals: const [],
+        direction: RecommendationDirection.bullish,
         quote: _quote(turnover: 4),
         tradeLevels: const {'risk_reward_ratio': 0.8},
       );
       final good = TradeQualityEvaluator.evaluate(
         data: data,
         directionalSignals: const [],
+        direction: RecommendationDirection.bullish,
         quote: _quote(turnover: 4),
         tradeLevels: const {
           'risk_reward_ratio': 2.8,
@@ -63,6 +67,66 @@ void main() {
 
       expect(good.supportRewardRisk, greaterThan(poor.supportRewardRisk));
       expect(good.score, greaterThan(poor.score));
+    });
+
+    test('volume price confirmation is direction aware', () {
+      final rising = _klines(
+        close: [10, 10.1, 10.2, 10.3, 10.6],
+        volume: [1000, 1000, 1000, 1000, 1800],
+      );
+      final falling = _klines(
+        close: [10.6, 10.5, 10.4, 10.3, 10.0],
+        volume: [1000, 1000, 1000, 1000, 1800],
+      );
+
+      double volumePrice(
+        RecommendationDirection direction,
+        List<HistoryKline> data,
+      ) =>
+          TradeQualityEvaluator.evaluate(
+            data: data,
+            directionalSignals: const [],
+            direction: direction,
+            quote: _quote(turnover: 4, volumeRatio: 1.8),
+          ).volumePrice;
+
+      expect(
+        volumePrice(RecommendationDirection.bullish, rising),
+        greaterThan(volumePrice(RecommendationDirection.bullish, falling)),
+      );
+      expect(
+        volumePrice(RecommendationDirection.bearish, falling),
+        greaterThan(volumePrice(RecommendationDirection.bearish, rising)),
+      );
+      expect(volumePrice(RecommendationDirection.neutral, rising), 50);
+      expect(volumePrice(RecommendationDirection.neutral, falling), 50);
+    });
+
+    test('production signal strength changes timing without saturation', () {
+      final now = DateTime(2026, 7, 15);
+      double timing(int strength) => TradeQualityEvaluator.evaluate(
+            data: _klines(close: [10], volume: [1000]),
+            directionalSignals: [
+              _signal(strength: strength, confidence: 0.8, freshTime: now),
+            ],
+            direction: RecommendationDirection.bullish,
+            now: now,
+          ).timing;
+
+      expect(timing(75), greaterThan(timing(45)));
+      expect(timing(75), lessThan(100));
+    });
+
+    test('bearish quality does not borrow bullish reward-risk scoring', () {
+      double support(double ratio) => TradeQualityEvaluator.evaluate(
+            data: _klines(close: [10], volume: [1000]),
+            directionalSignals: const [],
+            direction: RecommendationDirection.bearish,
+            tradeLevels: {'risk_reward_ratio': ratio, 'has_support': true},
+          ).supportRewardRisk;
+
+      expect(support(0.8), 50);
+      expect(support(3.5), 50);
     });
   });
 
@@ -139,6 +203,7 @@ void main() {
       directionalSignals: [
         _signal(strength: 99, confidence: 5, freshTime: DateTime(2030)),
       ],
+      direction: RecommendationDirection.bullish,
       quote: _quote(turnover: 100, volumeRatio: 100),
       tradeLevels: const {'risk_reward_ratio': 100},
       primaryStrategySupported: true,
@@ -210,7 +275,7 @@ List<HistoryKline> _klines({
 
 SignalItem _signal({
   String indicator = 'KDJ',
-  int strength = 3,
+  int strength = 60,
   double confidence = 0.8,
   DateTime? freshTime,
 }) {

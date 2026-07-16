@@ -69,7 +69,15 @@ void main() {
           sellSignals: <SignalItem>[
             _signal(type: 'sell', indicator: 'MACD', strength: 90),
           ],
-          industryRelativeStrength: -100,
+          stockLastCompletedChangePct: -5,
+          marketContext: _market(
+            marketTrend: 'neutral',
+            shIndexPct: 0,
+            szIndexPct: 0,
+            avgChangePct: 0,
+            upCount: 2200,
+            downCount: 2100,
+          ),
           nextSessionPrediction: const NextSessionPrediction(
             nextOpenUpProbability: 0.2,
             nextCloseUpProbability: 0.2,
@@ -142,7 +150,7 @@ void main() {
           buySignals: <SignalItem>[
             _signal(type: 'buy', indicator: 'MA', strength: 90),
           ],
-          industryRelativeStrength: 100,
+          stockLastCompletedChangePct: 6,
           marketContext: _market(
             marketTrend: 'strong_up',
             shIndexPct: 1.2,
@@ -311,7 +319,15 @@ void main() {
           sellSignals: <SignalItem>[
             _signal(type: 'sell', indicator: 'MACD', strength: 90),
           ],
-          industryRelativeStrength: -100,
+          stockLastCompletedChangePct: -5,
+          marketContext: _market(
+            marketTrend: 'neutral',
+            shIndexPct: 0,
+            szIndexPct: 0,
+            avgChangePct: 0,
+            upCount: 2200,
+            downCount: 2100,
+          ),
           nextSessionPrediction: const NextSessionPrediction(
             nextOpenUpProbability: 0.2,
             nextCloseUpProbability: 0.2,
@@ -383,7 +399,7 @@ void main() {
           buySignals: <SignalItem>[
             _signal(type: 'buy', indicator: 'MA', strength: 90),
           ],
-          industryRelativeStrength: 100,
+          stockLastCompletedChangePct: 6,
           marketContext: _market(
             marketTrend: 'strong_up',
             shIndexPct: 1.2,
@@ -463,7 +479,7 @@ DirectionalEvidenceInput _input({
   QuoteData? quote,
   MarketContext? marketContext,
   MarketStructureResult? marketStructure,
-  double? industryRelativeStrength,
+  double? stockLastCompletedChangePct,
   NextDayPredictionResult? nextDayPrediction,
   NextSessionPrediction nextSessionPrediction =
       const NextSessionPrediction.neutral(),
@@ -476,7 +492,7 @@ DirectionalEvidenceInput _input({
     quote: quote ?? QuoteData(code: '000001', price: inputData.last.close),
     marketContext: marketContext,
     marketStructure: marketStructure ?? MarketStructureResult.unknown(),
-    industryRelativeStrength: industryRelativeStrength,
+    stockLastCompletedChangePct: stockLastCompletedChangePct,
     nextDayPrediction: nextDayPrediction ?? _prediction(),
     nextSessionPrediction: nextSessionPrediction,
   );

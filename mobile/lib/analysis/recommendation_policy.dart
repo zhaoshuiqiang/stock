@@ -4,6 +4,12 @@ const String _tradeQualityBelowThreshold = 'trade_quality_below_threshold';
 const String _riskAboveThreshold = 'risk_above_threshold';
 const String _evidenceConfidenceBelowThreshold =
     'evidence_confidence_below_threshold';
+const String _criticalDataMissing = 'critical_data_missing';
+const Set<String> _criticalDataFlags = <String>{
+  'history_data_missing',
+  'market_context_missing',
+  'market_context_invalid',
+};
 
 // 方向分数阈值（9级强度映射）
 const double _kStrongBearishThreshold = -55.0;
@@ -116,6 +122,11 @@ class RecommendationPolicy {
     ShortTermDecision decision,
   ) {
     final gates = <String>[];
+
+    if (_isActionableLevel(level) &&
+        decision.dataQualityFlags.any(_criticalDataFlags.contains)) {
+      gates.add(_criticalDataMissing);
+    }
 
     switch (level) {
       case RecommendationLevel.strongBullish:

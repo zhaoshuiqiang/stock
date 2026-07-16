@@ -73,7 +73,11 @@ class EvidenceConfidenceCalculator {
         .length;
     var score = (covered / 5).clamp(0.0, 1.0) * 100;
     for (final flag in dataQualityFlags.toSet()) {
-      score -= flag.contains('missing') ? 18 : 10;
+      score -= flag == 'evidence_family_conflict'
+          ? 15
+          : flag.contains('missing')
+              ? 18
+              : 10;
     }
     return score;
   }

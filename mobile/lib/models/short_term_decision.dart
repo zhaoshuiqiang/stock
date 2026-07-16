@@ -102,6 +102,7 @@ class ShortTermDecision {
   final String? primaryStrategyName;
   final List<String> supportingStrategyIds;
   final List<String> dataQualityFlags;
+  final DateTime? evidenceTradeDate;
   final String modelVersion;
   final double rawComprehensiveScore;
 
@@ -120,6 +121,7 @@ class ShortTermDecision {
     this.primaryStrategyName,
     List<String> supportingStrategyIds = const [],
     List<String> dataQualityFlags = const [],
+    this.evidenceTradeDate,
     required this.modelVersion,
     required this.rawComprehensiveScore,
   })  : calibrationByHorizon = Map<int, CalibrationEstimate>.unmodifiable(
@@ -203,6 +205,7 @@ class ShortTermDecision {
       primaryStrategyName: json['primary_strategy_name'] as String?,
       supportingStrategyIds: _stringList(json['supporting_strategy_ids']),
       dataQualityFlags: _stringList(json['data_quality_flags']),
+      evidenceTradeDate: _dateValue(json['evidence_trade_date']),
       modelVersion: json['model_version'] as String? ?? '',
       rawComprehensiveScore: _doubleValue(
         json['raw_comprehensive_score'],
@@ -232,6 +235,7 @@ class ShortTermDecision {
         'primary_strategy_name': primaryStrategyName,
         'supporting_strategy_ids': List<String>.from(supportingStrategyIds),
         'data_quality_flags': List<String>.from(dataQualityFlags),
+        'evidence_trade_date': _dateOnly(evidenceTradeDate),
         'model_version': modelVersion,
         'raw_comprehensive_score': rawComprehensiveScore,
       };
@@ -251,6 +255,7 @@ class ShortTermDecision {
     String? primaryStrategyName,
     List<String>? supportingStrategyIds,
     List<String>? dataQualityFlags,
+    DateTime? evidenceTradeDate,
     String? modelVersion,
     double? rawComprehensiveScore,
   }) {
@@ -270,6 +275,7 @@ class ShortTermDecision {
       supportingStrategyIds:
           supportingStrategyIds ?? this.supportingStrategyIds,
       dataQualityFlags: dataQualityFlags ?? this.dataQualityFlags,
+      evidenceTradeDate: evidenceTradeDate ?? this.evidenceTradeDate,
       modelVersion: modelVersion ?? this.modelVersion,
       rawComprehensiveScore:
           rawComprehensiveScore ?? this.rawComprehensiveScore,
@@ -467,3 +473,22 @@ List<String> _stringList(Object? value) {
   // 安全转换：将所有元素转为 String，防止非 String 元素导致下游崩溃
   return value.map((item) => item.toString()).toList(growable: false);
 }
+
+DateTime? _dateValue(Object? value) {
+  if (value is DateTime) {
+    return DateTime(value.year, value.month, value.day);
+  }
+  if (value is String && value.isNotEmpty) {
+    final parsed = DateTime.tryParse(value);
+    return parsed == null
+        ? null
+        : DateTime(parsed.year, parsed.month, parsed.day);
+  }
+  return null;
+}
+
+String? _dateOnly(DateTime? value) => value == null
+    ? null
+    : '${value.year.toString().padLeft(4, '0')}-'
+        '${value.month.toString().padLeft(2, '0')}-'
+        '${value.day.toString().padLeft(2, '0')}';

@@ -390,6 +390,45 @@ void main() {
       expect(result.actionable, isTrue);
       expect(result.gates, isEmpty);
     });
+
+    for (final flag in const <String>[
+      'history_data_missing',
+      'market_context_missing',
+      'market_context_invalid',
+    ]) {
+      test('critical data flag $flag downgrades bullish execution', () {
+        final result = RecommendationPolicy.evaluate(
+          _decision(
+            directionScore: 35,
+            tradeQualityScore: 70,
+            riskScore: 30,
+            evidenceConfidence: 70,
+            dataQualityFlags: <String>[flag],
+          ),
+        );
+
+        expect(result.direction, RecommendationDirection.bullish);
+        expect(result.level, RecommendationLevel.bullishWatch);
+        expect(result.actionable, isFalse);
+        expect(result.gates, contains('critical_data_missing'));
+      });
+    }
+
+    test('critical data downgrades bearish execution without flipping sign',
+        () {
+      final result = RecommendationPolicy.evaluate(
+        _decision(
+          directionScore: -35,
+          evidenceConfidence: 70,
+          dataQualityFlags: const <String>['market_context_invalid'],
+        ),
+      );
+
+      expect(result.direction, RecommendationDirection.bearish);
+      expect(result.level, RecommendationLevel.bearishWatch);
+      expect(result.actionable, isFalse);
+      expect(result.gates, contains('critical_data_missing'));
+    });
   });
 
   group('RecommendationPolicy bullish gate boundaries', () {
@@ -761,6 +800,7 @@ ShortTermDecision _decision({
   double tradeQualityScore = 70,
   double riskScore = 45,
   double evidenceConfidence = 65,
+  List<String> dataQualityFlags = const <String>[],
 }) {
   return ShortTermDecision(
     directionScore: directionScore,
@@ -769,6 +809,7 @@ ShortTermDecision _decision({
     evidenceConfidence: evidenceConfidence,
     direction: RecommendationDirection.neutral,
     marketRegime: MarketRegime.unknown,
+    dataQualityFlags: dataQualityFlags,
     modelVersion: 'test',
     rawComprehensiveScore: 0,
   );

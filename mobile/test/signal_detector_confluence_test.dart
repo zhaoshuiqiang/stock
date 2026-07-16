@@ -24,6 +24,19 @@ void main() {
     expect(annotated.map((signal) => signal.confidence),
         orderedEquals(<double?>[0.5, 0.6, 0.7, 0.8]));
   });
+
+  test('annotated signal list remains growable for downstream enrichment', () {
+    final annotated = SignalConfluenceAnnotator.annotate(<SignalItem>[
+      _signal(type: 'buy', indicator: 'MA', confidence: 0.5),
+    ]);
+
+    expect(
+      () => annotated.add(
+        _signal(type: 'buy', indicator: 'RSI', confidence: 0.6),
+      ),
+      returnsNormally,
+    );
+  });
 }
 
 SignalItem _signal({

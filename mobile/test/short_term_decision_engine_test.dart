@@ -7,7 +7,7 @@ import 'package:stock_analyzer/models/short_term_decision.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 
 void main() {
-  test('neutral data returns score 5 observation and v2 model', () {
+  test('neutral data returns score 5 observation and v3 model', () {
     final result = ShortTermDecisionEngine.evaluate(_input(
       data: _data(trend: 0),
     ));
@@ -15,7 +15,8 @@ void main() {
     expect(result.decision.direction, RecommendationDirection.neutral);
     expect(result.recommendation.legacyScore, 5);
     expect(result.recommendation.actionable, isFalse);
-    expect(result.decision.modelVersion, 'short-term-v2');
+    expect(result.decision.modelVersion, 'short-term-v3');
+    expect(result.decision.evidenceTradeDate, DateTime(2026, 7, 6));
   });
 
   test('clean bullish evidence selects one compatible primary strategy', () {
@@ -68,6 +69,40 @@ void main() {
     expect(
         result.decision.dataQualityFlags, contains('market_context_missing'));
   });
+
+  test('relative strength is centered on stock performance versus market', () {
+    double relative(double stockChange, double marketChange) =>
+        ShortTermDecisionEngine.evaluate(
+          _input(
+            data: _data(trend: 0, lastChangePct: stockChange),
+            marketContext: _market(avgChangePct: marketChange),
+          ),
+        ).decision.directionComponents['relative_strength']!;
+
+    expect(relative(1.2, 1.2), 0);
+    expect(relative(3, 1), closeTo(0.4, 0.000001));
+    expect(relative(-2, 1), closeTo(-0.6, 0.000001));
+  });
+
+  test('legacy percentile relative score cannot bias v3 direction', () {
+    final low = ShortTermDecisionEngine.evaluate(
+      _input(
+        data: _data(trend: 0, lastChangePct: 1),
+        marketContext: _market(avgChangePct: 1),
+        industryRelativeStrength: 0.05,
+      ),
+    );
+    final high = ShortTermDecisionEngine.evaluate(
+      _input(
+        data: _data(trend: 0, lastChangePct: 1),
+        marketContext: _market(avgChangePct: 1),
+        industryRelativeStrength: 0.95,
+      ),
+    );
+
+    expect(high.decision.directionScore, low.decision.directionScore);
+    expect(high.decision.directionComponents['relative_strength'], 0);
+  });
 }
 
 ShortTermDecisionInput _input({
@@ -75,6 +110,8 @@ ShortTermDecisionInput _input({
   List<SignalItem> buySignals = const [],
   List<SignalItem> sellSignals = const [],
   QuoteData? quote,
+  MarketContext? marketContext,
+  double? industryRelativeStrength,
   List<TradingStrategy> activeStrategies = const [],
   NextDayPredictionResult? nextDayPrediction,
   NextSessionPrediction nextSessionPrediction =
@@ -85,9 +122,9 @@ ShortTermDecisionInput _input({
     quote: quote,
     buySignals: buySignals,
     sellSignals: sellSignals,
-    marketContext: null,
+    marketContext: marketContext,
     marketStructure: null,
-    industryRelativeStrength: null,
+    industryRelativeStrength: industryRelativeStrength,
     nextDayPrediction: nextDayPrediction ?? _prediction(),
     nextSessionPrediction: nextSessionPrediction,
     tradeLevels: const {
@@ -99,7 +136,7 @@ ShortTermDecisionInput _input({
   );
 }
 
-List<HistoryKline> _data({required int trend}) {
+List<HistoryKline> _data({required int trend, double? lastChangePct}) {
   return List.generate(6, (index) {
     final close = trend == 0 ? 10.0 : 10 + index * 0.2 * trend;
     final open = close - 0.08 * trend;
@@ -111,7 +148,8 @@ List<HistoryKline> _data({required int trend}) {
       close: close,
       volume: trend == 0 ? 1000 : 1000 + index * 300,
       amount: close * 1000,
-      changePct: trend * 1.5,
+      changePct:
+          index == 5 && lastChangePct != null ? lastChangePct : trend * 1.5,
       amplitude: 3,
       turnover: 4,
       ma5: trend == 0 ? 10 : close,
@@ -132,7 +170,7 @@ SignalItem _signal(String indicator) => SignalItem(
       type: 'buy',
       indicator: indicator,
       signal: 'test',
-      strength: 8,
+      strength: 80,
       confidence: 0.9,
       duration: SignalDuration.shortTerm,
       freshTime: DateTime(2026, 7, 15),
@@ -163,4 +201,15 @@ NextDayPredictionResult _prediction({double up = 0.5, double down = 0.5}) =>
       sampleCount: 20,
       description: 'test',
       featureBins: const {},
+    );
+
+MarketContext _market({required double avgChangePct}) => MarketContext(
+      shIndexPct: avgChangePct,
+      szIndexPct: avgChangePct,
+      indexChange: avgChangePct,
+      marketTrend: 'neutral',
+      upCount: 2100,
+      downCount: 2100,
+      avgChangePct: avgChangePct,
+      updateTime: DateTime(2026, 7, 6),
     );

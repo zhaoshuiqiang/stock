@@ -24,7 +24,7 @@ class DirectionalEvidenceInput {
   final QuoteData? quote;
   final MarketContext? marketContext;
   final MarketStructureResult? marketStructure;
-  final double? industryRelativeStrength;
+  final double? stockLastCompletedChangePct;
   final NextDayPredictionResult nextDayPrediction;
   final NextSessionPrediction nextSessionPrediction;
 
@@ -35,7 +35,7 @@ class DirectionalEvidenceInput {
     this.quote,
     this.marketContext,
     this.marketStructure,
-    this.industryRelativeStrength,
+    this.stockLastCompletedChangePct,
     required this.nextDayPrediction,
     required this.nextSessionPrediction,
   });
@@ -152,7 +152,11 @@ class DirectionalEvidenceBuilder {
       _EvidenceObservation(
         component: relativeStrengthComponentKey,
         family: 'relative_strength',
-        signedValue: _relativeStrength(input.industryRelativeStrength),
+        signedValue: _relativeStrength(
+          input.stockLastCompletedChangePct,
+          input.marketContext,
+          market,
+        ),
         source: 'numeric',
       ),
       ..._nextSessionEvidence(
@@ -429,15 +433,21 @@ class DirectionalEvidenceBuilder {
     return values;
   }
 
-  static double _relativeStrength(double? industryRelativeStrength) {
-    if (industryRelativeStrength == null ||
-        !industryRelativeStrength.isFinite) {
+  static double _relativeStrength(
+    double? stockLastCompletedChangePct,
+    MarketContext? context,
+    MarketRegimeClassification classification,
+  ) {
+    if (stockLastCompletedChangePct == null ||
+        !stockLastCompletedChangePct.isFinite ||
+        context == null ||
+        classification.dataQualityFlags.contains(marketContextMissingFlag) ||
+        classification.dataQualityFlags.contains(marketContextInvalidFlag)) {
       return 0;
     }
-    final normalized = industryRelativeStrength.abs() > 1
-        ? industryRelativeStrength / 100
-        : industryRelativeStrength;
-    return _clampUnit(normalized);
+    return _clampUnit(
+      (stockLastCompletedChangePct - context.avgChangePct) / 5,
+    );
   }
 
   static List<_EvidenceObservation> _nextSessionEvidence(
