@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -216,57 +217,11 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       emit(ExploreProgress(status: ExploreStatus.saving));
       await _dbService.replaceExploreResults(results);
 
-      try {
-        await captureDecisionBatchForTesting(
-          analyses: analysisList,
-          source: 'explore',
-          tracker: DecisionTracker(),
-          signalTradeDate: DateTime.now(),
-          benchmarkCode: '000300',
-        );
-      } catch (e) {
-        debugPrint('ExploreEngine.decisionTracking: $e');
-      }
-
-      // 1.15: capture 后评估 pending outcomes，否则 decision_outcomes 永远为 pending
-      try {
-        await DecisionTracker().refreshPending(limit: 100);
-      } catch (e) {
-        debugPrint('ExploreEngine.refreshPending: $e');
-      }
-
-      // 自动清理超过保留期的历史决策数据，防止决策表无限增长
-      try {
-        final removed = await DecisionTracker().purgeOldSnapshots();
-        if (removed > 0) {
-          debugPrint('ExploreEngine.purgeOldSnapshots: 已清理 $removed 条旧决策快照');
-        }
-      } catch (e) {
-        debugPrint('ExploreEngine.purgeOldSnapshots: $e');
-      }
-
-      // Phase 3: 批量记录推荐快照（事务内一次性写入，避免逐只 track 的并发开销）
-      try {
-        await RecommendationTracker().trackBatch(analysisList);
-      } catch (e) {
-        debugPrint('trackBatch失败: $e');
-      }
-
-      // Phase 3: 更新历史推荐收益率
-      try {
-        final pricesByCode = <String, double>{};
-        for (final q in quoteCache.values) {
-          pricesByCode[q.code] = q.price;
-        }
-        await RecommendationTracker().updateReturns(pricesByCode);
-      } catch (e) {
-        debugPrint('ExploreEngine.updateReturns: $e');
-      }
-
       final elapsed = DateTime.now().difference(startTime);
       debugPrint(
-          'Explore completed: ${results.length} stocks in ${elapsed.inSeconds}s (optimized)');
+          'Explore 分析完成，结果已落库: ${results.length} stocks in ${elapsed.inSeconds}s (optimized)');
 
+      // 先把结果通知 UI 完成，避免后续的决策追踪/推荐回测（含批量网络请求）卡在“保存结果”
       emit(ExploreProgress(
         status: ExploreStatus.complete,
         results: results,
@@ -275,11 +230,68 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         elapsedSeconds: elapsed.inSeconds,
         marketTiming: marketTiming,
       ));
+
+      // 决策追踪 / 推荐快照 / 收益回测 等副作用放到后台执行，不阻塞结果展示
+      unawaited(_runDecisionSideEffects(analysisList, quoteCache));
     } catch (e) {
       debugPrint('ExploreEngine error: $e');
       emit(ExploreProgress(status: ExploreStatus.error, message: '分析出错：$e'));
     } finally {
       markFinished();
+    }
+  }
+
+  /// 后台执行决策追踪副作用（不阻塞分析结果展示）。
+  /// [refreshPending] 内含批量网络请求，可能耗时很长，故在结果落库并通知 UI 完成后异步进行。
+  Future<void> _runDecisionSideEffects(
+    List<AnalysisResult> analysisList,
+    Map<String, QuoteData> quoteCache,
+  ) async {
+    try {
+      await captureDecisionBatchForTesting(
+        analyses: analysisList,
+        source: 'explore',
+        tracker: DecisionTracker(),
+        signalTradeDate: DateTime.now(),
+        benchmarkCode: '000300',
+      );
+    } catch (e) {
+      debugPrint('ExploreEngine.decisionTracking: $e');
+    }
+
+    // 1.15: capture 后评估 pending outcomes，否则 decision_outcomes 永远为 pending
+    try {
+      await DecisionTracker().refreshPending(limit: 100);
+    } catch (e) {
+      debugPrint('ExploreEngine.refreshPending: $e');
+    }
+
+    // 自动清理超过保留期的历史决策数据，防止决策表无限增长
+    try {
+      final removed = await DecisionTracker().purgeOldSnapshots();
+      if (removed > 0) {
+        debugPrint('ExploreEngine.purgeOldSnapshots: 已清理 $removed 条旧决策快照');
+      }
+    } catch (e) {
+      debugPrint('ExploreEngine.purgeOldSnapshots: $e');
+    }
+
+    // Phase 3: 批量记录推荐快照（事务内一次性写入，避免逐只 track 的并发开销）
+    try {
+      await RecommendationTracker().trackBatch(analysisList);
+    } catch (e) {
+      debugPrint('trackBatch失败: $e');
+    }
+
+    // Phase 3: 更新历史推荐收益率
+    try {
+      final pricesByCode = <String, double>{};
+      for (final q in quoteCache.values) {
+        pricesByCode[q.code] = q.price;
+      }
+      await RecommendationTracker().updateReturns(pricesByCode);
+    } catch (e) {
+      debugPrint('ExploreEngine.updateReturns: $e');
     }
   }
 

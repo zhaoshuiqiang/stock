@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.28.20260716',
+        'date': '2026-07-16',
+        'changes': [
+          '修复: 自选页分析、全市场扫描一直卡在「保存结果」不动',
+          '根因: 「保存结果」阶段混入了决策追踪网络回测(refreshPending 最多100个pending串行联网)，UI被长时间阻塞',
+          '修复: 结果落库后立即通知UI完成(按钮恢复、列表刷新)，决策追踪/推荐回测等副作用改为后台异步执行',
+        ],
+      },
+      {
         'version': 'v3.27.20260716',
         'date': '2026-07-16',
         'changes': [

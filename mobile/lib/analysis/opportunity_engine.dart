@@ -321,40 +321,49 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       await _dbService.replaceOpportunityResults(
           opportunities.map((o) => o.toMap(DateTime.now())).toList());
 
-      try {
-        await captureDecisionBatchForTesting(
-          analyses: analysisList,
-          source: 'opportunity',
-          tracker: DecisionTracker(),
-          signalTradeDate: DateTime.now(),
-          benchmarkCode: '000300',
-        );
-      } catch (_) {}
-
-      // 1.15: capture 后评估 pending outcomes，否则 decision_outcomes 永远为 pending
-      try {
-        await DecisionTracker().refreshPending(limit: 100);
-      } catch (_) {}
-
-      // 自动清理超过保留期的历史决策数据，防止决策表无限增长
-      try {
-        final removed = await DecisionTracker().purgeOldSnapshots();
-        if (removed > 0) {
-          print('OpportunityEngine.purgeOldSnapshots: 已清理 $removed 条旧决策快照');
-        }
-      } catch (_) {}
-
+      // 结果落库后立刻通知 UI 完成，解除“保存结果”卡死（让按钮恢复、列表刷新）
       emit(OpportunityProgress(
           status: OpportunityStatus.complete,
           results: opportunities,
           totalCount: totalCount,
           completedCount: totalCount,
           marketTiming: marketTimingResult));
+
+      // 决策追踪属于副作用，且 refreshPending 会对 pending 决策逐个发起网络请求回测，
+      // 可能耗时很长。放到后台异步执行，避免阻塞 UI 一直卡在“保存结果”。
+      unawaited(_runDecisionSideEffects(analysisList));
     } catch (e) {
       emit(OpportunityProgress(
           status: OpportunityStatus.error, message: '分析出错：$e'));
     } finally {
       markFinished();
     }
+  }
+
+  /// 后台执行决策追踪副作用（不阻塞分析结果展示）。
+  /// [refreshPending] 内含批量网络请求，可能耗时较长，故在结果落库并通知 UI 完成后异步进行。
+  Future<void> _runDecisionSideEffects(List<AnalysisResult> analysisList) async {
+    try {
+      await captureDecisionBatchForTesting(
+        analyses: analysisList,
+        source: 'opportunity',
+        tracker: DecisionTracker(),
+        signalTradeDate: DateTime.now(),
+        benchmarkCode: '000300',
+      );
+    } catch (_) {}
+
+    // 1.15: capture 后评估 pending outcomes，否则 decision_outcomes 永远为 pending
+    try {
+      await DecisionTracker().refreshPending(limit: 100);
+    } catch (_) {}
+
+    // 自动清理超过保留期的历史决策数据，防止决策表无限增长
+    try {
+      final removed = await DecisionTracker().purgeOldSnapshots();
+      if (removed > 0) {
+        print('OpportunityEngine.purgeOldSnapshots: 已清理 $removed 条旧决策快照');
+      }
+    } catch (_) {}
   }
 }
