@@ -59,15 +59,31 @@ class DecisionStatisticsSummary {
   final int pendingCount;
   final int maturedPendingCount;
   final int invalidCount;
+  final int rawHitSampleCount;
+  final int effectiveHitSampleCount;
+  final int alphaHitSampleCount;
+  final int bullishSampleCount;
+  final int bearishSampleCount;
+  final int neutralSampleCount;
+  final int orientedSampleCount;
+  final int orientedAlphaSampleCount;
   final double? coverage;
   final double? rawHitRate;
   final double? effectiveHitRate;
   final double? alphaHitRate;
+  final double? bullishEffectiveHitRate;
+  final double? bearishEffectiveHitRate;
+  final double? balancedEffectiveHitRate;
+  final double? neutralStabilityRate;
   final ConfidenceInterval? rawHitWilson;
   final double? meanReturn;
   final double? medianReturn;
   final double? meanAlpha;
   final double? medianAlpha;
+  final double? meanOrientedReturn;
+  final double? medianOrientedReturn;
+  final double? meanOrientedAlpha;
+  final double? medianOrientedAlpha;
   final double? meanMfe;
   final double? meanMae;
   final DecisionCalibrationQuality calibration;
@@ -77,15 +93,31 @@ class DecisionStatisticsSummary {
     required this.pendingCount,
     required this.maturedPendingCount,
     required this.invalidCount,
+    this.rawHitSampleCount = 0,
+    this.effectiveHitSampleCount = 0,
+    this.alphaHitSampleCount = 0,
+    this.bullishSampleCount = 0,
+    this.bearishSampleCount = 0,
+    this.neutralSampleCount = 0,
+    this.orientedSampleCount = 0,
+    this.orientedAlphaSampleCount = 0,
     this.coverage,
     this.rawHitRate,
     this.effectiveHitRate,
     this.alphaHitRate,
+    this.bullishEffectiveHitRate,
+    this.bearishEffectiveHitRate,
+    this.balancedEffectiveHitRate,
+    this.neutralStabilityRate,
     this.rawHitWilson,
     this.meanReturn,
     this.medianReturn,
     this.meanAlpha,
     this.medianAlpha,
+    this.meanOrientedReturn,
+    this.medianOrientedReturn,
+    this.meanOrientedAlpha,
+    this.medianOrientedAlpha,
     this.meanMfe,
     this.meanMae,
     required this.calibration,
@@ -124,8 +156,34 @@ class DecisionStatistics {
         .where((row) => row.outcome.alphaHit != null)
         .map((row) => row.outcome.alphaHit!)
         .toList();
+    final bullishHits = evaluated
+        .where((row) =>
+            row.snapshot.direction == RecommendationDirection.bullish &&
+            row.outcome.effectiveDirectionHit != null)
+        .map((row) => row.outcome.effectiveDirectionHit!)
+        .toList(growable: false);
+    final bearishHits = evaluated
+        .where((row) =>
+            row.snapshot.direction == RecommendationDirection.bearish &&
+            row.outcome.effectiveDirectionHit != null)
+        .map((row) => row.outcome.effectiveDirectionHit!)
+        .toList(growable: false);
+    final neutralStability = evaluated
+        .where((row) =>
+            row.snapshot.direction == RecommendationDirection.neutral &&
+            row.outcome.alphaReturn != null)
+        .map((row) => row.outcome.alphaReturn!.abs() <= 0.5)
+        .toList(growable: false);
     final returns = _values(evaluated, (row) => row.outcome.forecastReturn);
     final alphas = _values(evaluated, (row) => row.outcome.alphaReturn);
+    final orientedReturns = _orientedValues(
+      evaluated,
+      (row) => row.outcome.forecastReturn,
+    );
+    final orientedAlphas = _orientedValues(
+      evaluated,
+      (row) => row.outcome.alphaReturn,
+    );
     final mfes = _values(evaluated, (row) => row.outcome.mfe);
     final maes = _values(evaluated, (row) => row.outcome.mae);
     final probabilityRows = evaluated
@@ -144,21 +202,36 @@ class DecisionStatistics {
               outcome: row.outcome.effectiveDirectionHit!,
             ))
         .toList(growable: false);
-    // Legacy cold-start display threshold; V3 tightens this with diagnostics.
     final calibrationEligible =
-        probabilitySamples.length >= 10 && signalDates >= 5;
+        probabilitySamples.length >= 30 && signalDates >= 10;
     final rawHitCount = rawHits.where((hit) => hit).length;
+    final bullishHitRate = _hitRate(bullishHits);
+    final bearishHitRate = _hitRate(bearishHits);
     return DecisionStatisticsSummary(
       evaluatedCount: evaluated.length,
       pendingCount: pending.length,
       maturedPendingCount: maturedPending,
       invalidCount: invalid,
+      rawHitSampleCount: rawHits.length,
+      effectiveHitSampleCount: effectiveHits.length,
+      alphaHitSampleCount: alphaHits.length,
+      bullishSampleCount: bullishHits.length,
+      bearishSampleCount: bearishHits.length,
+      neutralSampleCount: neutralStability.length,
+      orientedSampleCount: orientedReturns.length,
+      orientedAlphaSampleCount: orientedAlphas.length,
       coverage: coverageDenominator == 0
           ? null
           : evaluated.length / coverageDenominator,
       rawHitRate: _hitRate(rawHits),
       effectiveHitRate: _hitRate(effectiveHits),
       alphaHitRate: _hitRate(alphaHits),
+      bullishEffectiveHitRate: bullishHitRate,
+      bearishEffectiveHitRate: bearishHitRate,
+      balancedEffectiveHitRate: bullishHitRate == null || bearishHitRate == null
+          ? null
+          : (bullishHitRate + bearishHitRate) / 2,
+      neutralStabilityRate: _hitRate(neutralStability),
       rawHitWilson: rawHits.isEmpty
           ? null
           : wilsonInterval(hits: rawHitCount, sampleCount: rawHits.length),
@@ -166,6 +239,10 @@ class DecisionStatistics {
       medianReturn: _median(returns),
       meanAlpha: _mean(alphas),
       medianAlpha: _median(alphas),
+      meanOrientedReturn: _mean(orientedReturns),
+      medianOrientedReturn: _median(orientedReturns),
+      meanOrientedAlpha: _mean(orientedAlphas),
+      medianOrientedAlpha: _median(orientedAlphas),
       meanMfe: _mean(mfes),
       meanMae: _mean(maes),
       calibration: DecisionCalibrationQuality(
@@ -184,6 +261,26 @@ class DecisionStatistics {
     double? Function(DecisionStatisticsRow row) select,
   ) =>
       rows.map(select).whereType<double>().toList(growable: false);
+
+  static List<double> _orientedValues(
+    List<DecisionStatisticsRow> rows,
+    double? Function(DecisionStatisticsRow row) select,
+  ) =>
+      rows
+          .map((row) {
+            final value = select(row);
+            if (value == null) return null;
+            switch (row.snapshot.direction) {
+              case RecommendationDirection.bullish:
+                return value;
+              case RecommendationDirection.bearish:
+                return -value;
+              case RecommendationDirection.neutral:
+                return null;
+            }
+          })
+          .whereType<double>()
+          .toList(growable: false);
 
   static double? _hitRate(List<bool> values) => values.isEmpty
       ? null
