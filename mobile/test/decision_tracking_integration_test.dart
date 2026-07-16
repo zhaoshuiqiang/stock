@@ -13,7 +13,7 @@ void main() {
     databaseFactory = databaseFactoryFfi;
   });
 
-  test('batch capture retains bearish score below six in new tables only',
+  test('batch capture stores the actual bearish recommendation in new tables',
       () async {
     final db = await openDatabase(
       inMemoryDatabasePath,
@@ -56,7 +56,8 @@ void main() {
     final snapshots = await db.query('decision_snapshots');
     expect(snapshots, hasLength(1));
     expect(snapshots.single['direction'], 'bearish');
-    expect(snapshots.single['legacy_score'], 3);
+    expect(snapshots.single['recommendation_level'], 'strongBearish');
+    expect(snapshots.single['legacy_score'], 1);
     expect(await db.query('archive_records'), isEmpty);
     expect(await db.query('recommendation_tracking'), isEmpty);
     await db.close();

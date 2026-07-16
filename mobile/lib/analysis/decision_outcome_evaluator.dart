@@ -11,35 +11,38 @@ class DecisionOutcomeEvaluator {
   }) {
     final benchmark = _normalized(data.adjustedBenchmark);
     final stock = _normalized(data.adjustedStock);
-    final signalIndex = benchmark.indexWhere(
-      (bar) => _sameDate(bar.date, snapshot.signalTradeDate),
+    final evidenceDate = snapshot.evidenceTradeDate ?? snapshot.signalTradeDate;
+    final evidenceIndex = benchmark.indexWhere(
+      (bar) => _sameDate(bar.date, evidenceDate),
     );
-    // signalTradeDate 不在基准序列（如节假日/数据缺口）→ 永远无法匹配，
+    // evidenceTradeDate 不在基准序列（如节假日/数据缺口）→ 永远无法匹配，
     // 直接置 invalid，避免 refreshPending 每周期空转占用 limit 槽位。
     // （已通过 [TradingDateUtils] 在写入时归一化周末，此处为双保险。）
-    if (signalIndex < 0) {
-      return _invalid(outcome, 'signal date not in benchmark series');
+    if (evidenceIndex < 0) {
+      return _invalid(outcome, 'evidence date not in benchmark series');
     }
-    if (signalIndex + outcome.horizon >= benchmark.length) {
+    if (evidenceIndex + outcome.horizon >= benchmark.length) {
       return _pending(outcome);
     }
-    final benchmarkSignal = benchmark[signalIndex];
-    final benchmarkTarget = benchmark[signalIndex + outcome.horizon];
+    final benchmarkSignal = benchmark[evidenceIndex];
+    final benchmarkTarget = benchmark[evidenceIndex + outcome.horizon];
     final dueDate = benchmarkTarget.date;
     final targetIndex = stock.indexWhere(
       (bar) => !bar.date.isBefore(_date(dueDate)),
     );
     if (targetIndex < 0) return _pending(outcome, dueTradeDate: dueDate);
 
-    final signalAdjusted = snapshot.adjustedSignalPrice ??
-        _barOn(stock, snapshot.signalTradeDate)?.close ??
+    final signalAdjusted = _barOn(stock, evidenceDate)?.close ??
+        snapshot.adjustedSignalPrice ??
         snapshot.signalPrice;
     if (signalAdjusted <= 0) {
       return _invalid(outcome, 'invalid adjusted signal price');
     }
     final target = stock[targetIndex];
     final entry = stock.cast<HistoryKline?>().firstWhere(
-          (bar) => bar!.date.isAfter(_date(snapshot.signalTradeDate)),
+          (bar) => snapshot.signalPhase == DecisionSignalPhase.preMarket
+              ? !bar!.date.isBefore(_date(snapshot.signalTradeDate))
+              : bar!.date.isAfter(_date(evidenceDate)),
           orElse: () => null,
         );
     final forecastReturn = (target.close / signalAdjusted - 1) * 100;
@@ -62,7 +65,8 @@ class DecisionOutcomeEvaluator {
         : alphaReturn * orientation > 0;
     final path = stock
         .where((bar) =>
-            bar.date.isAfter(_date(snapshot.signalTradeDate)) &&
+            entry != null &&
+            !bar.date.isBefore(_date(entry.date)) &&
             !bar.date.isAfter(_date(target.date)))
         .toList();
     final orientedReturns = path
@@ -77,9 +81,8 @@ class DecisionOutcomeEvaluator {
     final rawTarget = data.rawStock == null
         ? null
         : _barOnOrAfter(data.rawStock!, target.date);
-    final rawSignal = data.rawStock == null
-        ? null
-        : _barOn(data.rawStock!, snapshot.signalTradeDate);
+    final rawSignal =
+        data.rawStock == null ? null : _barOn(data.rawStock!, evidenceDate);
     final rawReturn = rawTarget == null || rawSignal == null
         ? null
         : (rawTarget.close / rawSignal.close - 1) * 100;

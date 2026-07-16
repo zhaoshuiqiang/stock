@@ -1,9 +1,12 @@
 import 'package:flutter/foundation.dart';
 
+import '../core/app_version.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
 import 'decision_market_data_provider.dart';
 import 'decision_outcome_evaluator.dart';
+import 'recommendation_policy.dart';
+import 'trading_date_utils.dart';
 
 Future<void> captureDecisionBatchForTesting({
   required List<AnalysisResult> analyses,
@@ -42,6 +45,10 @@ class DecisionTracker {
     required DateTime signalTradeDate,
     required String benchmarkCode,
     String sectorName = '',
+    DateTime? capturedAt,
+    DateTime? evidenceTradeDate,
+    DecisionSignalPhase? signalPhase,
+    bool isRetrospective = false,
   }) async {
     final decision = analysis.shortTermDecision;
     final quote = analysis.quote;
@@ -49,15 +56,32 @@ class DecisionTracker {
       throw ArgumentError(
           'A priced analysis with shortTermDecision is required');
     }
-    final now = DateTime.now();
+    final now = capturedAt ?? DateTime.now();
+    final phase = signalPhase ?? TradingDateUtils.signalPhase(now);
+    final resolvedEvidenceDate =
+        evidenceTradeDate ?? decision.evidenceTradeDate;
+    if (decision.modelVersion == 'short-term-v3' &&
+        resolvedEvidenceDate == null) {
+      throw ArgumentError('short-term-v3 requires an evidence trade date');
+    }
+    final normalizedSignalDate =
+        TradingDateUtils.normalizeToTradeDate(signalTradeDate);
+    final normalizedEvidenceDate = TradingDateUtils.normalizeToTradeDate(
+      resolvedEvidenceDate ?? normalizedSignalDate,
+    );
+    final recommendation = analysis.recommendationDecision ??
+        RecommendationPolicy.evaluate(decision);
+    final flags = <String>{...decision.dataQualityFlags};
+    if (isRetrospective) flags.add('retrospective_backfill');
     final snapshot = DecisionSnapshotRecord(
       code: quote.code,
       name: quote.name,
       source: source,
-      signalTime: quote.updateTime ?? now,
-      signalTradeDate: signalTradeDate,
+      signalTime: now,
+      signalTradeDate: normalizedSignalDate,
+      evidenceTradeDate: normalizedEvidenceDate,
+      signalPhase: phase,
       signalPrice: quote.price,
-      adjustedSignalPrice: quote.price,
       benchmarkCode: benchmarkCode,
       sectorName: sectorName,
       direction: decision.direction,
@@ -65,19 +89,23 @@ class DecisionTracker {
       tradeQualityScore: decision.tradeQualityScore,
       riskScore: decision.riskScore,
       evidenceConfidence: decision.evidenceConfidence,
-      recommendationLevel: decision.direction.name,
-      recommendationLabel: analysis.recommendation,
-      legacyScore: analysis.score.clamp(1, 10),
+      recommendationLevel: recommendation.level.name,
+      recommendationLabel: recommendation.label,
+      legacyScore: recommendation.legacyScore,
+      actionable: recommendation.actionable,
+      recommendationGates: recommendation.gates,
       marketRegime: decision.marketRegime,
-      marketChangePct: analysis.marketContext?.shIndexPct,
+      marketChangePct: analysis.marketContext?.avgChangePct,
       modelVersion: decision.modelVersion,
+      appVersion: AppVersion.version,
+      isRetrospective: isRetrospective,
       primaryStrategyId: decision.primaryStrategyId,
       primaryStrategyName: decision.primaryStrategyName,
       supportingStrategyIds: decision.supportingStrategyIds,
       directionComponents: decision.directionComponents,
       qualityComponents: decision.qualityComponents,
       riskComponents: decision.riskComponents,
-      dataQualityFlags: decision.dataQualityFlags,
+      dataQualityFlags: flags.toList(growable: false),
       createdAt: now,
     );
     return storage.saveDecisionSnapshotWithOutcomes(

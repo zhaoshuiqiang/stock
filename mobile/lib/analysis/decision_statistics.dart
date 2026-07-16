@@ -8,6 +8,11 @@ class DecisionStatisticsFilter {
   final MarketRegime? marketRegime;
   final String? modelVersion;
   final String? source;
+  final List<String>? sources;
+  final DecisionSignalPhase? signalPhase;
+  final DateTime? startTradeDate;
+  final DateTime? endTradeDate;
+  final bool includeRetrospective;
 
   const DecisionStatisticsFilter({
     this.horizon,
@@ -15,6 +20,11 @@ class DecisionStatisticsFilter {
     this.marketRegime,
     this.modelVersion,
     this.source,
+    this.sources,
+    this.signalPhase,
+    this.startTradeDate,
+    this.endTradeDate,
+    this.includeRetrospective = false,
   });
 }
 
@@ -134,7 +144,7 @@ class DecisionStatistics {
               outcome: row.outcome.effectiveDirectionHit!,
             ))
         .toList(growable: false);
-    // v3.21: 冷启动门槛降低 30→10样本+5信号日，让新用户更快看到校准指标
+    // Legacy cold-start display threshold; V3 tightens this with diagnostics.
     final calibrationEligible =
         probabilitySamples.length >= 10 && signalDates >= 5;
     final rawHitCount = rawHits.where((hit) => hit).length;

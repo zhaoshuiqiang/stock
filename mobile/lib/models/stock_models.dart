@@ -9,6 +9,14 @@ import 'short_term_direction.dart';
 
 enum DecisionOutcomeStatus { pending, evaluated, invalid }
 
+enum DecisionSignalPhase {
+  preMarket,
+  intraday,
+  afterClose,
+  nonTrading,
+  unknown,
+}
+
 const Set<int> _decisionHorizons = <int>{1, 3, 5};
 
 String? _dateOnly(DateTime? value) => value == null
@@ -22,20 +30,42 @@ DateTime? _parseDateOnly(dynamic value) =>
 
 bool? _nullableBool(dynamic value) => value == null ? null : value == 1;
 
+bool _trackingBool(dynamic value, {bool fallback = false}) {
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  return fallback;
+}
+
 dynamic _boolInt(bool? value) => value == null ? null : (value ? 1 : 0);
 
 Map<String, double> _trackingDoubleMap(dynamic value) {
-  final decoded = value is String ? jsonDecode(value) : value;
-  if (decoded is! Map) return const {};
-  return decoded.map(
-    (key, item) => MapEntry(key.toString(), (item as num).toDouble()),
-  );
+  try {
+    final decoded = value is String ? jsonDecode(value) : value;
+    if (decoded is! Map) return const {};
+    return decoded.map(
+      (key, item) => MapEntry(key.toString(), (item as num).toDouble()),
+    );
+  } catch (_) {
+    return const {};
+  }
 }
 
 List<String> _trackingStringList(dynamic value) {
-  final decoded = value is String ? jsonDecode(value) : value;
-  if (decoded is! List) return const [];
-  return decoded.map((item) => item.toString()).toList(growable: false);
+  try {
+    final decoded = value is String ? jsonDecode(value) : value;
+    if (decoded is! List) return const [];
+    return decoded.map((item) => item.toString()).toList(growable: false);
+  } catch (_) {
+    return const [];
+  }
+}
+
+DecisionSignalPhase _trackingSignalPhase(dynamic value) {
+  final name = value?.toString();
+  return DecisionSignalPhase.values.firstWhere(
+    (phase) => phase.name == name,
+    orElse: () => DecisionSignalPhase.unknown,
+  );
 }
 
 class DecisionSnapshotRecord {
@@ -45,6 +75,8 @@ class DecisionSnapshotRecord {
   final String source;
   final DateTime signalTime;
   final DateTime signalTradeDate;
+  final DateTime? evidenceTradeDate;
+  final DecisionSignalPhase signalPhase;
   final double signalPrice;
   final double? adjustedSignalPrice;
   final String benchmarkCode;
@@ -57,9 +89,13 @@ class DecisionSnapshotRecord {
   final String recommendationLevel;
   final String recommendationLabel;
   final int legacyScore;
+  final bool actionable;
+  final List<String> recommendationGates;
   final MarketRegime marketRegime;
   final double? marketChangePct;
   final String modelVersion;
+  final String appVersion;
+  final bool isRetrospective;
   final String? primaryStrategyId;
   final String? primaryStrategyName;
   final List<String> supportingStrategyIds;
@@ -76,6 +112,8 @@ class DecisionSnapshotRecord {
     required this.source,
     required this.signalTime,
     required this.signalTradeDate,
+    this.evidenceTradeDate,
+    this.signalPhase = DecisionSignalPhase.unknown,
     required this.signalPrice,
     this.adjustedSignalPrice,
     required this.benchmarkCode,
@@ -88,9 +126,13 @@ class DecisionSnapshotRecord {
     required this.recommendationLevel,
     required this.recommendationLabel,
     required this.legacyScore,
+    this.actionable = false,
+    this.recommendationGates = const [],
     required this.marketRegime,
     this.marketChangePct,
     required this.modelVersion,
+    this.appVersion = '',
+    this.isRetrospective = false,
     this.primaryStrategyId,
     this.primaryStrategyName,
     this.supportingStrategyIds = const [],
@@ -112,6 +154,7 @@ class DecisionSnapshotRecord {
         source: 'test',
         signalTime: signalTradeDate,
         signalTradeDate: signalTradeDate,
+        evidenceTradeDate: signalTradeDate,
         signalPrice: 1,
         benchmarkCode: '000300',
         direction: RecommendationDirection.neutral,
@@ -122,6 +165,7 @@ class DecisionSnapshotRecord {
         recommendationLevel: 'neutralWatch',
         recommendationLabel: '中性',
         legacyScore: 5,
+        actionable: false,
         marketRegime: MarketRegime.unknown,
         modelVersion: 'test',
         createdAt: signalTradeDate,
@@ -134,6 +178,8 @@ class DecisionSnapshotRecord {
         'source': source,
         'signal_time': signalTime.millisecondsSinceEpoch,
         'signal_trade_date': _dateOnly(signalTradeDate),
+        'evidence_trade_date': _dateOnly(evidenceTradeDate),
+        'signal_phase': signalPhase.name,
         'signal_price': signalPrice,
         'adjusted_signal_price': adjustedSignalPrice,
         'benchmark_code': benchmarkCode,
@@ -146,9 +192,13 @@ class DecisionSnapshotRecord {
         'recommendation_level': recommendationLevel,
         'recommendation_label': recommendationLabel,
         'legacy_score': legacyScore,
+        'actionable': actionable ? 1 : 0,
+        'recommendation_gates_json': jsonEncode(recommendationGates),
         'market_regime': marketRegime.name,
         'market_change_pct': marketChangePct,
         'model_version': modelVersion,
+        'app_version': appVersion,
+        'is_retrospective': isRetrospective ? 1 : 0,
         'primary_strategy_id': primaryStrategyId,
         'primary_strategy_name': primaryStrategyName,
         'supporting_strategy_ids_json': jsonEncode(supportingStrategyIds),
@@ -169,6 +219,9 @@ class DecisionSnapshotRecord {
           (map['signal_time'] as num).toInt(),
         ),
         signalTradeDate: _parseDateOnly(map['signal_trade_date'])!,
+        evidenceTradeDate: _parseDateOnly(map['evidence_trade_date']) ??
+            _parseDateOnly(map['signal_trade_date'])!,
+        signalPhase: _trackingSignalPhase(map['signal_phase']),
         signalPrice: (map['signal_price'] as num).toDouble(),
         adjustedSignalPrice: (map['adjusted_signal_price'] as num?)?.toDouble(),
         benchmarkCode: map['benchmark_code'] as String,
@@ -183,11 +236,16 @@ class DecisionSnapshotRecord {
         recommendationLevel: map['recommendation_level'] as String,
         recommendationLabel: map['recommendation_label'] as String,
         legacyScore: (map['legacy_score'] as num).toInt(),
+        actionable: _trackingBool(map['actionable']),
+        recommendationGates:
+            _trackingStringList(map['recommendation_gates_json']),
         marketRegime: MarketRegime.values.byName(
           map['market_regime'] as String,
         ),
         marketChangePct: (map['market_change_pct'] as num?)?.toDouble(),
         modelVersion: map['model_version'] as String,
+        appVersion: map['app_version'] as String? ?? '',
+        isRetrospective: _trackingBool(map['is_retrospective']),
         primaryStrategyId: map['primary_strategy_id'] as String?,
         primaryStrategyName: map['primary_strategy_name'] as String?,
         supportingStrategyIds:
@@ -924,7 +982,8 @@ class HistoryKline {
       adx14: QuoteData._parseDouble(json['adx14']),
       // v3.19: 保留 null 语义，避免缺少字段时被塌缩成 0 导致的假"WR超买"卖信号
       wr14: json['wr14'] == null ? null : QuoteData._parseDouble(json['wr14']),
-      cci14: json['cci14'] == null ? null : QuoteData._parseDouble(json['cci14']),
+      cci14:
+          json['cci14'] == null ? null : QuoteData._parseDouble(json['cci14']),
     );
   }
 }
@@ -1348,7 +1407,8 @@ class AnalysisResult {
   final NewsSentiment? newsSentiment; // 新闻情绪
   final List<ValidatedSignal>? validatedSignals; // 对抗验证信号
   final Map<String, double>? confidenceBreakdown; // 置信度分项明细
-  final double? calculatorConfidence; // v3.19: ConfidenceCalculator 输出的综合置信度（含回测胜率/预测准确率/对抗验证），用于与证据置信度对照展示
+  final double?
+      calculatorConfidence; // v3.19: ConfidenceCalculator 输出的综合置信度（含回测胜率/预测准确率/对抗验证），用于与证据置信度对照展示
 
   // 市场结构 + 概念 + 分位值 (Phase 1-4)
   final MarketStructureResult? marketStructure; // 市场结构分析结果

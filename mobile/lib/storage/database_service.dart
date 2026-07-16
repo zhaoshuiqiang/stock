@@ -43,6 +43,9 @@ class DatabaseService {
     if (oldVersion < 21 && newVersion >= 21) {
       await db.transaction(createDecisionTrackingSchema);
     }
+    if (oldVersion >= 21 && oldVersion < 24 && newVersion >= 24) {
+      await db.transaction(upgradeDecisionTrackingSchemaV24);
+    }
   }
 
   Future<Database> _initDatabase() async {
@@ -51,7 +54,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 23,
+      version: 24,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -413,6 +416,9 @@ class DatabaseService {
               // 列已存在则忽略
               debugPrint('[DB] v22→v23 short_term_decision 列已存在或添加失败: $e');
             }
+          }
+          if (oldVersion >= 21 && oldVersion < 24) {
+            await upgradeDecisionTrackingSchemaV24(txn);
           }
           // 索引补建（幂等，保证升级路径和新装路径都有）
           await txn.execute(
@@ -909,9 +915,11 @@ class DatabaseService {
       // 方向变化时允许重新留档
       final lastRec = existing.first['recommendation'] as String? ?? '';
       final lastIsBullish = lastRec.contains('买入') || lastRec.contains('看多');
-      final newIsBullish = record.recommendation.contains('买入') || record.recommendation.contains('看多');
+      final newIsBullish = record.recommendation.contains('买入') ||
+          record.recommendation.contains('看多');
       final lastIsBearish = lastRec.contains('卖出') || lastRec.contains('回避');
-      final newIsBearish = record.recommendation.contains('卖出') || record.recommendation.contains('回避');
+      final newIsBearish = record.recommendation.contains('卖出') ||
+          record.recommendation.contains('回避');
       // 方向相同则跳过
       if ((lastIsBullish && newIsBullish) || (lastIsBearish && newIsBearish)) {
         return false;
@@ -1771,6 +1779,11 @@ class DatabaseService {
     final selectedMarketRegime = filter?.marketRegime ?? marketRegime;
     final selectedModelVersion = filter?.modelVersion ?? modelVersion;
     final selectedSource = filter?.source ?? source;
+    final selectedSources = filter?.sources;
+    final selectedSignalPhase = filter?.signalPhase;
+    final selectedStartDate = filter?.startTradeDate;
+    final selectedEndDate = filter?.endTradeDate;
+    final includeRetrospective = filter?.includeRetrospective ?? false;
     final db = await database;
     final where = <String>[];
     final args = <Object?>[];
@@ -1788,7 +1801,24 @@ class DatabaseService {
     if (selectedModelVersion != null) {
       add('model_version = ?', selectedModelVersion);
     }
-    if (selectedSource != null) add('source = ?', selectedSource);
+    if (selectedSources != null && selectedSources.isNotEmpty) {
+      where.add('source IN (${selectedSources.map((_) => '?').join(',')})');
+      args.addAll(selectedSources);
+    } else if (selectedSource != null) {
+      add('source = ?', selectedSource);
+    }
+    if (selectedSignalPhase != null) {
+      add('signal_phase = ?', selectedSignalPhase.name);
+    }
+    if (selectedStartDate != null) {
+      add('signal_trade_date >= ?', _formatSnapshotDate(selectedStartDate));
+    }
+    if (selectedEndDate != null) {
+      add('signal_trade_date <= ?', _formatSnapshotDate(selectedEndDate));
+    }
+    if (!includeRetrospective) {
+      add('is_retrospective = ?', 0);
+    }
     if (primaryStrategyId != null) {
       add('primary_strategy_id = ?', primaryStrategyId);
     }
@@ -1830,13 +1860,27 @@ class DatabaseService {
 
   /// 返回 [decision_snapshots] 中已存在的股票代码（按来源过滤，去重）。
   /// 用于回填时判断哪些留档记录尚未生成决策快照。
-  Future<List<String>> getDecisionSnapshotCodes({String? source}) async {
+  Future<List<String>> getDecisionSnapshotCodes({
+    String? source,
+    List<String>? sources,
+  }) async {
     final db = await database;
+    final selectedSources =
+        sources?.where((value) => value.isNotEmpty).toList();
+    final useSources = selectedSources != null && selectedSources.isNotEmpty;
     final rows = await db.query(
       'decision_snapshots',
       columns: const ['code'],
-      where: source != null ? 'source = ?' : null,
-      whereArgs: source != null ? [source] : null,
+      where: useSources
+          ? 'source IN (${selectedSources.map((_) => '?').join(',')})'
+          : source != null
+              ? 'source = ?'
+              : null,
+      whereArgs: useSources
+          ? selectedSources
+          : source != null
+              ? [source]
+              : null,
       distinct: true,
     );
     return rows.map((r) => (r['code'] as String)).toList();

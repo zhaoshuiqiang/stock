@@ -10,6 +10,11 @@ import '../storage/database_service.dart';
 import 'decision_tracker.dart';
 import 'single_stock_analyzer.dart';
 
+typedef ArchiveStockAnalyzer = Future<AnalysisResult?> Function(
+  String code, {
+  String? name,
+});
+
 /// 统一「留档」服务。
 ///
 /// 一次用户点击同时写入两条数据：
@@ -21,6 +26,7 @@ import 'single_stock_analyzer.dart';
 class ArchiveService {
   /// 用户显式留档产生的决策快照来源标识。
   static const String kManualSource = 'archive';
+  static const String kBackfillSource = 'archive_backfill';
 
   const ArchiveService._();
 
@@ -47,7 +53,8 @@ class ArchiveService {
     final record = _buildRecord(code, name, analysis, opp);
     var archived = false;
     try {
-      archived = skipArchiveRecord ? false : await db.addArchiveIfNotExists(record);
+      archived =
+          skipArchiveRecord ? false : await db.addArchiveIfNotExists(record);
     } catch (e) {
       debugPrint('[留档] 写入 archive_records 失败: $e');
     }
@@ -67,13 +74,13 @@ class ArchiveService {
     }
 
     var captured = false;
-    if (captureAnalysis != null &&
-        captureAnalysis.shortTermDecision != null) {
+    if (captureAnalysis != null && captureAnalysis.shortTermDecision != null) {
       try {
         await DecisionTracker().capture(
           analysis: captureAnalysis,
           source: kManualSource,
-          signalTradeDate: TradingDateUtils.normalizeToTradeDate(DateTime.now()),
+          signalTradeDate:
+              TradingDateUtils.normalizeToTradeDate(DateTime.now()),
           benchmarkCode: '000300',
         );
         if (!skipRefreshPending) {
@@ -115,7 +122,8 @@ class ArchiveService {
   ) {
     final quote = a?.quote;
     return ArchiveRecord(
-      code: StockCodeUtils.normalizeForArchive(opp?.code ?? quote?.code ?? code),
+      code:
+          StockCodeUtils.normalizeForArchive(opp?.code ?? quote?.code ?? code),
       name: opp?.name ?? quote?.name ?? name,
       price: opp?.price ?? quote?.price ?? 0,
       changePct: opp?.changePct ?? quote?.changePct ?? 0,
@@ -149,13 +157,19 @@ class ArchiveService {
     required void Function(int done, int total) onProgress,
     bool Function()? shouldCancel,
     int concurrency = 5,
+    ArchiveStockAnalyzer? analyzeStock,
+    DecisionTracker? tracker,
   }) async {
+    final analyzer = analyzeStock ?? SingleStockAnalyzer.analyze;
+    final decisionTracker = tracker ?? DecisionTracker(storage: db);
     final archives = await db.getArchives();
-    final existingRaw =
-        await db.getDecisionSnapshotCodes(source: kManualSource);
+    final existingRaw = await db.getDecisionSnapshotCodes(
+      sources: const <String>[kManualSource, kBackfillSource],
+    );
     final have = existingRaw.map(StockCodeUtils.normalizeForArchive).toSet();
     final need = archives
-        .where((a) => !have.contains(StockCodeUtils.normalizeForArchive(a.code)))
+        .where(
+            (a) => !have.contains(StockCodeUtils.normalizeForArchive(a.code)))
         .toList();
     if (need.isEmpty) {
       return const BackfillSummary(total: 0, done: 0, success: 0, failed: 0);
@@ -165,23 +179,26 @@ class ArchiveService {
     var failed = 0;
     for (var i = 0; i < need.length; i += concurrency) {
       if (shouldCancel?.call() == true) break;
-      final end = (i + concurrency > need.length) ? need.length : i + concurrency;
+      final end =
+          (i + concurrency > need.length) ? need.length : i + concurrency;
       final batch = need.sublist(i, end);
       final results = await Future.wait(batch.map((record) async {
         try {
           final raw = StockCodeUtils.stripMarketPrefix(record.code);
-          final analysis = await SingleStockAnalyzer.analyze(
+          final analysis = await analyzer(
             raw,
             name: record.name,
           );
           if (analysis == null || analysis.shortTermDecision == null) {
             return false;
           }
-          await DecisionTracker().capture(
+          await decisionTracker.capture(
             analysis: analysis,
-            source: kManualSource,
-            signalTradeDate: TradingDateUtils.normalizeToTradeDate(record.archivedAt),
+            source: kBackfillSource,
+            signalTradeDate:
+                TradingDateUtils.normalizeToTradeDate(record.archivedAt),
             benchmarkCode: '000300',
+            isRetrospective: true,
           );
           return true;
         } catch (e) {
@@ -237,4 +254,3 @@ class BackfillSummary {
     required this.failed,
   });
 }
-

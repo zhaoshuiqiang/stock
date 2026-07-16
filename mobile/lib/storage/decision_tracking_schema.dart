@@ -9,6 +9,8 @@ Future<void> createDecisionTrackingSchema(DatabaseExecutor db) async {
       source TEXT NOT NULL,
       signal_time INTEGER NOT NULL,
       signal_trade_date TEXT NOT NULL,
+      evidence_trade_date TEXT,
+      signal_phase TEXT NOT NULL DEFAULT 'unknown',
       signal_price REAL NOT NULL CHECK(signal_price > 0),
       adjusted_signal_price REAL CHECK(adjusted_signal_price > 0),
       benchmark_code TEXT NOT NULL,
@@ -21,10 +23,15 @@ Future<void> createDecisionTrackingSchema(DatabaseExecutor db) async {
       recommendation_level TEXT NOT NULL,
       recommendation_label TEXT NOT NULL,
       legacy_score INTEGER NOT NULL CHECK(legacy_score BETWEEN 1 AND 10),
+      actionable INTEGER NOT NULL DEFAULT 0 CHECK(actionable IN (0,1)),
+      recommendation_gates_json TEXT NOT NULL DEFAULT '[]',
       market_regime TEXT NOT NULL CHECK(market_regime IN
         ('bullishTrend','bearishTrend','rebound','pullback','range','highVolatility','unknown')),
       market_change_pct REAL,
       model_version TEXT NOT NULL,
+      app_version TEXT NOT NULL DEFAULT '',
+      is_retrospective INTEGER NOT NULL DEFAULT 0
+        CHECK(is_retrospective IN (0,1)),
       primary_strategy_id TEXT,
       primary_strategy_name TEXT,
       supporting_strategy_ids_json TEXT NOT NULL DEFAULT '[]',
@@ -83,6 +90,31 @@ Future<void> createDecisionTrackingSchema(DatabaseExecutor db) async {
     ON decision_snapshots(signal_trade_date)''');
   await db.execute('''CREATE INDEX IF NOT EXISTS idx_decision_snapshots_filter
     ON decision_snapshots(direction, model_version, source, signal_trade_date)''');
+  await db.execute('''CREATE INDEX IF NOT EXISTS idx_decision_snapshots_phase
+    ON decision_snapshots(signal_phase, is_retrospective, model_version, signal_trade_date)''');
   await db.execute('''CREATE INDEX IF NOT EXISTS idx_decision_outcomes_pending
     ON decision_outcomes(status, horizon, due_trade_date)''');
+}
+
+Future<void> upgradeDecisionTrackingSchemaV24(DatabaseExecutor db) async {
+  await db.execute(
+    'ALTER TABLE decision_snapshots ADD COLUMN evidence_trade_date TEXT',
+  );
+  await db.execute(
+    "ALTER TABLE decision_snapshots ADD COLUMN signal_phase TEXT NOT NULL DEFAULT 'unknown'",
+  );
+  await db.execute(
+    'ALTER TABLE decision_snapshots ADD COLUMN actionable INTEGER NOT NULL DEFAULT 0 CHECK(actionable IN (0,1))',
+  );
+  await db.execute(
+    "ALTER TABLE decision_snapshots ADD COLUMN recommendation_gates_json TEXT NOT NULL DEFAULT '[]'",
+  );
+  await db.execute(
+    "ALTER TABLE decision_snapshots ADD COLUMN app_version TEXT NOT NULL DEFAULT ''",
+  );
+  await db.execute(
+    'ALTER TABLE decision_snapshots ADD COLUMN is_retrospective INTEGER NOT NULL DEFAULT 0 CHECK(is_retrospective IN (0,1))',
+  );
+  await db.execute('''CREATE INDEX IF NOT EXISTS idx_decision_snapshots_phase
+    ON decision_snapshots(signal_phase, is_retrospective, model_version, signal_trade_date)''');
 }

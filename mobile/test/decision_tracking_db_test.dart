@@ -104,6 +104,41 @@ void main() {
     await db.close();
   });
 
+  test('v23 to v24 migration preserves rows and adds provenance defaults',
+      () async {
+    final db = await openDatabase(
+      inMemoryDatabasePath,
+      version: 23,
+      singleInstance: false,
+      onCreate: (db, version) async {
+        await db.execute('''
+          CREATE TABLE decision_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            signal_trade_date TEXT NOT NULL,
+            model_version TEXT NOT NULL DEFAULT 'v2'
+          )
+        ''');
+        await db.insert('decision_snapshots', {
+          'code': '000001',
+          'signal_trade_date': '2026-07-14',
+        });
+      },
+    );
+
+    await DatabaseService.upgradeDatabaseForTesting(db, 23, 24);
+
+    final row = (await db.query('decision_snapshots')).single;
+    expect(row['code'], '000001');
+    expect(row['evidence_trade_date'], isNull);
+    expect(row['signal_phase'], 'unknown');
+    expect(row['actionable'], 0);
+    expect(row['recommendation_gates_json'], '[]');
+    expect(row['app_version'], '');
+    expect(row['is_retrospective'], 0);
+    await db.close();
+  });
+
   test('pending work is typed and ordered by signal date', () async {
     final db = await _openTrackingDb();
     final service = DatabaseService();
@@ -139,6 +174,8 @@ Map<String, Object?> _snapshotMap({required double directionScore}) => {
       'source': 'test',
       'signal_time': DateTime(2026, 7, 14).millisecondsSinceEpoch,
       'signal_trade_date': '2026-07-14',
+      'evidence_trade_date': '2026-07-11',
+      'signal_phase': 'preMarket',
       'signal_price': 10.0,
       'benchmark_code': '000300',
       'direction': 'bullish',
@@ -149,7 +186,11 @@ Map<String, Object?> _snapshotMap({required double directionScore}) => {
       'recommendation_level': 'bullish',
       'recommendation_label': '看多',
       'legacy_score': 8,
+      'actionable': 1,
+      'recommendation_gates_json': '[]',
       'market_regime': 'bullishTrend',
       'model_version': 'v2',
+      'app_version': '3.31.20260716',
+      'is_retrospective': 0,
       'created_at': DateTime(2026, 7, 14).millisecondsSinceEpoch,
     };

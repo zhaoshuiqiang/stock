@@ -1,3 +1,5 @@
+import '../models/stock_models.dart';
+
 /// 交易日工具。
 ///
 /// 决策快照的 [signalTradeDate] 用于对齐基准（000300）K 线序列以计算
@@ -28,5 +30,28 @@ class TradingDateUtils {
   static bool isTradeDate(DateTime date) {
     final w = date.weekday;
     return w >= DateTime.monday && w <= DateTime.friday;
+  }
+
+  static DecisionSignalPhase signalPhase(DateTime capturedAt) {
+    if (!isTradeDate(capturedAt)) {
+      return DecisionSignalPhase.nonTrading;
+    }
+    final minutes = capturedAt.hour * 60 + capturedAt.minute;
+    if (minutes < 9 * 60 + 30) {
+      return DecisionSignalPhase.preMarket;
+    }
+    if (minutes < 15 * 60) {
+      return DecisionSignalPhase.intraday;
+    }
+    return DecisionSignalPhase.afterClose;
+  }
+
+  static DateTime previousWeekday(DateTime date) {
+    var candidate = DateTime(date.year, date.month, date.day)
+        .subtract(const Duration(days: 1));
+    while (!isTradeDate(candidate)) {
+      candidate = candidate.subtract(const Duration(days: 1));
+    }
+    return candidate;
   }
 }

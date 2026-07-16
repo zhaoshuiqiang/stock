@@ -88,4 +88,84 @@ void main() {
     );
     await db.close();
   });
+
+  test('phase date source and retrospective filters compose', () async {
+    final db = await openDatabase(
+      inMemoryDatabasePath,
+      version: 1,
+      onCreate: (db, version) => createDecisionTrackingSchema(db),
+    );
+    final service = DatabaseService();
+    service.resetForTesting();
+    await service.setDatabaseForTesting(db);
+    await service.saveDecisionSnapshotWithOutcomes(
+      _snapshot(
+        code: '000001',
+        source: 'archive',
+        signalDate: DateTime(2026, 7, 16),
+        phase: DecisionSignalPhase.preMarket,
+      ),
+    );
+    await service.saveDecisionSnapshotWithOutcomes(
+      _snapshot(
+        code: '000002',
+        source: 'archive_backfill',
+        signalDate: DateTime(2026, 7, 15),
+        phase: DecisionSignalPhase.afterClose,
+        retrospective: true,
+      ),
+    );
+
+    expect(await service.getDecisionStatisticsRows(), hasLength(3));
+    expect(
+      await service.getDecisionStatisticsRows(
+        filter: const DecisionStatisticsFilter(includeRetrospective: true),
+      ),
+      hasLength(6),
+    );
+    expect(
+      await service.getDecisionStatisticsRows(
+        filter: DecisionStatisticsFilter(
+          horizon: 1,
+          sources: const ['archive'],
+          signalPhase: DecisionSignalPhase.preMarket,
+          startTradeDate: DateTime(2026, 7, 16),
+          endTradeDate: DateTime(2026, 7, 16),
+        ),
+      ),
+      hasLength(1),
+    );
+    await db.close();
+  });
 }
+
+DecisionSnapshotRecord _snapshot({
+  required String code,
+  required String source,
+  required DateTime signalDate,
+  required DecisionSignalPhase phase,
+  bool retrospective = false,
+}) =>
+    DecisionSnapshotRecord(
+      code: code,
+      source: source,
+      signalTime: signalDate,
+      signalTradeDate: signalDate,
+      evidenceTradeDate: signalDate.subtract(const Duration(days: 1)),
+      signalPhase: phase,
+      signalPrice: 10,
+      benchmarkCode: '000300',
+      direction: RecommendationDirection.bullish,
+      directionScore: 40,
+      tradeQualityScore: 70,
+      riskScore: 30,
+      evidenceConfidence: 75,
+      recommendationLevel: 'bullish',
+      recommendationLabel: '看多',
+      legacyScore: 8,
+      actionable: true,
+      marketRegime: MarketRegime.range,
+      modelVersion: 'short-term-v3',
+      isRetrospective: retrospective,
+      createdAt: signalDate,
+    );

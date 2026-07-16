@@ -11,6 +11,8 @@ void main() {
       source: 'explore',
       signalTime: DateTime(2026, 7, 14, 14, 55),
       signalTradeDate: DateTime(2026, 7, 14),
+      evidenceTradeDate: DateTime(2026, 7, 11),
+      signalPhase: DecisionSignalPhase.preMarket,
       signalPrice: 1500,
       adjustedSignalPrice: 1498,
       benchmarkCode: '000300',
@@ -23,9 +25,13 @@ void main() {
       recommendationLevel: 'bullish',
       recommendationLabel: '看多',
       legacyScore: 8,
+      actionable: true,
+      recommendationGates: const ['liquidity_gate'],
       marketRegime: MarketRegime.bullishTrend,
       marketChangePct: 0.8,
       modelVersion: 'short-term-v2',
+      appVersion: '3.31.20260716',
+      isRetrospective: true,
       primaryStrategyId: 'trend_pullback',
       primaryStrategyName: '趋势回踩',
       supportingStrategyIds: const ['volume_confirm'],
@@ -38,16 +44,51 @@ void main() {
 
     final map = record.toMap();
     expect(map['signal_trade_date'], '2026-07-14');
+    expect(map['evidence_trade_date'], '2026-07-11');
+    expect(map['signal_phase'], 'preMarket');
+    expect(map['actionable'], 1);
+    expect(map['recommendation_gates_json'], '["liquidity_gate"]');
+    expect(map['is_retrospective'], 1);
     expect(map['supporting_strategy_ids_json'], '["volume_confirm"]');
 
     final restored = DecisionSnapshotRecord.fromMap(map);
     expect(restored.signalTradeDate, DateTime(2026, 7, 14));
+    expect(restored.evidenceTradeDate, DateTime(2026, 7, 11));
+    expect(restored.signalPhase, DecisionSignalPhase.preMarket);
+    expect(restored.actionable, isTrue);
+    expect(restored.recommendationGates, ['liquidity_gate']);
+    expect(restored.appVersion, '3.31.20260716');
+    expect(restored.isRetrospective, isTrue);
     expect(restored.direction, RecommendationDirection.bullish);
     expect(restored.marketRegime, MarketRegime.bullishTrend);
     expect(restored.primaryStrategyId, 'trend_pullback');
     expect(restored.supportingStrategyIds, ['volume_confirm']);
     expect(restored.directionComponents, {'technical': 42.0});
     expect(restored.dataQualityFlags, ['fresh_quote']);
+  });
+
+  test('legacy snapshot maps receive safe provenance defaults', () {
+    final record = DecisionSnapshotRecord.minimalForTesting(
+      id: 1,
+      code: '000001',
+      signalTradeDate: DateTime(2026, 7, 14),
+    );
+    final legacy = Map<String, dynamic>.from(record.toMap())
+      ..remove('evidence_trade_date')
+      ..remove('signal_phase')
+      ..remove('actionable')
+      ..remove('recommendation_gates_json')
+      ..remove('app_version')
+      ..remove('is_retrospective');
+
+    final restored = DecisionSnapshotRecord.fromMap(legacy);
+
+    expect(restored.evidenceTradeDate, restored.signalTradeDate);
+    expect(restored.signalPhase, DecisionSignalPhase.unknown);
+    expect(restored.actionable, isFalse);
+    expect(restored.recommendationGates, isEmpty);
+    expect(restored.appVersion, isEmpty);
+    expect(restored.isRetrospective, isFalse);
   });
 
   test('decision outcome round trips dates nullable booleans and prediction',

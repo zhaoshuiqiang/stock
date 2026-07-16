@@ -171,9 +171,9 @@ void main() {
   test('30天内同向重复留档被跳过', () async {
     final a = _analysis('000003', RecommendationDirection.bullish);
     final first = await ArchiveService.archiveStock(
-      code: '000003', name: 'X', analysis: a, db: storage);
+        code: '000003', name: 'X', analysis: a, db: storage);
     final second = await ArchiveService.archiveStock(
-      code: '000003', name: 'X', analysis: a, db: storage);
+        code: '000003', name: 'X', analysis: a, db: storage);
 
     expect(first.archived, isTrue);
     expect(second.archived, isFalse);
@@ -205,6 +205,36 @@ void main() {
     expect(remaining.first['source'], 'archive');
     expect(removed, 1);
   });
+
+  test('历史重分析只写回溯来源并标记隔离', () async {
+    await db.insert('archive_records', {
+      'code': '000006',
+      'name': '民生银行',
+      'price': 5.0,
+      'change_pct': 0.0,
+      'score': 5,
+      'recommendation': '观望',
+      'risk_level': '中',
+      'archived_at': DateTime(2026, 7, 14).millisecondsSinceEpoch,
+    });
+    final tracker = DecisionTracker(storage: storage, marketData: _FakeData());
+
+    final summary = await ArchiveService.backfillMissingDecisionSnapshots(
+      db: storage,
+      onProgress: (_, __) {},
+      concurrency: 1,
+      tracker: tracker,
+      analyzeStock: (code, {name}) async =>
+          _analysis(code, RecommendationDirection.bullish),
+    );
+
+    expect(summary.success, 1);
+    final snapshot = (await db.query('decision_snapshots')).single;
+    expect(snapshot['source'], ArchiveService.kBackfillSource);
+    expect(snapshot['is_retrospective'], 1);
+    expect(snapshot['data_quality_flags_json'],
+        contains('retrospective_backfill'));
+  });
 }
 
 AnalysisResult _analysis(String code, RecommendationDirection direction) =>
@@ -220,6 +250,7 @@ AnalysisResult _analysis(String code, RecommendationDirection direction) =>
         evidenceConfidence: 72,
         direction: direction,
         marketRegime: MarketRegime.range,
+        evidenceTradeDate: DateTime(2026, 7, 11),
         modelVersion: 'short-term-v2',
         rawComprehensiveScore: 7,
       ),
@@ -234,10 +265,20 @@ class _FakeData implements DecisionMarketDataSource {
   }) async =>
       DecisionMarketData(
         adjustedStock: [
-          HistoryKline(date: DateTime(2026, 7, 14), open: 10, high: 10, low: 10, close: 10),
+          HistoryKline(
+              date: DateTime(2026, 7, 14),
+              open: 10,
+              high: 10,
+              low: 10,
+              close: 10),
         ],
         adjustedBenchmark: [
-          HistoryKline(date: DateTime(2026, 7, 14), open: 100, high: 100, low: 100, close: 100),
+          HistoryKline(
+              date: DateTime(2026, 7, 14),
+              open: 100,
+              high: 100,
+              low: 100,
+              close: 100),
         ],
       );
 }
