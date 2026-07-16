@@ -160,6 +160,8 @@ String buildDecisionCsv(List<DecisionExportRow> rows) {
     ];
     for (final horizon in const [1, 3, 5]) {
       final outcome = row.outcomes[horizon];
+      final hasDirectionalOutcome =
+          snapshot.direction != RecommendationDirection.neutral;
       values.addAll([
         outcome?.status.name ?? 'pending',
         _dateNullable(outcome?.dueTradeDate),
@@ -180,21 +182,23 @@ String buildDecisionCsv(List<DecisionExportRow> rows) {
         outcome?.benchmarkReturn,
         outcome?.alphaReturn,
         _oriented(snapshot.direction, outcome?.alphaReturn),
-        outcome?.mfe,
-        outcome?.mae,
-        _bool(outcome?.rawDirectionHit),
-        _bool(outcome?.effectiveDirectionHit),
-        _bool(outcome?.alphaHit),
+        hasDirectionalOutcome ? outcome?.mfe : null,
+        hasDirectionalOutcome ? outcome?.mae : null,
+        _bool(hasDirectionalOutcome ? outcome?.rawDirectionHit : null),
+        _bool(hasDirectionalOutcome ? outcome?.effectiveDirectionHit : null),
+        _bool(hasDirectionalOutcome ? outcome?.alphaHit : null),
         _bool(outcome?.corporateActionDetected),
         _bool(outcome?.executableValid),
         outcome?.executableInvalidReason,
-        outcome?.predictedProbability,
-        outcome?.predictedProbability == null
+        hasDirectionalOutcome ? outcome?.predictedProbability : null,
+        !hasDirectionalOutcome || outcome?.predictedProbability == null
             ? null
             : outcome?.predictedSampleCount,
-        outcome?.predictedWilsonLower,
-        outcome?.predictedWilsonUpper,
-        _dateTimeNullable(outcome?.predictionCreatedAt),
+        hasDirectionalOutcome ? outcome?.predictedWilsonLower : null,
+        hasDirectionalOutcome ? outcome?.predictedWilsonUpper : null,
+        _dateTimeNullable(
+          hasDirectionalOutcome ? outcome?.predictionCreatedAt : null,
+        ),
         outcome?.invalidReason,
         outcome?.attemptCount,
         _dateTimeNullable(outcome?.lastAttemptedAt),

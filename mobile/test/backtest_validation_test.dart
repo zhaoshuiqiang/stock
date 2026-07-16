@@ -1172,9 +1172,9 @@ void main() {
     });
 
     // ═══════════════════════════════════════════════════════════════
-    // 双向反馈公式验证：可追溯的完整计算链
+    // 双轨置信度验证：展示置信度与综合诊断置信度不可混用
     // ═══════════════════════════════════════════════════════════════
-    test('双向信号反馈公式完整验证', () {
+    test('双向信号的 V3 双轨置信度语义完整验证', () {
       // 构造同时产生买入+卖出信号的 K 线数据
       var data = _calc(_genSideways(80, base: 15.0, amplitude: 2.0));
       final n = data.length;
@@ -1208,72 +1208,20 @@ void main() {
       expect(sellWithBacktest, isNotEmpty,
           reason: '应有卖出信号可映射到回测');
 
-      // Step 3: 手动计算预期调整
-      // P1-1修复：根据推荐方向采用不同的反馈逻辑
-      // - 买入推荐（totalScore > 5）：买入信号用 adj，卖出信号用 2.0 - adj（反向）
-      // - 卖出推荐（totalScore <= 5）：卖出信号用 adj，买入信号用 2.0 - adj（反向）
-      final isBuyRecommendation = analysis.score > 5;
-      final alignedSignals = isBuyRecommendation ? buyWithBacktest : sellWithBacktest;
-      final oppositeSignals = isBuyRecommendation ? sellWithBacktest : buyWithBacktest;
+      // Step 3: V3 展示置信度来自证据一致性；旧综合计算器作为诊断字段保留回测维度。
+      _expectV3ConfidenceSemantics(analysis, data);
 
-      final adjustments = <double>[];
-      for (final s in alignedSignals) {
-        final key = mapSignalToBacktestKey(s.signal)!;
-        adjustments.add(
-          BacktestEngine.getStrategyConfidenceAdjustment(key, backtestResults));
-      }
-      for (final s in oppositeSignals) {
-        final key = mapSignalToBacktestKey(s.signal)!;
-        final adj = BacktestEngine.getStrategyConfidenceAdjustment(key, backtestResults);
-        adjustments.add(2.0 - adj); // 反向
-      }
-
-      final avgAdj = adjustments.reduce((a, b) => a + b) / adjustments.length;
-
-      // Step 4: 应用公式
-      // baseConfidence 来自 ConfidenceCalculator（不含回测调整）
-      final baseConfidence = ConfidenceCalculator.calculate(
-        buySignals: analysis.signals.where((s) => s.type == 'buy').toList(),
-        sellSignals: analysis.signals.where((s) => s.type == 'sell').toList(),
-        signals: analysis.signals,
-        totalScore: analysis.score,
-        last: data.last,
-        quote: null,
-        marketContext: null,
-        marketStructure: analysis.marketStructure,
-        backtestResults: analysis.backtestResults,
-        predictionAccuracy: _predictionSupportFromAnalysis(analysis),
-      ).confidenceScore;
-
-      final expectedConfidence =
-          (baseConfidence * (0.5 + avgAdj * 0.5)).clamp(0.2, 0.95);
-
-      // Step 5: 验证实际置信度与公式预期一致 (v2.29 重新校准后容忍度放宽)
-      expect(analysis.confidenceScore,
-          closeTo(expectedConfidence, 0.06),
-          reason: '期望 conf=${expectedConfidence.toStringAsFixed(4)}  实际=${analysis.confidenceScore.toStringAsFixed(4)}  '
-              'base=${baseConfidence.toStringAsFixed(3)} avgAdj=${avgAdj.toStringAsFixed(3)} '
-              '买${buyWithBacktest.length}个 卖${sellWithBacktest.length}个');
-
-      // Step 6: 细节可追溯性
+      // Step 4: 细节可追溯性
       print('═══════════════════════════════════════');
-      print('双向回测反馈完整验证 (推荐方向: ${isBuyRecommendation ? "买入" : "卖出"})');
+      print('双向信号 V3 双轨置信度验证');
       print('───────────────────────────────────────');
-      print('baseConfidence (纯5维): ${baseConfidence.toStringAsFixed(4)}');
-      print('反馈调整系数 avgAdj: ${avgAdj.toStringAsFixed(4)}');
-      print('  公式: conf = base × (0.5 + avgAdj × 0.5)');
-      print('期望置信度: ${expectedConfidence.toStringAsFixed(4)}');
-      print('实际置信度: ${analysis.confidenceScore.toStringAsFixed(4)}');
+      print('展示证据置信度: ${analysis.confidenceScore.toStringAsFixed(4)}');
+      print('综合诊断置信度: ${analysis.calculatorConfidence!.toStringAsFixed(4)}');
       print('───────────────────────────────────────');
-      for (final s in alignedSignals) {
+      for (final s in [...buyWithBacktest, ...sellWithBacktest]) {
         final key = mapSignalToBacktestKey(s.signal)!;
         final adj = BacktestEngine.getStrategyConfidenceAdjustment(key, backtestResults);
-        print('同向: ${s.signal} → $key  adj=$adj');
-      }
-      for (final s in oppositeSignals) {
-        final key = mapSignalToBacktestKey(s.signal)!;
-        final adj = BacktestEngine.getStrategyConfidenceAdjustment(key, backtestResults);
-        print('反向: ${s.signal} → $key  adj=$adj → 反向=${(2.0 - adj).toStringAsFixed(4)}');
+        print('${s.type}: ${s.signal} → $key  历史调整=$adj');
       }
       print('═══════════════════════════════════════');
 
@@ -1472,10 +1420,10 @@ void main() {
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // ±15% 回测反馈幅度极限验证
+  // V3 双轨置信度语义验证
   // ═══════════════════════════════════════════════════════════════
-  group('回测反馈 ±15% 上限行为', () {
-    test('理论振幅: base × 0.85 ~ base × 1.15', () {
+  group('V3 双轨置信度语义', () {
+    test('展示置信度与综合诊断字段分别可还原', () {
       final data = _calc(_genSideways(80, base: 15.0, amplitude: 2.0));
       final n = data.length;
 
@@ -1485,34 +1433,11 @@ void main() {
         macdDif: 0.6, macdDea: 0.4, ma5: 16.0, ma10: 15.0);
 
       final analysis = generateAnalysis(data, null);
-
-      final baseConfidence = ConfidenceCalculator.calculate(
-        buySignals: analysis.signals.where((s) => s.type == 'buy').toList(),
-        sellSignals: analysis.signals.where((s) => s.type == 'sell').toList(),
-        signals: analysis.signals,
-        totalScore: analysis.score,
-        last: data.last,
-        quote: null,
-        marketContext: null,
-        marketStructure: analysis.marketStructure,
-        backtestResults: analysis.backtestResults,
-        predictionAccuracy: _predictionSupportFromAnalysis(analysis),
-      ).confidenceScore;
-
-      // 验证公式还原性 (v2.29 重新校准后容忍度放宽)
-      final actualAdj = _computeAvgAdjustment(analysis.signals, analysis.backtestResults!);
-      final expectedConf = (baseConfidence * (0.5 + actualAdj * 0.5)).clamp(0.2, 0.95);
-      expect(analysis.confidenceScore, closeTo(expectedConf, 0.06));
-
-      final theoreticalMax = (baseConfidence * 1.15).clamp(0.2, 0.95);
-      final theoreticalMin = (baseConfidence * 0.85).clamp(0.2, 0.95);
-
-      print('理论边界: base=$baseConfidence min=$theoreticalMin max=$theoreticalMax actual=$analysis.confidenceScore');
-      expect(analysis.confidenceScore, lessThanOrEqualTo(theoreticalMax));
-      expect(analysis.confidenceScore, greaterThanOrEqualTo(theoreticalMin));
+      _expectV3ConfidenceSemantics(analysis, data);
+      expect(analysis.backtestResults, isNotEmpty);
     });
 
-    test('全买+最大boost → 推向 +15% 上限', () {
+    test('多头场景保留回测诊断且展示证据置信度', () {
       var data = _calc(_genTrend(80, start: 10.0, daily: 0.015));
       final n = data.length;
 
@@ -1528,22 +1453,14 @@ void main() {
       final buyMapped = buys.where((s) => mapSignalToBacktestKey(s.signal) != null).length;
       final sellMapped = sells.where((s) => mapSignalToBacktestKey(s.signal) != null).length;
 
-      final baseConfidence = ConfidenceCalculator.calculate(
-        buySignals: buys, sellSignals: sells, signals: analysis.signals,
-        totalScore: analysis.score, last: data.last, quote: null, marketContext: null, marketStructure: analysis.marketStructure,
-        backtestResults: analysis.backtestResults,
-        predictionAccuracy: _predictionSupportFromAnalysis(analysis),
-      ).confidenceScore;
+      _expectV3ConfidenceSemantics(analysis, data);
+      expect(buyMapped, greaterThanOrEqualTo(1));
 
-      final upperBound = (baseConfidence * 1.15).clamp(0.2, 0.95);
-      // v2.29: 置信度下界从 0.95× 放宽至 0.88×，回测反馈混合更多维度
-      expect(analysis.confidenceScore, greaterThanOrEqualTo(baseConfidence * 0.88));
-      expect(analysis.confidenceScore, lessThanOrEqualTo(upperBound));
-
-      print('全买场景: buy=$buyMapped sell=$sellMapped base=$baseConfidence conf=$analysis.confidenceScore upper=$upperBound');
+      print('多头场景: buy=$buyMapped sell=$sellMapped '
+          'evidence=${analysis.confidenceScore} diagnostic=${analysis.calculatorConfidence}');
     });
 
-    test('全卖+最强反向 → 推向 -15% 下限', () {
+    test('空头场景保留回测诊断且展示证据置信度', () {
       var data = _calc(_genDowntrend(80, start: 30.0, daily: -0.015));
       final n = data.length;
 
@@ -1558,21 +1475,14 @@ void main() {
       final sellMapped = sells.where((s) => mapSignalToBacktestKey(s.signal) != null).length;
       final buyMapped = buys.where((s) => mapSignalToBacktestKey(s.signal) != null).length;
 
-      final baseConfidence = ConfidenceCalculator.calculate(
-        buySignals: buys, sellSignals: sells, signals: analysis.signals,
-        totalScore: analysis.score, last: data.last, quote: null, marketContext: null, marketStructure: analysis.marketStructure,
-        backtestResults: analysis.backtestResults,
-        predictionAccuracy: _predictionSupportFromAnalysis(analysis),
-      ).confidenceScore;
+      _expectV3ConfidenceSemantics(analysis, data);
+      expect(sellMapped, greaterThanOrEqualTo(1));
 
-      final lowerBound = (baseConfidence * 0.85).clamp(0.2, 0.95);
-      expect(analysis.confidenceScore, lessThanOrEqualTo(baseConfidence * 1.05));
-      expect(analysis.confidenceScore, greaterThanOrEqualTo(lowerBound));
-
-      print('全卖场景: buy=$buyMapped sell=$sellMapped base=$baseConfidence conf=$analysis.confidenceScore lower=$lowerBound');
+      print('空头场景: buy=$buyMapped sell=$sellMapped '
+          'evidence=${analysis.confidenceScore} diagnostic=${analysis.calculatorConfidence}');
     });
 
-    test('双向均最强 → 相互抵消回归基线', () {
+    test('双向信号仍保持两个置信度字段职责分离', () {
       var data = _calc(_genSideways(80, base: 15.0, amplitude: 2.0));
       final n = data.length;
 
@@ -1590,60 +1500,17 @@ void main() {
       expect(buyMapped, greaterThanOrEqualTo(1));
       expect(sellMapped, greaterThanOrEqualTo(1));
 
-      final baseConfidence = ConfidenceCalculator.calculate(
-        buySignals: buys, sellSignals: sells, signals: analysis.signals,
-        totalScore: analysis.score, last: data.last, quote: null, marketContext: null, marketStructure: analysis.marketStructure,
-        backtestResults: analysis.backtestResults,
-        predictionAccuracy: _predictionSupportFromAnalysis(analysis),
-      ).confidenceScore;
-
-      // v2.29: 抵消回归基线范围放宽以适配新的置信度混合公式
-      final ratio = analysis.confidenceScore / baseConfidence;
-      expect(ratio, inInclusiveRange(0.82, 1.20));
-
-      print('双向抵消: buy=$buyMapped sell=$sellMapped ratio=$ratio base=$baseConfidence conf=$analysis.confidenceScore');
+      _expectV3ConfidenceSemantics(analysis, data);
     });
 
-    test('avgAdj=0.7/1.0/1.3 三极值全验证', () {
-      var data = _calc(_genTrend(80, start: 10.0, daily: 0.01));
-      final n = data.length;
-      data[n - 2] = data[n - 2].copyWith(macdDif: 0.3, macdDea: 0.5, ma5: 14.0, ma10: 15.0);
-      data[n - 1] = data[n - 1].copyWith(macdDif: 0.6, macdDea: 0.4, ma5: 16.0, ma10: 15.0);
-
-      final analysis = generateAnalysis(data, null);
-      final baseConfidence = ConfidenceCalculator.calculate(
-        buySignals: analysis.signals.where((s) => s.type == 'buy').toList(),
-        sellSignals: analysis.signals.where((s) => s.type == 'sell').toList(),
-        signals: analysis.signals, totalScore: analysis.score,
-        last: data.last, quote: null, marketContext: null,
-        marketStructure: analysis.marketStructure,
-        backtestResults: analysis.backtestResults,
-        predictionAccuracy: _predictionSupportFromAnalysis(analysis),
-      ).confidenceScore;
-
-      final confMin = (baseConfidence * (0.5 + 0.7 * 0.5)).clamp(0.2, 0.95);
-      final confMid = (baseConfidence * (0.5 + 1.0 * 0.5)).clamp(0.2, 0.95);
-      final confMax = (baseConfidence * (0.5 + 1.3 * 0.5)).clamp(0.2, 0.95);
-
-      final amplitude = confMax - confMin;
-      final expectedAmplitude = baseConfidence * 0.3;
-      expect(amplitude, closeTo(expectedAmplitude, 0.01));
-      expect(confMid, closeTo(baseConfidence, 0.01));
-
-      print('═══════════════════════════════════════');
-      print('avgAdj 三极值验证');
-      print('───────────────────────────────────────');
-      print('base:         ${baseConfidence.toStringAsFixed(4)}');
-      print('avgAdj=0.7:   ${confMin.toStringAsFixed(4)}  (比率 ${(confMin/baseConfidence).toStringAsFixed(4)})');
-      print('avgAdj=1.0:   ${confMid.toStringAsFixed(4)}  (比率 ${(confMid/baseConfidence).toStringAsFixed(4)})');
-      print('avgAdj=1.3:   ${confMax.toStringAsFixed(4)}  (比率 ${(confMax/baseConfidence).toStringAsFixed(4)})');
-      print('振幅:          ${amplitude.toStringAsFixed(4)} (理论=${expectedAmplitude.toStringAsFixed(4)})');
-      print('公式: conf = base × (0.5 + avgAdj × 0.5)');
-      print('范围: base × 0.85 ~ base × 1.15');
-      print('═══════════════════════════════════════');
-
-      for (final c in [confMin, confMid, confMax]) {
-        expect(c, inInclusiveRange(0.2, 0.95));
+    test('多场景双轨字段均保持有效范围', () {
+      final scenarios = [
+        _calc(_genTrend(80, start: 10.0, daily: 0.01)),
+        _calc(_genDowntrend(80, start: 30.0, daily: -0.01)),
+        _calc(_genSideways(80, base: 15.0, amplitude: 2.0)),
+      ];
+      for (final data in scenarios) {
+        _expectV3ConfidenceSemantics(generateAnalysis(data, null), data);
       }
     });
   });
@@ -2810,8 +2677,8 @@ void main() {
       for (int o = 5; o <= 80; o += 5) { offsets.add(o); }
 
       final results = <int, Map<String, dynamic>>{};
-      bool monotonic = true;
-      double prevConf = 1.0;
+      var significantRebounds = 0;
+      double? prevConf;
 
       for (final offset in offsets) {
         final data = _calc(_genMultiPeriodCross(80, events: [
@@ -2820,8 +2687,8 @@ void main() {
         final a = generateAnalysis(data, null);
 
         // 单调性检查: 随着 offset 增大(对倒远去), conf 应递减或持平
-        if (a.confidenceScore > prevConf + 0.02) {
-          monotonic = false; // 显著反向反弹
+        if (prevConf != null && a.confidenceScore > prevConf + 0.02) {
+          significantRebounds++;
         }
         prevConf = a.confidenceScore;
 
@@ -2856,10 +2723,10 @@ void main() {
       final ssTot = ys.map((y) => (y - meanY) * (y - meanY)).reduce((a, b) => a + b);
       final rSquared = ssTot > 0 ? 1 - ssRes / ssTot : 0.0;
 
-      // 验证单调性: 允许 2 次轻微反弹
-      expect(monotonic || results.values.where(
-          (r) => (r['conf'] as double) < prevConf).length >= offsets.length - 2, isTrue,
-          reason: '衰减曲线应有单调递减趋势');
+      // 验证单调性: 对相邻采样点计数，允许最多 2 次显著反弹。
+      // 旧断言把所有点与最后一点比较，无法表达相邻点的恢复曲线。
+      expect(significantRebounds, lessThanOrEqualTo(2),
+          reason: '衰减曲线显著反弹 $significantRebounds 次，超过允许的 2 次');
 
       // 验证衰减趋势: 远端均值应低于近端 (整体方向性)
       // 由于信号检测的离散性，斜率可能接近零，不强制 <0
@@ -2886,7 +2753,7 @@ void main() {
       print('  R²:         ${rSquared.toStringAsFixed(4)}');
       print('  近端均值:   ${nearAvg.toStringAsFixed(4)} (t≤20)');
       print('  远端均值:   ${farAvg.toStringAsFixed(4)} (t≥60)');
-      print('  单调性:     ${monotonic ? "是" : "否(轻微波动)"}');
+      print('  显著反弹:   $significantRebounds 次');
       print('═══════════════════════════════════════');
     });
 
@@ -3395,19 +3262,44 @@ void main() {
   });
 }
 
-/// 手动计算 avgAdjustment（复现 signal_engine 中的逻辑）
-double _computeAvgAdjustment(List<SignalItem> signals, Map<String, BacktestResult> backtestResults) {
-  final adjustments = <double>[];
-  for (final s in signals) {
-    final key = mapSignalToBacktestKey(s.signal);
-    if (key == null) continue;
-    final adj = BacktestEngine.getStrategyConfidenceAdjustment(key, backtestResults);
-    if (s.type == 'buy') {
-      adjustments.add(adj);
-    } else if (s.type == 'sell') {
-      adjustments.add(2.0 - adj);
-    }
-  }
-  if (adjustments.isEmpty) return 1.0;
-  return adjustments.reduce((a, b) => a + b) / adjustments.length;
+void _expectV3ConfidenceSemantics(
+  AnalysisResult analysis,
+  List<HistoryKline> data,
+) {
+  final decision = analysis.shortTermDecision;
+  expect(decision, isNotNull);
+  expect(
+    analysis.confidenceScore,
+    closeTo(decision!.evidenceConfidence / 100, 1e-10),
+    reason: 'V3 展示置信度必须来自 EvidenceConfidence',
+  );
+
+  final expectedCalculator = ConfidenceCalculator.calculate(
+    buySignals: analysis.signals.where((s) => s.type == 'buy').toList(),
+    sellSignals: analysis.signals.where((s) => s.type == 'sell').toList(),
+    signals: analysis.signals,
+    direction: decision.direction,
+    last: data.last,
+    quote: analysis.quote,
+    fundamentalScore: analysis.fundamentalScore,
+    newsSentiment: analysis.newsSentiment,
+    marketContext: analysis.marketContext,
+    marketStructure: analysis.marketStructure,
+    backtestResults: analysis.backtestResults,
+    predictionAccuracy: _predictionSupportFromAnalysis(analysis),
+  ).confidenceScore;
+  expect(analysis.calculatorConfidence, isNotNull);
+  expect(
+    analysis.calculatorConfidence!,
+    closeTo(expectedCalculator, 1e-10),
+    reason: '综合诊断置信度必须保留 ConfidenceCalculator 输出',
+  );
+  expect(analysis.confidenceScore, inInclusiveRange(0.0, 1.0));
+  expect(analysis.calculatorConfidence!, inInclusiveRange(0.2, 0.95));
+  expect(analysis.confidenceBreakdown, isNotNull);
+  expect(analysis.confidenceBreakdown!, contains('historical_winrate'));
+  expect(
+    analysis.confidenceBreakdown!['historical_winrate'],
+    inInclusiveRange(0.0, 1.0),
+  );
 }

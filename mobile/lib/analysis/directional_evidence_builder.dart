@@ -15,6 +15,7 @@ const String nextSessionComponentKey = 'next_session';
 const String oversoldReboundGuard = 'oversold_rebound_guard';
 const String chaseGuard = 'chase_guard';
 const String historyDataMissingFlag = 'history_data_missing';
+const String quoteDataMissingFlag = 'quote_data_missing';
 const String evidenceFamilyConflictFlag = 'evidence_family_conflict';
 
 class DirectionalEvidenceInput {
@@ -130,6 +131,12 @@ class DirectionalEvidenceBuilder {
     final dataQualityFlags = <String>[...market.dataQualityFlags];
     final guardReasons = <String>[];
     final signalOwnership = <String, String>{};
+
+    if (input.quote == null ||
+        !input.quote!.price.isFinite ||
+        input.quote!.price <= 0) {
+      dataQualityFlags.add(quoteDataMissingFlag);
+    }
 
     if (input.data.isEmpty) {
       dataQualityFlags.add(historyDataMissingFlag);

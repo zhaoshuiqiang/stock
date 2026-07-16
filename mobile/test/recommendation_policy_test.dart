@@ -395,6 +395,7 @@ void main() {
       'history_data_missing',
       'market_context_missing',
       'market_context_invalid',
+      'quote_data_missing',
     ]) {
       test('critical data flag $flag downgrades bullish execution', () {
         final result = RecommendationPolicy.evaluate(

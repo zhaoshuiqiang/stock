@@ -105,6 +105,49 @@ void main() {
     expect(rows.last.outcomes.keys, contains(5));
   });
 
+  test('neutral export clears legacy directional labels and excursions', () {
+    final snapshot = DecisionSnapshotRecord.minimalForTesting(
+      id: 1,
+      code: '000001',
+      signalTradeDate: DateTime(2026, 7, 14),
+    );
+    final csv = buildDecisionCsv([
+      DecisionExportRow(
+        snapshot: snapshot,
+        outcomes: {
+          1: DecisionOutcomeRecord(
+            snapshotId: 1,
+            horizon: 1,
+            status: DecisionOutcomeStatus.evaluated,
+            rawDirectionHit: true,
+            effectiveDirectionHit: true,
+            alphaHit: true,
+            mfe: 0,
+            mae: 0,
+            predictedProbability: 0.9,
+            predictedSampleCount: 100,
+            predictedWilsonLower: 0.8,
+            predictedWilsonUpper: 0.95,
+          ),
+        },
+      ),
+    ]);
+    final lines = csv.split('\r\n');
+    final headers = lines.first.replaceFirst('\ufeff', '').split(',');
+    final values = lines[1].split(',');
+    String valueOf(String header) => values[headers.indexOf(header)];
+
+    expect(valueOf('h1_raw_hit'), isEmpty);
+    expect(valueOf('h1_effective_hit'), isEmpty);
+    expect(valueOf('h1_alpha_hit'), isEmpty);
+    expect(valueOf('h1_mfe'), isEmpty);
+    expect(valueOf('h1_mae'), isEmpty);
+    expect(valueOf('h1_predicted_probability'), isEmpty);
+    expect(valueOf('h1_predicted_sample_count'), isEmpty);
+    expect(valueOf('h1_wilson_lower'), isEmpty);
+    expect(valueOf('h1_wilson_upper'), isEmpty);
+  });
+
   test('uses a distinct filename prefix for decision exports', () {
     expect(
       decisionExportFileName(DateTime(2026, 7, 15, 9, 8, 7)),

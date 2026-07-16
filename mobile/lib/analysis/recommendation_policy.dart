@@ -9,6 +9,7 @@ const Set<String> _criticalDataFlags = <String>{
   'history_data_missing',
   'market_context_missing',
   'market_context_invalid',
+  'quote_data_missing',
 };
 
 // 方向分数阈值（9级强度映射）

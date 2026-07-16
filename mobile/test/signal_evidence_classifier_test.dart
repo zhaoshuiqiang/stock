@@ -22,6 +22,13 @@ void main() {
       expect(_classify('BOLL', '趋势突破上轨').family, 'boll_trend');
     });
 
+    test('keeps independent volume-flow sources in separate families', () {
+      expect(_classify('量价', '放量上涨').family, 'volume_price');
+      expect(_classify('OBV', 'OBV放量上涨').family, 'obv');
+      expect(_classify('主力资金', '主力净流入').family, 'capital_flow');
+      expect(_classify('换手率', '换手活跃').family, 'turnover');
+    });
+
     test('does not route ordinary signals into reserved model components', () {
       final rsi = _classify('RSI', 'RSI超卖');
       final relativeText = _classify('形态', 'relative strength breakout');

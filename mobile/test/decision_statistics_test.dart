@@ -53,6 +53,30 @@ void main() {
     expect(summary.meanMae, -2);
   });
 
+  test('same-day pending outcome matures only after market close', () {
+    final rows = [
+      _row(
+        status: DecisionOutcomeStatus.pending,
+        dueDate: DateTime(2026, 7, 15),
+      ),
+    ];
+
+    expect(
+      DecisionStatistics.summarize(
+        rows,
+        now: DateTime(2026, 7, 15, 8, 45),
+      ).maturedPendingCount,
+      0,
+    );
+    expect(
+      DecisionStatistics.summarize(
+        rows,
+        now: DateTime(2026, 7, 15, 15),
+      ).maturedPendingCount,
+      1,
+    );
+  });
+
   test('summary uses independent direction denominators and oriented returns',
       () {
     final rows = [
@@ -106,6 +130,40 @@ void main() {
     expect(summary.medianOrientedReturn, 2);
     expect(summary.meanOrientedAlpha, closeTo(1 / 6, 1e-9));
     expect(summary.medianOrientedAlpha, 1);
+  });
+
+  test('legacy neutral hit fields do not enter directional statistics', () {
+    final summary = DecisionStatistics.summarize([
+      _row(
+        direction: RecommendationDirection.bullish,
+        status: DecisionOutcomeStatus.evaluated,
+        rawHit: true,
+        effectiveHit: true,
+        alphaHit: true,
+        predicted: 0.7,
+        mfe: 3,
+        mae: -1,
+      ),
+      _row(
+        direction: RecommendationDirection.neutral,
+        status: DecisionOutcomeStatus.evaluated,
+        alpha: 0.1,
+        rawHit: true,
+        effectiveHit: true,
+        alphaHit: true,
+        predicted: 0.9,
+        mfe: 0,
+        mae: 0,
+        snapshotId: 2,
+      ),
+    ]);
+
+    expect(summary.rawHitSampleCount, 1);
+    expect(summary.effectiveHitSampleCount, 1);
+    expect(summary.alphaHitSampleCount, 1);
+    expect(summary.calibration.sampleCount, 1);
+    expect(summary.meanMfe, 3);
+    expect(summary.meanMae, -1);
   });
 
   test('calibration quality requires 30 outcomes and 10 signal dates', () {

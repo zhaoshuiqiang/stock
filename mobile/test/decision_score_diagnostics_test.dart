@@ -187,6 +187,29 @@ void main() {
     expect(result.decliningPairs, hasLength(1));
   });
 
+  test('monotonicity ignores evaluated rows without directional labels', () {
+    List<DecisionStatisticsRow> mostlyUnlabeled(double score, int offset) =>
+        List.generate(
+          20,
+          (index) => _row(
+            id: offset + index,
+            signalDate: DateTime(2026, 1, 1 + index % 5),
+            direction: RecommendationDirection.bullish,
+            directionScore: score,
+            forecastReturn: 1,
+            effectiveHit: index == 0 ? true : null,
+          ),
+        );
+
+    final result = DecisionScoreDiagnostics.analyze([
+      ...mostlyUnlabeled(15, 1000),
+      ...mostlyUnlabeled(25, 2000),
+    ]).bullishMonotonicity;
+
+    expect(result.eligiblePairCount, 0);
+    expect(result.isMonotonic, isNull);
+  });
+
   test('empty diagnostics are safe and not optimization ready', () {
     final result = DecisionScoreDiagnostics.analyze(const []);
 

@@ -70,6 +70,48 @@ void main() {
         result.decision.dataQualityFlags, contains('market_context_missing'));
   });
 
+  test('missing or invalid quote price blocks actionable recommendations', () {
+    final invalidQuote = QuoteData(
+      code: 'sh600001',
+      name: 'test',
+      price: 0,
+      open: 10.7,
+      high: 11.1,
+      low: 10.6,
+      preClose: 10.7,
+      changePct: 2.8,
+      turnover: 4,
+      volumeRatio: 1.8,
+      mainNetFlowRate: 6,
+    );
+
+    for (final quote in <QuoteData?>[null, invalidQuote]) {
+      final result = ShortTermDecisionEngine.evaluate(_input(
+        data: _data(trend: 1, lastChangePct: 5),
+        buySignals: [_signal('MA'), _signal('volume')],
+        quote: quote,
+        marketContext: _market(avgChangePct: 0.1),
+        activeStrategies: [_strategy('primary', strength: 90)],
+        nextDayPrediction: _prediction(up: 0.95, down: 0),
+        nextSessionPrediction: const NextSessionPrediction(
+          nextOpenUpProbability: 0.9,
+          nextCloseUpProbability: 0.95,
+          expectedNextCloseReturn: 3,
+          downsideRiskProbability: 0.05,
+          confidence: 1,
+          sampleCount: 100,
+          scenarioTags: [],
+          riskWarnings: [],
+        ),
+      ));
+
+      expect(result.decision.directionScore, greaterThanOrEqualTo(20));
+      expect(result.decision.dataQualityFlags, contains('quote_data_missing'));
+      expect(result.recommendation.gates, contains('critical_data_missing'));
+      expect(result.recommendation.actionable, isFalse);
+    }
+  });
+
   test('relative strength is centered on stock performance versus market', () {
     double relative(double stockChange, double marketChange) =>
         ShortTermDecisionEngine.evaluate(

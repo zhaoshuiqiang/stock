@@ -328,7 +328,10 @@ class DecisionScoreDiagnostics {
             row.snapshot.direction == direction &&
             bucketFor(row.snapshot.directionScore) == scoreBucket)
         .toList(growable: false);
-    final effectiveHits = bucketRows
+    final effectiveRows = bucketRows
+        .where((row) => row.outcome.effectiveDirectionHit != null)
+        .toList(growable: false);
+    final effectiveHits = effectiveRows
         .map((row) => row.outcome.effectiveDirectionHit)
         .whereType<bool>()
         .toList(growable: false);
@@ -352,7 +355,7 @@ class DecisionScoreDiagnostics {
       scoreBucket: scoreBucket,
       direction: direction,
       sampleCount: bucketRows.length,
-      signalDateCount: bucketRows
+      signalDateCount: effectiveRows
           .map((row) => _dateKey(row.snapshot.signalTradeDate))
           .toSet()
           .length,
@@ -381,8 +384,8 @@ class DecisionScoreDiagnostics {
     for (var index = 0; index < directional.length - 1; index++) {
       final lower = directional[index];
       final higher = directional[index + 1];
-      final eligible = lower.sampleCount >= 20 &&
-          higher.sampleCount >= 20 &&
+      final eligible = lower.effectiveHitSampleCount >= 20 &&
+          higher.effectiveHitSampleCount >= 20 &&
           lower.signalDateCount >= 5 &&
           higher.signalDateCount >= 5 &&
           lower.effectiveHitRate != null &&

@@ -508,11 +508,9 @@ AnalysisResult generateAnalysis(
       nextDayPrediction,
     ),
   );
-  // 回测反馈闭环：根据策略历史表现调整置信度
-  // v3.19: 显示用置信度仍采用短线决策的证据置信度(shortTermDecision.evidenceConfidence)，
-  // 以兼容已校准的置信度测试套件；但 ConfidenceCalculator 计算的、含回测胜率/预测准确率/
-  // 对抗验证维度的 confResult.confidence 并未被丢弃——它通过 confidenceBreakdown 与
-  // validatedSignals 流入建议生成与 UI（见 Batch 3 展示），避免"只看证据忽略回测"的信息丢失。
+  // V3 双轨置信度：展示/推荐使用证据一致性，避免把它误当作历史胜率概率；
+  // ConfidenceCalculator 的综合诊断结果（含回测胜率、预测支持和对抗验证）单独保留，
+  // 供 UI、导出与后续校准诊断使用，两个字段不得再套用旧的 ±15% 后处理公式。
   final confidenceScore = shortTermDecision.evidenceConfidence / 100;
   final calculatorConfidence = confResult.confidenceScore;
   final validatedSignals = confResult.validatedSignals;

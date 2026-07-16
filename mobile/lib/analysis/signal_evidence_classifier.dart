@@ -54,22 +54,24 @@ class SignalEvidenceClassifier {
         'gap_reversal',
       );
     }
+    if (text.contains('obv')) {
+      return const SignalEvidenceClassification('volume_flow', 'obv');
+    }
     if (_containsAny(text, const <String>[
-      '量价',
-      '成交量',
-      '量能',
       '资金',
       '主力',
-      'obv',
-      'volume',
-      'turnover',
-      '换手',
+      'fund flow',
+      'capital flow',
       '吸筹',
       '派发',
-      '放量',
-      '缩量',
-      '地量'
     ])) {
+      return const SignalEvidenceClassification('volume_flow', 'capital_flow');
+    }
+    if (_containsAny(text, const <String>['turnover', '换手'])) {
+      return const SignalEvidenceClassification('volume_flow', 'turnover');
+    }
+    if (_containsAny(
+        text, const <String>['量价', '成交量', '量能', 'volume', '放量', '缩量', '地量'])) {
       return const SignalEvidenceClassification('volume_flow', 'volume_price');
     }
     if (_containsAny(text, const <String>['k线形态', '蜡烛', 'candlestick'])) {

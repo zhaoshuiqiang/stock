@@ -133,6 +133,10 @@ class DecisionStatistics {
     final evaluated = rows
         .where((row) => row.outcome.status == DecisionOutcomeStatus.evaluated)
         .toList(growable: false);
+    final directionalEvaluated = evaluated
+        .where(
+            (row) => row.snapshot.direction != RecommendationDirection.neutral)
+        .toList(growable: false);
     final invalid = rows
         .where((row) => row.outcome.status == DecisionOutcomeStatus.invalid)
         .length;
@@ -141,18 +145,18 @@ class DecisionStatistics {
         .toList(growable: false);
     final maturedPending = pending.where((row) {
       final due = row.outcome.dueTradeDate;
-      return due != null && !due.isAfter(current);
+      return due != null && _isMatured(due, current);
     }).length;
     final coverageDenominator = evaluated.length + invalid + maturedPending;
-    final rawHits = evaluated
+    final rawHits = directionalEvaluated
         .where((row) => row.outcome.rawDirectionHit != null)
         .map((row) => row.outcome.rawDirectionHit!)
         .toList();
-    final effectiveHits = evaluated
+    final effectiveHits = directionalEvaluated
         .where((row) => row.outcome.effectiveDirectionHit != null)
         .map((row) => row.outcome.effectiveDirectionHit!)
         .toList();
-    final alphaHits = evaluated
+    final alphaHits = directionalEvaluated
         .where((row) => row.outcome.alphaHit != null)
         .map((row) => row.outcome.alphaHit!)
         .toList();
@@ -184,9 +188,9 @@ class DecisionStatistics {
       evaluated,
       (row) => row.outcome.alphaReturn,
     );
-    final mfes = _values(evaluated, (row) => row.outcome.mfe);
-    final maes = _values(evaluated, (row) => row.outcome.mae);
-    final probabilityRows = evaluated
+    final mfes = _values(directionalEvaluated, (row) => row.outcome.mfe);
+    final maes = _values(directionalEvaluated, (row) => row.outcome.mae);
+    final probabilityRows = directionalEvaluated
         .where((row) =>
             row.outcome.predictedProbability != null &&
             row.outcome.effectiveDirectionHit != null)
@@ -294,5 +298,13 @@ class DecisionStatistics {
     return sorted.length.isOdd
         ? sorted[middle]
         : (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+
+  static bool _isMatured(DateTime due, DateTime current) {
+    final dueDate = DateTime(due.year, due.month, due.day);
+    final currentDate = DateTime(current.year, current.month, current.day);
+    if (dueDate.isBefore(currentDate)) return true;
+    if (dueDate.isAfter(currentDate)) return false;
+    return current.hour * 60 + current.minute >= 15 * 60;
   }
 }
