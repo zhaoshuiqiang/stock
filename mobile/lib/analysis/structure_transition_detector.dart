@@ -42,22 +42,22 @@ class StructureTransitionDetector {
       evidence.add('ADX方向一致');
     }
 
-    if (_isVolumePriceConfirming(data, current.type)) {
+    if (_isVolumePriceConfirming(data, current.structure)) {
       confidence += 0.15;
       evidence.add('量价配合确认');
     }
 
-    if (_isMaAlignmentConfirming(data, current.type)) {
+    if (_isMaAlignmentConfirming(data, current.structure)) {
       confidence += 0.15;
       evidence.add('均线排列确认');
     }
 
     return StructureTransition(
-      from: previous.type,
-      to: current.type,
+      from: previous.structure,
+      to: current.structure,
       confidence: confidence.clamp(0.3, 0.95),
       detectedAt: DateTime.now(),
-      description: '${_structureLabel(previous.type)}→${_structureLabel(current.type)}',
+      description: '${_structureLabel(previous.structure)}->${_structureLabel(current.structure)}',
       evidence: evidence,
     );
   }
