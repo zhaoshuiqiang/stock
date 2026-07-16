@@ -1766,6 +1766,20 @@ class DatabaseService {
     return result;
   }
 
+  /// 返回 [decision_snapshots] 中已存在的股票代码（按来源过滤，去重）。
+  /// 用于回填时判断哪些留档记录尚未生成决策快照。
+  Future<List<String>> getDecisionSnapshotCodes({String? source}) async {
+    final db = await database;
+    final rows = await db.query(
+      'decision_snapshots',
+      columns: const ['code'],
+      where: source != null ? 'source = ?' : null,
+      whereArgs: source != null ? [source] : null,
+      distinct: true,
+    );
+    return rows.map((r) => (r['code'] as String)).toList();
+  }
+
   static String _formatSnapshotDate(DateTime date) =>
       '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 }

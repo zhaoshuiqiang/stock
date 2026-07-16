@@ -487,6 +487,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
 
   void _onExploreProgress(ExploreProgress p) {
     if (!mounted) return;
+    String? errorMsg;
     setState(() {
       switch (p.status) {
         case ExploreStatus.fetchingSectors:
@@ -506,6 +507,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
           break;
         case ExploreStatus.error:
           _exploreLoading = false;
+          errorMsg = p.message;
           break;
         case ExploreStatus.alreadyRunning:
           _exploreLoading = true;
@@ -514,6 +516,15 @@ class DiscoverScreenState extends State<DiscoverScreen>
           break;
       }
     });
+    // 扫描失败时给用户明确反馈（此前仅静默清除 loading）。
+    if (errorMsg != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('扫描失败：$errorMsg'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   // ─── Tab 1: 打板梯队（涨停/连板标的） ─────────────────────────
@@ -1540,7 +1551,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             onPressed: _exploreLoading ? null : () => _exploreEngine.explore(),
-            tooltip: '刷新探索',
+            tooltip: '重新扫描',
           ),
         ],
       ),

@@ -14,6 +14,7 @@ import '../analysis/archive_reliability_evaluator.dart';
 import '../services/legacy_archive_csv_exporter.dart';
 import '../services/decision_csv_exporter.dart';
 import '../analysis/decision_statistics.dart';
+import '../analysis/decision_tracker.dart';
 import '../analysis/archive_service.dart';
 import '../models/short_term_decision.dart';
 import '../widgets/decision_archive_summary.dart';
@@ -50,6 +51,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
   bool _isLoading = true;
   Map<String, QuoteData> _currentQuotes = {};
   Timer? _refreshTimer;
+  Timer? _pendingTimer;
   String _sortBy = 'time'; // 'time', 'score', 'change'
   bool _sortAscending = false;
   bool _showNewModel = true;
@@ -92,6 +94,29 @@ class ArchiveScreenState extends State<ArchiveScreen>
       }
     } catch (e) {
       debugPrint('[留档] 加载决策统计行失败: $e');
+    }
+  }
+
+  /// 为缺少决策快照的留档记录补录决策信息（联网重分析回填）。
+  Future<void> _backfillDecision() async {
+    final summary = await showDialog<BackfillSummary>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _BackfillDecisionDialog(db: _dbService),
+    );
+    // 回填后刷新「新模型」与「历史口径」数据。
+    await _loadDecisionRows();
+    await _loadArchives();
+    if (mounted && summary != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(summary.total == 0
+              ? '没有需要补录的留档'
+              : '补录完成：成功 ${summary.success} 条，失败 ${summary.failed} 条'),
+          backgroundColor: const Color(0xFF58A6FF),
+          duration: const Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -149,6 +174,12 @@ class ArchiveScreenState extends State<ArchiveScreen>
                   foregroundColor: Colors.red,
                   side: BorderSide(color: Colors.red.withOpacity(0.5)),
                 ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: _backfillDecision,
+                icon: const Icon(Icons.sync, size: 16),
+                label: const Text('补录缺失决策'),
               ),
             ],
           ),
@@ -380,6 +411,21 @@ class ArchiveScreenState extends State<ArchiveScreen>
     _refreshTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       _refreshCurrentPrices();
     });
+    // vX.Y.Z: 周期评估 pending 决策快照的命中率，使「新模型」数据逐步更新，
+    // 避免只刷行情、快照永远停留在 pending。
+    _pendingTimer?.cancel();
+    _pendingTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+      _refreshPendingDecisions();
+    });
+  }
+
+  /// 评估仍处于 pending 的决策快照（命中率），失败仅记录日志。
+  Future<void> _refreshPendingDecisions() async {
+    try {
+      await DecisionTracker().refreshPending(limit: 200);
+    } catch (e) {
+      debugPrint('[留档] 命中率评估刷新失败: $e');
+    }
   }
 
   Future<void> _loadArchives() async {
@@ -520,7 +566,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
         }
       });
     } catch (e) {
-      // ignore
+      debugPrint('[留档] 实时行情刷新失败: $e');
     }
   }
 
@@ -1629,6 +1675,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
+    _pendingTimer?.cancel();
     _apiClient.dispose();
     super.dispose();
   }
@@ -1637,5 +1684,88 @@ class ArchiveScreenState extends State<ArchiveScreen>
   void onTabVisible() {
     _loadArchives();
     _loadDecisionRows();
+  }
+}
+
+/// 补录缺失决策信息的进度对话框。
+///
+/// 进入即开始 [ArchiveService.backfillMissingDecisionSnapshots]，按批次
+/// 联网重分析并捕获决策快照；支持取消（当前批次结束后中止）。完成或取消后
+/// pop 出 [BackfillSummary] 供调用方刷新界面。
+class _BackfillDecisionDialog extends StatefulWidget {
+  const _BackfillDecisionDialog({required this.db});
+  final DatabaseService db;
+
+  @override
+  State<_BackfillDecisionDialog> createState() =>
+      _BackfillDecisionDialogState();
+}
+
+class _BackfillDecisionDialogState extends State<_BackfillDecisionDialog> {
+  int _done = 0;
+  int _total = 0;
+  bool _cancelled = false;
+  BackfillSummary? _summary;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    final summary = await ArchiveService.backfillMissingDecisionSnapshots(
+      db: widget.db,
+      shouldCancel: () => _cancelled,
+      onProgress: (done, total) {
+        if (mounted) setState(() {
+          _done = done;
+          _total = total;
+        });
+      },
+    );
+    if (!mounted) return;
+    setState(() => _summary = summary);
+    // 短暂停留让用户看到结果，再自动关闭。
+    await Future.delayed(const Duration(milliseconds: 900));
+    if (mounted) Navigator.of(context).pop(summary);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final finished = _summary != null;
+    return AlertDialog(
+      backgroundColor: const Color(0xFF161B22),
+      title: const Text('补录缺失决策',
+          style: TextStyle(color: Color(0xFFF0F6FC))),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!finished) ...[
+            Text(
+              _total == 0 ? '正在准备...' : '已处理 $_done / $_total',
+              style: const TextStyle(color: Color(0xFF8B949E)),
+            ),
+            const SizedBox(height: 12),
+            if (_total > 0)
+              LinearProgressIndicator(value: _done / _total),
+          ] else
+            Text(
+              _summary!.total == 0
+                  ? '没有需要补录的留档'
+                  : '补录完成\n成功 ${_summary!.success} 条，失败 ${_summary!.failed} 条',
+              style: const TextStyle(color: Color(0xFF8B949E)),
+            ),
+        ],
+      ),
+      actions: [
+        if (!finished)
+          TextButton(
+            onPressed: () => setState(() => _cancelled = true),
+            child: const Text('取消',
+                style: TextStyle(color: Color(0xFF8B949E))),
+          ),
+      ],
+    );
   }
 }

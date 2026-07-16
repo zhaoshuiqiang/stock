@@ -631,30 +631,33 @@ class WatchlistScreenState extends State<WatchlistScreen>
       ),
     );
     if (confirmed != true) return;
+    // 统一走 ArchiveService.archiveStock 双写（历史口径 + 决策快照），
+    // 与一键归档保持一致，避免批量归档缺少决策信息导致「新模型」页为空。
+    // skipRefreshPending 避免每只都触发行情拉取，循环结束后统一刷新一次。
+    var archived = 0;
     for (final r in toArchive) {
-      final record = ArchiveRecord(
-        code: StockCodeUtils.normalizeForArchive(r.code),
-        name: r.name,
-        price: r.price,
-        changePct: r.changePct,
-        score: r.score,
-        recommendation: r.recommendation,
-        riskLevel: r.riskLevel,
-        buySignalCount: r.buySignalCount,
-        sellSignalCount: r.sellSignalCount,
-        activeStrategyCount: r.activeStrategyCount,
-        confluenceScore: r.confluenceScore,
-        tradeLevelsJson:
-            r.tradeLevels != null ? r.tradeLevels.toString() : null,
-        topSignals: r.topSignals.join('  '),
-        archivedAt: DateTime.now(),
-      );
-      await _dbService.addArchiveIfNotExists(record);
+      try {
+        final result = await ArchiveService.archiveStock(
+          code: r.code,
+          name: r.name,
+          opp: r,
+          db: _dbService,
+          skipRefreshPending: true,
+        );
+        if (result.archived) archived++;
+      } catch (e) {
+        debugPrint('[留档] 批量归档失败: $e');
+      }
+    }
+    try {
+      await DecisionTracker().refreshPending(limit: toArchive.length);
+    } catch (e) {
+      debugPrint('[留档] 批量归档命中率刷新失败: $e');
     }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已归档 ${toArchive.length} 只股票'),
+          content: Text('已归档 $archived 只（含命中率跟踪）'),
           backgroundColor: _accentColor,
           duration: const Duration(seconds: 1),
         ),

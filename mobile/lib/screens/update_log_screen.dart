@@ -10,6 +10,18 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.29.20260716',
+        'date': '2026-07-16',
+        'changes': [
+          '修复: 留档批量归档(归档选中)后「新模型」页无决策信息',
+          '根因: 批量归档只写历史口径(archive_records)，未走 ArchiveService.archiveStock 双写决策快照',
+          '批量归档现统一走 ArchiveService.archiveStock，与一键归档一致写入历史口径+决策快照',
+          '新增: 留档新模型页「补录缺失决策」按钮，对仅历史口径、缺决策快照的留档逐只联网重分析并补捕获快照(可取消、带进度)',
+          '留档自动刷新增强: 60秒刷行情外，新增5分钟定时评估 pending 命中率;行情拉取失败改为记录日志而非静默',
+          '全市场扫描: 刷新按钮 tooltip 改为「重新扫描」，扫描失败弹出红色提示，便于手动触发与排查',
+        ],
+      },
+      {
         'version': 'v3.28.20260716',
         'date': '2026-07-16',
         'changes': [

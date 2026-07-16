@@ -132,6 +132,76 @@ class ArchiveService {
       archivedAt: DateTime.now(),
     );
   }
+
+  /// 为「仅有历史口径、缺少决策快照」的留档记录补录决策信息。
+  ///
+  /// 留档记录本身不持久化 [ShortTermDecision]（方向评分/市场状态/模型版本等），
+  /// 无法本地重建，因此对本批次中每只缺失记录重新联网分析
+  /// （[SingleStockAnalyzer]）后捕获决策快照。[signalTradeDate] 取留档时间，
+  /// 使命中率从该留档点起算。已存在 `source='archive'` 快照的标的会被跳过，
+  /// 不会重复写入（[decision_snapshots] 有唯一约束）。
+  ///
+  /// [concurrency] 控制并发分析数，避免瞬间打满行情接口；[shouldCancel]
+  /// 返回 true 时在当前批次结束后中止。进度通过 [onProgress] 回调（done/total）。
+  static Future<BackfillSummary> backfillMissingDecisionSnapshots({
+    required DatabaseService db,
+    required void Function(int done, int total) onProgress,
+    bool Function()? shouldCancel,
+    int concurrency = 5,
+  }) async {
+    final archives = await db.getArchives();
+    final existingRaw =
+        await db.getDecisionSnapshotCodes(source: kManualSource);
+    final have = existingRaw.map(StockCodeUtils.normalizeForArchive).toSet();
+    final need = archives
+        .where((a) => !have.contains(StockCodeUtils.normalizeForArchive(a.code)))
+        .toList();
+    if (need.isEmpty) {
+      return const BackfillSummary(total: 0, done: 0, success: 0, failed: 0);
+    }
+    var done = 0;
+    var success = 0;
+    var failed = 0;
+    for (var i = 0; i < need.length; i += concurrency) {
+      if (shouldCancel?.call() == true) break;
+      final end = (i + concurrency > need.length) ? need.length : i + concurrency;
+      final batch = need.sublist(i, end);
+      final results = await Future.wait(batch.map((record) async {
+        try {
+          final raw = StockCodeUtils.stripMarketPrefix(record.code);
+          final analysis = await SingleStockAnalyzer.analyze(
+            raw,
+            name: record.name,
+          );
+          if (analysis == null || analysis.shortTermDecision == null) {
+            return false;
+          }
+          await DecisionTracker().capture(
+            analysis: analysis,
+            source: kManualSource,
+            signalTradeDate: record.archivedAt,
+            benchmarkCode: '000300',
+          );
+          return true;
+        } catch (e) {
+          debugPrint('[留档] 回填决策失败 ${record.code}: $e');
+          return false;
+        }
+      }));
+      for (final ok in results) {
+        done++;
+        if (ok) success++;
+        if (!ok) failed++;
+      }
+      onProgress(done, need.length);
+    }
+    return BackfillSummary(
+      total: need.length,
+      done: done,
+      success: success,
+      failed: failed,
+    );
+  }
 }
 
 /// [ArchiveService.archiveStock] 的执行结果。
@@ -144,3 +214,26 @@ class ArchiveResult {
 
   const ArchiveResult({required this.archived, required this.captured});
 }
+
+/// 批量回填结果的汇总。
+class BackfillSummary {
+  /// 需要回填的留档记录数（缺少 source='archive' 决策快照）。
+  final int total;
+
+  /// 已处理数。
+  final int done;
+
+  /// 成功生成决策快照数。
+  final int success;
+
+  /// 失败数（分析失败 / 无 shortTermDecision / 写入冲突）。
+  final int failed;
+
+  const BackfillSummary({
+    required this.total,
+    required this.done,
+    required this.success,
+    required this.failed,
+  });
+}
+
