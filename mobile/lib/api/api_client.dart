@@ -1766,25 +1766,32 @@ class ApiClient {
   Future<List<QuoteData>> getBatchRealtimeQuotes(List<String> codes) async {
     if (codes.isEmpty) return [];
 
-    final cacheKey = 'batch_quotes_${codes.join(',')}';
-    final cached = _getCached(cacheKey);
-    if (cached != null) return cached as List<QuoteData>;
-
-    // Check if request is already in flight
-    if (_inFlightRequests.containsKey(cacheKey)) {
-      return _inFlightRequests[cacheKey] as Future<List<QuoteData>>;
+    // 去重（保序），避免对重复代码发起冗余请求
+    final uniqueCodes = <String>[];
+    final seen = <String>{};
+    for (final c in codes) {
+      if (seen.add(c)) uniqueCodes.add(c);
     }
 
-    // Make the request
-    final future = _fetchBatchRealtimeQuotes(codes, cacheKey);
-    _inFlightRequests[cacheKey] = future;
-
-    try {
-      final result = await future;
-      return result;
-    } finally {
-      _inFlightRequests.remove(cacheKey);
+    // 腾讯批量接口单次代码过多易触发超长 URL / 限流，按 ≤100 分片并发请求
+    const chunkSize = 100;
+    final results = <QuoteData>[];
+    for (var i = 0; i < uniqueCodes.length; i += chunkSize) {
+      final end = (i + chunkSize) > uniqueCodes.length
+          ? uniqueCodes.length
+          : i + chunkSize;
+      final chunk = uniqueCodes.sublist(i, end);
+      try {
+        final chunkResult = await _fetchBatchRealtimeQuotes(
+          chunk,
+          'batch_quotes_${chunk.join(',')}',
+        );
+        results.addAll(chunkResult);
+      } catch (e) {
+        debugPrint('[行情] 批量行情分片失败($i-$end): $e');
+      }
     }
+    return results;
   }
 
   Future<List<QuoteData>> _fetchBatchRealtimeQuotes(

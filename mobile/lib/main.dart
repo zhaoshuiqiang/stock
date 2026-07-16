@@ -130,6 +130,9 @@ class _MyAppState extends State<MyApp> {
     // 切回留档时刷新数据
     if (index == 4) {
       _archiveKey.currentState?.onTabVisible();
+    } else {
+      // 切离留档时停止后台定时器（IndexedStack 下不 dispose）
+      _archiveKey.currentState?.onTabHidden();
     }
   }
 

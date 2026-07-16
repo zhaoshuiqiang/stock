@@ -14,7 +14,13 @@ class DecisionOutcomeEvaluator {
     final signalIndex = benchmark.indexWhere(
       (bar) => _sameDate(bar.date, snapshot.signalTradeDate),
     );
-    if (signalIndex < 0 || signalIndex + outcome.horizon >= benchmark.length) {
+    // signalTradeDate 不在基准序列（如节假日/数据缺口）→ 永远无法匹配，
+    // 直接置 invalid，避免 refreshPending 每周期空转占用 limit 槽位。
+    // （已通过 [TradingDateUtils] 在写入时归一化周末，此处为双保险。）
+    if (signalIndex < 0) {
+      return _invalid(outcome, 'signal date not in benchmark series');
+    }
+    if (signalIndex + outcome.horizon >= benchmark.length) {
       return _pending(outcome);
     }
     final benchmarkSignal = benchmark[signalIndex];

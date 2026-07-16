@@ -957,6 +957,66 @@ class DatabaseService {
     });
   }
 
+  /// 删除早于 [days] 天前的决策评估数据。
+  /// 默认排除用户显式留档 source='archive'，以保护长期评分参考；
+  /// 如需连留档一起清，传 [excludeSources]: const []。
+  Future<int> deleteDecisionDataOlderThanDays(
+    int days, {
+    List<String> excludeSources = const ['archive'],
+  }) async {
+    final db = await database;
+    final cutoff = _formatSnapshotDate(
+      DateTime.now().subtract(Duration(days: days)),
+    );
+    final exclude = excludeSources.isEmpty
+        ? "source NOT IN ('__none__')"
+        : "source NOT IN (${excludeSources.map((_) => '?').join(',')})";
+    final args = excludeSources.isEmpty ? <Object?>[] : excludeSources;
+    return db.transaction((txn) async {
+      await txn.delete(
+        'decision_outcomes',
+        where: 'snapshot_id IN (SELECT id FROM decision_snapshots '
+            'WHERE signal_trade_date < ? AND $exclude)',
+        whereArgs: [cutoff, ...args],
+      );
+      return txn.delete(
+        'decision_snapshots',
+        where: 'signal_trade_date < ? AND $exclude',
+        whereArgs: [cutoff, ...args],
+      );
+    });
+  }
+
+  /// 仅删除指定状态的决策评估数据（如待评估 pending / 无效 invalid），
+  /// 用于「保留已评估作参考」式清理。删除后清理无 outcome 的悬空快照。
+  Future<int> deleteDecisionDataByStatus(String status) async {
+    final db = await database;
+    return db.transaction((txn) async {
+      final removed = await txn.delete(
+        'decision_outcomes',
+        where: 'status = ?',
+        whereArgs: [status],
+      );
+      await txn.delete(
+        'decision_snapshots',
+        where: 'id NOT IN (SELECT DISTINCT snapshot_id FROM decision_outcomes)',
+      );
+      return removed;
+    });
+  }
+
+  /// 删除早于 [days] 天前的留档记录（archive_records，archived_at 为毫秒时间戳）。
+  Future<int> deleteArchivesOlderThanDays(int days) async {
+    final db = await database;
+    final cutoff =
+        DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
+    return db.delete(
+      'archive_records',
+      where: 'archived_at < ?',
+      whereArgs: [cutoff],
+    );
+  }
+
   Future<void> closeDb() async {
     if (_dbFuture != null) {
       final db = await _dbFuture!;
@@ -1696,6 +1756,7 @@ class DatabaseService {
     String? primaryStrategyId,
     double? minDirectionScore,
     double? maxDirectionScore,
+    int? snapshotId,
   }) async {
     final selectedHorizon = filter?.horizon ?? horizon;
     if (selectedHorizon != null &&
@@ -1731,6 +1792,7 @@ class DatabaseService {
     if (primaryStrategyId != null) {
       add('primary_strategy_id = ?', primaryStrategyId);
     }
+    if (snapshotId != null) add('id = ?', snapshotId);
     if (minDirectionScore != null) {
       add('direction_score >= ?', minDirectionScore);
     }

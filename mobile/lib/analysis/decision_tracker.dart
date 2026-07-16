@@ -136,13 +136,27 @@ class DecisionTracker {
         excludeSources: excludeSources,
       );
 
+  /// 评估失败重试上限：超过后标记 invalid，避免不可匹配的快照永久占用
+  /// [refreshPending] 的 limit 槽位、饿死真正可评估的快照。
+  static const int kMaxEvalAttempts = 5;
+
   Future<void> _recordFailure(
       DecisionOutcomeRecord outcome, DateTime at) async {
     final db = await storage.database;
-    await db.rawUpdate('''
-      UPDATE decision_outcomes
-      SET attempt_count = attempt_count + 1, last_attempted_at = ?
-      WHERE id = ? AND status = 'pending'
-    ''', [at.millisecondsSinceEpoch, outcome.id]);
+    final next = outcome.attemptCount + 1;
+    if (next >= kMaxEvalAttempts) {
+      await db.rawUpdate('''
+        UPDATE decision_outcomes
+        SET attempt_count = ?, last_attempted_at = ?, status = 'invalid',
+            invalid_reason = 'eval_failed'
+        WHERE id = ? AND status = 'pending'
+      ''', [next, at.millisecondsSinceEpoch, outcome.id]);
+    } else {
+      await db.rawUpdate('''
+        UPDATE decision_outcomes
+        SET attempt_count = ?, last_attempted_at = ?
+        WHERE id = ? AND status = 'pending'
+      ''', [next, at.millisecondsSinceEpoch, outcome.id]);
+    }
   }
 }

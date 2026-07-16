@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../analysis/opportunity_engine.dart';
+import '../analysis/trading_date_utils.dart';
 import '../core/stock_code_utils.dart';
 import '../models/stock_models.dart';
 import '../storage/database_service.dart';
@@ -72,7 +73,7 @@ class ArchiveService {
         await DecisionTracker().capture(
           analysis: captureAnalysis,
           source: kManualSource,
-          signalTradeDate: DateTime.now(),
+          signalTradeDate: TradingDateUtils.normalizeToTradeDate(DateTime.now()),
           benchmarkCode: '000300',
         );
         if (!skipRefreshPending) {
@@ -179,7 +180,7 @@ class ArchiveService {
           await DecisionTracker().capture(
             analysis: analysis,
             source: kManualSource,
-            signalTradeDate: record.archivedAt,
+            signalTradeDate: TradingDateUtils.normalizeToTradeDate(record.archivedAt),
             benchmarkCode: '000300',
           );
           return true;

@@ -9,12 +9,16 @@ class ScoreRadarChart extends StatelessWidget {
   final Map<String, double> scores;
   final int? totalScore;
   final double size;
+  final List<String> dimensions;
+  final List<Color> dimensionColors;
 
   const ScoreRadarChart({
     super.key,
     required this.scores,
     this.totalScore,
     this.size = 220,
+    this.dimensions = kDimensions,
+    this.dimensionColors = kDimensionColors,
   });
 
   /// 7维标准顺序（与综合评分权重顺序一致）
@@ -40,8 +44,8 @@ class ScoreRadarChart extends StatelessWidget {
       painter: _RadarPainter(
         scores: scores,
         totalScore: totalScore,
-        dimensions: kDimensions,
-        dimensionColors: kDimensionColors,
+        dimensions: dimensions,
+        dimensionColors: dimensionColors,
       ),
     );
   }
