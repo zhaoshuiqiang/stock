@@ -23,8 +23,8 @@ void main() {
         mainNetFlow: 1000000,
         mainNetFlowRate: 12.0,
       );
-      // base 5.0 + 0.8 (cp>8抑制追高) + 1.5 (rate>10) + 0.8 (turnover 2-5) = 8.1
-      expect(RealtimeScorer.score(quote), equals(8.1));
+      // v3.34: cp>8追高惩罚-1.2, 5.0 - 1.2 + 1.5 + 0.8 = 6.1
+      expect(RealtimeScorer.score(quote), equals(6.1));
     });
 
     test('strong fall gets low score', () {
@@ -58,10 +58,10 @@ void main() {
         mainNetFlow: 1000000,
         mainNetFlowRate: 6.0,
       );
-      // No flow: 5.0 + 1.2 (cp>0) = 6.2
-      expect(RealtimeScorer.score(quoteNoFlow), equals(6.2));
-      // With flow: 5.0 + 1.2 (cp>0) + 1.0 (rate>5) = 7.2
-      expect(RealtimeScorer.score(quoteWithFlow), equals(7.2));
+      // v3.34: cp=1.0, cp>1为false→cp>0: +0.5, 5.0 + 0.5 = 5.5
+      expect(RealtimeScorer.score(quoteNoFlow), equals(5.5));
+      // v3.34: cp=1.0, cp>0:+0.5, rate=6>5:+1.0, 5.0+0.5+1.0=6.5
+      expect(RealtimeScorer.score(quoteWithFlow), equals(6.5));
       expect(
         RealtimeScorer.score(quoteWithFlow) > RealtimeScorer.score(quoteNoFlow),
         isTrue,
@@ -108,8 +108,8 @@ void main() {
         mainNetFlow: 500000,
         mainNetFlowRate: 3.0,
       );
-      // 5.0 + 2.0 (cp>2温和上涨最优) + 0.5 (rate>0) + 0.8 (turnover 2-5) = 8.3
-      expect(RealtimeScorer.score(quote), equals(8.3));
+      // v3.34: cp=3.0, cp>3为false→cp>1:+0.8, 5.0+0.8+0.5+0.8=7.1
+      expect(RealtimeScorer.score(quote), equals(7.1));
     });
 
     test('zero turnover does not affect score', () {
@@ -120,8 +120,8 @@ void main() {
         changePct: 1.0,
         turnover: 0,
       );
-      // 5.0 + 1.2 (cp>0) = 6.2 (turnover=0, no adjustment)
-      expect(RealtimeScorer.score(quote), equals(6.2));
+      // v3.34: cp=1.0, cp>1为false→cp>0:+0.5, 5.0+0.5=5.5
+      expect(RealtimeScorer.score(quote), equals(5.5));
     });
   });
 }

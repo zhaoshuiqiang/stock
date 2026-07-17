@@ -56,7 +56,7 @@ class ApiClient {
   /// 获取共享的fallback HttpClient
   HttpClient _getFallbackClient() {
     _fallbackClient ??= HttpClient()
-      ..connectionTimeout = const Duration(seconds: 8)
+      ..connectionTimeout = const Duration(seconds: 5)
       ..idleTimeout = const Duration(seconds: 5);
     return _fallbackClient!;
   }
@@ -64,7 +64,7 @@ class ApiClient {
   /// 公共 HTTP GET 请求方法，统一处理超时、重试和异常捕获
   Future<http.Response?> _httpGet(Uri url,
       {Map<String, String>? headers,
-      Duration timeout = const Duration(seconds: 8),
+      Duration timeout = const Duration(seconds: 5),
       int retries = 2}) async {
     if (_disposed) return null;
     for (var attempt = 0; attempt < retries; attempt++) {
@@ -82,7 +82,7 @@ class ApiClient {
           _rebuildClient();
         }
         if (attempt < retries - 1) {
-          await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+          await Future.delayed(Duration(milliseconds: 200 * (attempt + 1)));
         }
       }
     }
@@ -761,52 +761,40 @@ class ApiClient {
 
   Future<List<HistoryKline>> _fetchStockHistory(
       String code, int days, String cacheKey) async {
-    // 数据源优先级：通达信 > 腾讯 > 东方财富 > 新浪
-    // 通达信（第一优先级）：使用通达信兼容格式的K线数据
-    try {
-      final tdxResult = await _fetchStockHistoryFromTDX(code, days);
-      if (tdxResult.isNotEmpty) {
-        _setCached(cacheKey, tdxResult, duration: _klineCacheDuration());
-        return tdxResult;
-      }
-    } catch (e) {
-      debugPrint('TDX kline failed for $code: $e');
+    // v3.34: 串行回退改并行竞速(Future.any)，首个成功即返回
+    // 原串行回退链TDX→腾讯→新浪→东财，最坏情况耗时36-44秒
+    // 并行竞速后，最坏情况耗时仅为单个源的超时时间(≈5秒)
+    final sources = <Future<List<HistoryKline>>>[
+      _fetchStockHistoryFromTDX(code, days),
+      _fetchStockHistoryFromTencent(code, days),
+      _fetchStockHistoryFromSina(code, days),
+      _fetchStockHistoryFromEastMoney(code, days),
+    ];
+
+    // 竞速: 所有源并行发起，首个返回非空结果的获胜
+    final completer = Completer<List<HistoryKline>>();
+    int remaining = sources.length;
+
+    for (final source in sources) {
+      source.then((result) {
+        if (!completer.isCompleted && result.isNotEmpty) {
+          _setCached(cacheKey, result, duration: _klineCacheDuration());
+          completer.complete(result);
+        } else {
+          remaining--;
+          if (remaining == 0 && !completer.isCompleted) {
+            completer.complete([]);
+          }
+        }
+      }).catchError((e) {
+        remaining--;
+        if (remaining == 0 && !completer.isCompleted) {
+          completer.complete([]);
+        }
+      });
     }
 
-    // 备用1：腾讯K线API（通达信同源数据）
-    try {
-      final tencentResult = await _fetchStockHistoryFromTencent(code, days);
-      if (tencentResult.isNotEmpty) {
-        _setCached(cacheKey, tencentResult,
-            duration: const Duration(minutes: 5));
-        return tencentResult;
-      }
-    } catch (e) {
-      debugPrint('Tencent kline failed for $code: $e');
-    }
-
-    // 备用1：新浪K线接口
-    try {
-      final sinaResult = await _fetchStockHistoryFromSina(code, days);
-      if (sinaResult.isNotEmpty) {
-        _setCached(cacheKey, sinaResult, duration: const Duration(minutes: 5));
-        return sinaResult;
-      }
-    } catch (e) {
-      debugPrint('Sina kline failed for $code: $e');
-    }
-
-    // 备用2：东方财富K线接口
-    try {
-      final emResult = await _fetchStockHistoryFromEastMoney(code, days);
-      if (emResult.isNotEmpty) {
-        _setCached(cacheKey, emResult, duration: const Duration(minutes: 5));
-        return emResult;
-      }
-    } catch (e) {
-      debugPrint('EastMoney kline failed for $code: $e');
-    }
-    return [];
+    return completer.future;
   }
 
   /// 通达信K线API（第一优先级数据源）
@@ -824,7 +812,7 @@ class ApiClient {
     // 通达信兼容API：使用前复权日K线数据
     final url = Uri.parse(
         'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=$code,day,$startStr,$endStr,$days,qfq');
-    final response = await _httpGet(url, timeout: const Duration(seconds: 10));
+    final response = await _httpGet(url, timeout: const Duration(seconds: 5));
     if (response == null) return [];
 
     final body = response.body;
@@ -900,7 +888,7 @@ class ApiClient {
 
     final url = Uri.parse(
         'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=$code,day,$startStr,$endStr,$days,qfq');
-    final response = await _httpGet(url, timeout: const Duration(seconds: 10));
+    final response = await _httpGet(url, timeout: const Duration(seconds: 5));
     if (response == null) return [];
 
     final body = response.body;
@@ -972,7 +960,7 @@ class ApiClient {
         headers: {
           'Referer': 'https://finance.sina.com.cn',
         },
-        timeout: const Duration(seconds: 10));
+        timeout: const Duration(seconds: 5));
     if (response == null) return [];
 
     final body = response.body;
@@ -1040,7 +1028,7 @@ class ApiClient {
         headers: {
           'User-Agent': 'Mozilla/5.0',
         },
-        timeout: const Duration(seconds: 15));
+        timeout: const Duration(seconds: 8));
 
     if (response != null) {
       final body = response.body;
@@ -1728,7 +1716,7 @@ class ApiClient {
         headers: {
           'Referer': 'https://finance.sina.com.cn',
         },
-        timeout: const Duration(seconds: 10));
+        timeout: const Duration(seconds: 5));
     if (response != null) {
       final body = await _decodeGbk(response.bodyBytes);
       final data = json.decode(body);

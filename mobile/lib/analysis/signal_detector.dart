@@ -84,7 +84,7 @@ class SignalDetector {
         strength: 70,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
-        confidence: 0.7,
+        confidence: _calculateRSIConfidence(last, prev, signalType: 'buy'),
         signalCount: 1,
       ));
     } else if (prev.rsi6 >= 70 && last.rsi6 < 70) {
@@ -96,7 +96,7 @@ class SignalDetector {
         strength: 70,
         timestamp: last.date,
         duration: SignalDuration.shortTerm,
-        confidence: 0.7,
+        confidence: _calculateRSIConfidence(last, prev, signalType: 'sell'),
         signalCount: 1,
       ));
     }
@@ -226,7 +226,7 @@ class SignalDetector {
           strength: 70,
           timestamp: last.date,
           duration: SignalDuration.shortTerm,
-          confidence: 0.7,
+          confidence: _calculateWRConfidence(last, signalType: 'buy'),
           signalCount: 1,
         ));
       } else if (last.wr14! < 20) {
@@ -238,9 +238,7 @@ class SignalDetector {
           strength: 70,
           timestamp: last.date,
           duration: SignalDuration.shortTerm,
-          // v3.22: 降低WR超买置信度(0.70→0.50)，A股趋势市中超买可持续很久，
-          // 仅凭超买判断回调胜率较低。
-          confidence: 0.50,
+          confidence: _calculateWRConfidence(last, signalType: 'sell'),
           signalCount: 1,
         ));
       }
@@ -531,6 +529,38 @@ class SignalDetector {
     }
     return base.clamp(0.45, 0.9);
   }
+
+  static double _calculateRSIConfidence(HistoryKline last, HistoryKline prev,
+      {String signalType = 'buy'}) {
+    double base = signalType == 'buy' ? 0.70 : 0.55;
+    if (signalType == 'buy') {
+      if (last.rsi6 < 25) base += 0.08;
+      if (last.rsi6 > 35) base -= 0.05;
+      if (last.rsi6 > prev.rsi6 && (last.rsi6 - prev.rsi6) > 5) base += 0.05;
+    } else {
+      if (last.rsi6 > 80) base += 0.08;
+      if (last.rsi6 < 65) base -= 0.05;
+      if (last.rsi6 < prev.rsi6 && (prev.rsi6 - last.rsi6) > 5) base += 0.05;
+    }
+    return base.clamp(0.40, 0.90);
+  }
+
+  static double _calculateWRConfidence(HistoryKline last,
+      {String signalType = 'buy'}) {
+    final wr = last.wr14;
+    if (wr == null) return 0.5;
+    // v3.34: WR超买卖出信号在A股趋势市中胜率极低，降低基准置信度
+    double base = signalType == 'buy' ? 0.65 : 0.35;
+    if (signalType == 'buy') {
+      if (wr > 90) base += 0.10;
+      if (wr < 75) base -= 0.10;
+    } else {
+      if (wr < 10) base += 0.05;
+      if (wr > 30) base -= 0.10;
+    }
+    return base.clamp(0.35, 0.85);
+  }
+
 
   /// MACD顶底背离检测（中期信号）
   static List<SignalItem> _detectMACDDivergence(
@@ -869,11 +899,13 @@ class SignalDetector {
             indicator: 'K线形态',
             signal: '三阳开泰',
             description: '连续3日阳线递增上涨，趋势强势${inTrend ? '' : "，但均线需确认"}',
-            strength: inTrend ? 85 : 75,
+            // v3.34: 留档数据三阳开泰胜率仅15.9%，本质是追涨信号而非买入信号
+            // 大幅降级: strength 85/75->50/45, confidence 0.82/0.72->0.45/0.40, signalCount 3->1
+            strength: inTrend ? 50 : 45,
             timestamp: last.date,
             duration: SignalDuration.shortTerm,
-            confidence: inTrend ? 0.82 : 0.72,
-            signalCount: 3,
+            confidence: inTrend ? 0.45 : 0.40,
+            signalCount: 1,
           ));
         }
       }

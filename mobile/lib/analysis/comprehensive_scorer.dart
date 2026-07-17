@@ -133,19 +133,21 @@ class ComprehensiveScorer {
     final effectiveBullAlign = isBullAlign ?? (marketStructure?.maAlignment == '多头');
     final momentumFactor = _momentumProtectionFactor(data, effectiveAdx, effectiveBullAlign);
 
-    // 追高惩罚：当日涨幅越高，后续回撤风险越大
-    // v2.30: 动量保护 + 连涨天数判断（突破首日减轻惩罚）
-    // v2.38.0: 涨停股(cp>9.5%)不被动量保护削弱，避免追高风险被掩盖
+    // v3.34: 留档数据分析——追高惩罚力度严重不足
+    // 原: 涨幅>3%仅抖0.94折扣，且被动量保护削弱后仅抖0.97，胜率仍仅18%
+    // 修复: 大幅加强惩罚，涨幅>3%时折扣不再被动量保护削弱
     double chasePenalty = 1.0;
     final cp = currentChangePct ?? quote?.changePct;
     if (cp != null && quote != null && quote.price > 0) {
       final consecutiveRise = _consecutiveRiseDays(data);
-      if (cp > 9.5) chasePenalty = 0.80;
-      else if (cp > 8) chasePenalty = consecutiveRise >= 3 ? 0.82 : 0.90;
-      else if (cp > 5) chasePenalty = consecutiveRise >= 3 ? 0.88 : 0.94;
-      else if (cp > 3) chasePenalty = consecutiveRise >= 2 ? 0.94 : 0.97;
-      else if (cp > 1.5) chasePenalty = 0.97;
-      if (cp <= 9.5) {
+      if (cp > 9.5) chasePenalty = 0.65;       // 涨停板: 次日不确定性极高
+      else if (cp > 8) chasePenalty = 0.72;    // 大涨: 追高风险极大
+      else if (cp > 5) chasePenalty = 0.80;    // 中阳线: 追高风险大
+      else if (cp > 3) chasePenalty = 0.88;    // 偏强: 已涨偏多
+      else if (cp > 2) chasePenalty = 0.94;    // 温和上涨: 轻微折扣
+      else if (cp > 1) chasePenalty = 0.97;    // 小涨: 几乎不影响
+      // v3.34: 涨幅>3%时惩罚不被动量保护削弱——数据证明动量保护是追高失败的重要原因
+      if (cp <= 3) {
         chasePenalty = 1.0 - (1.0 - chasePenalty) * momentumFactor;
       }
     }

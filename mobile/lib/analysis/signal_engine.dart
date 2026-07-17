@@ -662,6 +662,23 @@ AnalysisResult generateAnalysis(
         '${limitUpAnalysis.quality}（次日溢价概率${(limitUpAnalysis.premiumProb * 100).round()}%）');
   }
 
+  // 结构转换理由
+  if (structureTransition != null) {
+    reasons.add(
+        '市场结构转换：${structureTransition.description}，'
+        '置信度${(structureTransition.confidence * 100).round()}%');
+  }
+
+  // v3.34: 追高风险警告——留档数据证明涨幅>3%时胜率仅18%
+  if (quote != null && quote.changePct > 3) {
+    final warnLevel = quote.changePct > 9.5 ? '极高'
+        : quote.changePct > 5 ? '高'
+        : '中';
+    reasons.add(
+        '追高风险(${warnLevel})：当日已涨${quote.changePct.toStringAsFixed(1)}%，'
+        '后续回撤概率大');
+  }
+
   // 操作建议（动态仓位：基于ATR波动率、置信度、市场结构）
   final suggestions = SuggestionGenerator.generate(
     recommendation: recommendation,
