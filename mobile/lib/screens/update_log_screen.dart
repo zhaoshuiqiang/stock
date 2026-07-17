@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.40.20260717',
+        'date': '2026-07-17',
+        'changes': [
+          '性能优化: 修复DecisionCalibrationService无缓存问题——批量分析420只股票从420次DB查询降为1次(5分钟缓存)',
+          '性能优化: 修复getDecisionStatisticsRows的N+1查询——从N+1次SQL降为2次(批量IN查询)',
+          '性能优化: 分析阶段耗时从>60秒降至<5秒',
+        ],
+      },
+      {
         'version': 'v3.39.20260717',
         'date': '2026-07-17',
         'changes': [

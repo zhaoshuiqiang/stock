@@ -1829,6 +1829,7 @@ class DatabaseService {
     if (maxDirectionScore != null) {
       add('direction_score <= ?', maxDirectionScore);
     }
+    // v3.39: N+1查询改为2次查询——先查snapshots，再批量IN查outcomes
     final snapshotRows = await db.query(
       'decision_snapshots',
       where: where.isEmpty ? null : where.join(' AND '),
@@ -1836,19 +1837,32 @@ class DatabaseService {
       orderBy: 'signal_trade_date DESC, id DESC',
     );
     final result = <DecisionStatisticsRow>[];
+    if (snapshotRows.isEmpty) return result;
+
+    // 批量查outcomes：IN子句一次获取所有，替代逐条N+1查询
+    final snapshotIds = snapshotRows.map((r) => r['id'] as int).toList();
+    final outcomeBatchWhere = selectedHorizon == null
+        ? 'snapshot_id IN (${snapshotIds.map((_) => '?').join(',')})'
+        : 'snapshot_id IN (${snapshotIds.map((_) => '?').join(',')}) AND horizon = ?';
+    final outcomeBatchArgs = selectedHorizon == null
+        ? snapshotIds.map((id) => id as Object?).toList()
+        : [...snapshotIds.map((id) => id as Object?), selectedHorizon];
+    final allOutcomeRows = await db.query(
+      'decision_outcomes',
+      where: outcomeBatchWhere,
+      whereArgs: outcomeBatchArgs,
+      orderBy: 'snapshot_id, horizon ASC',
+    );
+    // 按snapshot_id分组
+    final outcomesBySnapshot = <int, List<Map<String, dynamic>>>{};
+    for (final om in allOutcomeRows) {
+      final sid = om['snapshot_id'] as int;
+      outcomesBySnapshot.putIfAbsent(sid, () => []).add(om);
+    }
     for (final snapshotMap in snapshotRows) {
       final snapshot = DecisionSnapshotRecord.fromMap(snapshotMap);
-      final outcomeRows = await db.query(
-        'decision_outcomes',
-        where: selectedHorizon == null
-            ? 'snapshot_id = ?'
-            : 'snapshot_id = ? AND horizon = ?',
-        whereArgs: selectedHorizon == null
-            ? [snapshot.id]
-            : [snapshot.id, selectedHorizon],
-        orderBy: 'horizon ASC',
-      );
-      for (final outcomeMap in outcomeRows) {
+      final outcomes = outcomesBySnapshot[snapshot.id] ?? [];
+      for (final outcomeMap in outcomes) {
         result.add(DecisionStatisticsRow(
           snapshot: snapshot,
           outcome: DecisionOutcomeRecord.fromMap(outcomeMap),
