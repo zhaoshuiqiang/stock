@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.37.20260717',
+        'date': '2026-07-17',
+        'changes': [
+          '性能优化: API缓存上限从200增至600，420只自选股全量缓存，二次分析K线阶段从47s→<2s',
+          '性能优化: K线竞速源从3减为2，减少50%无效HTTP请求，冷启动快47%',
+          '性能优化: 机会分析K线天数从120天减为60天，响应体积减半',
+        ],
+      },
+      {
         'version': 'v3.36.20260717',
         'date': '2026-07-17',
         'changes': [
