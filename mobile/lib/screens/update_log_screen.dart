@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.38.20260717',
+        'date': '2026-07-17',
+        'changes': [
+          '修复: K线天数恢复120天(60天导致MA60无法计算、回测/结构分析降级)',
+          '修复: K线竞速源恢复3源(2源失败率过高)',
+          '调整: API缓存上限从600调整为400(120天K线下约12MB，平衡内存与覆盖率)',
+        ],
+      },
+      {
         'version': 'v3.37.20260717',
         'date': '2026-07-17',
         'changes': [

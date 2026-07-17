@@ -42,7 +42,7 @@ class ApiClient {
   static final Duration _cacheDuration = const Duration(minutes: 5);
   // v3.2: 静态in-flight追踪防止重复并发请求
   static final Map<String, Future> _inFlightRequests = {};
-  static const int _maxCacheSize = 600;
+  static const int _maxCacheSize = 400;
   bool _disposed = false;
 
   /// 重建HTTP客户端（连接池失效时调用）

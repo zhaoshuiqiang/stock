@@ -232,7 +232,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
           completedCount: 0));
 
       const klineBatchSize = 15;
-      const klineDays = 60;
+      const klineDays = 120;
       final klineCache = <String, List<HistoryKline>>{};
       int klineFetched = 0;
 
@@ -245,7 +245,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
             final prefixedCode = _apiClient.addMarketPrefix(item.code);
             return _apiClient
                 .getStockHistory(prefixedCode,
-                    days: klineDays, maxRacingSources: 2)
+                    days: klineDays, maxRacingSources: 3)
                 .catchError((_) => <HistoryKline>[]);
           }),
         );
