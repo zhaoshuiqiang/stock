@@ -10,6 +10,16 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.35.20260717',
+        'date': '2026-07-17',
+        'changes': [
+          '清理死代码: 删除无导航入口的4个Screen(chart/signals/trend_signal/dragon_retreat)',
+          '清理死代码: 删除从未被引用的5个Widget(market_sentiment/quote_card/capsule_tab_switcher/strategy_panel_long/strategy_panel_short)',
+          '测试修复: hot_sectors_test添加skip注解，离线CI不再失败',
+          '文档更新: AGENTS.md全面更新至v3.34架构(80分析模块/24页面/102测试文件)',
+        ],
+      },
+      {
         'version': 'v3.34.20260717',
         'date': '2026-07-17',
         'changes': [
