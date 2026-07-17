@@ -10,6 +10,14 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.39.20260717',
+        'date': '2026-07-17',
+        'changes': [
+          '性能优化: K线缓存跳过——增量分析时直接复用API缓存，跳过已缓存股票的HTTP请求',
+          '性能优化: 自选分析+沪深扫描均支持K线缓存跳过，热缓存场景0次HTTP请求',
+        ],
+      },
+      {
         'version': 'v3.38.20260717',
         'date': '2026-07-17',
         'changes': [

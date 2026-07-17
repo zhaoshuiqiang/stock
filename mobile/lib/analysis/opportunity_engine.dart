@@ -236,30 +236,50 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       final klineCache = <String, List<HistoryKline>>{};
       int klineFetched = 0;
 
-      for (int i = 0; i < watchlist.length; i += klineBatchSize) {
-        final end = min(i + klineBatchSize, watchlist.length);
-        final batch = watchlist.sublist(i, end);
-
-        final klineResults = await Future.wait(
-          batch.map((item) {
-            final prefixedCode = _apiClient.addMarketPrefix(item.code);
-            return _apiClient
-                .getStockHistory(prefixedCode,
-                    days: klineDays, maxRacingSources: 3)
-                .catchError((_) => <HistoryKline>[]);
-          }),
-        );
-
-        for (int j = 0; j < batch.length; j++) {
-          final prefixedCode = _apiClient.addMarketPrefix(batch[j].code);
-          klineCache[prefixedCode] = klineResults[j];
+      // v3.39: 先从API缓存中提取已缓存的K线，跳过已缓存股票的HTTP请求
+      final uncachedStocks = <WatchlistItem>[];
+      for (final item in watchlist) {
+        final prefixedCode = _apiClient.addMarketPrefix(item.code);
+        final cached = _apiClient.getCachedKline(prefixedCode, days: klineDays);
+        if (cached != null && cached.isNotEmpty) {
+          klineCache[prefixedCode] = cached;
+          klineFetched++;
+        } else {
+          uncachedStocks.add(item);
         }
+      }
 
-        klineFetched = end;
+      if (uncachedStocks.isNotEmpty) {
+        for (int i = 0; i < uncachedStocks.length; i += klineBatchSize) {
+          final end = min(i + klineBatchSize, uncachedStocks.length);
+          final batch = uncachedStocks.sublist(i, end);
+
+          final klineResults = await Future.wait(
+            batch.map((item) {
+              final prefixedCode = _apiClient.addMarketPrefix(item.code);
+              return _apiClient
+                  .getStockHistory(prefixedCode,
+                      days: klineDays, maxRacingSources: 3)
+                  .catchError((_) => <HistoryKline>[]);
+            }),
+          );
+
+          for (int j = 0; j < batch.length; j++) {
+            final prefixedCode = _apiClient.addMarketPrefix(batch[j].code);
+            klineCache[prefixedCode] = klineResults[j];
+          }
+
+          klineFetched += batch.length;
+          emit(OpportunityProgress(
+              status: OpportunityStatus.fetchingKlines,
+              totalCount: totalCount,
+              completedCount: klineFetched));
+        }
+      } else {
         emit(OpportunityProgress(
             status: OpportunityStatus.fetchingKlines,
             totalCount: totalCount,
-            completedCount: klineFetched));
+            completedCount: totalCount));
       }
 
       // 阶段2.5: 补充缺失行情（批量接口未覆盖的股票）

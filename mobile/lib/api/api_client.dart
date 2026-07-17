@@ -703,6 +703,12 @@ class ApiClient {
     }
   }
 
+  List<HistoryKline>? getCachedKline(String code, {int days = 120}) {
+    final cacheKey = 'history_${code}_$days';
+    final cached = _getCached(cacheKey);
+    return cached is List<HistoryKline> ? cached : null;
+  }
+
   Future<List<HistoryKline>> getForwardAdjustedHistory(String code,
       {int days = 180}) async {
     final cacheKey = 'decision_qfq_${code}_$days';

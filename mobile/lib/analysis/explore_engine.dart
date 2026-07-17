@@ -116,24 +116,43 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
       final klineCache = <String, List<HistoryKline>>{};
       const klineBatchSize = 15;
 
-      for (int i = 0; i < allStocks.length; i += klineBatchSize) {
-        final end = min(i + klineBatchSize, allStocks.length);
-        final batch = allStocks.sublist(i, end);
-
-        final klineResults = await Future.wait(
-          batch.map((stock) => _apiClient
-              .getStockHistory(stock.code)
-              .catchError((_) => <HistoryKline>[])),
-        );
-
-        for (int j = 0; j < batch.length; j++) {
-          klineCache[batch[j].code] = klineResults[j];
+      // v3.39: 先从API缓存中提取已缓存的K线，跳过已缓存股票的HTTP请求
+      final uncachedStocks = <QuoteData>[];
+      for (final stock in allStocks) {
+        final cached = _apiClient.getCachedKline(stock.code);
+        if (cached != null && cached.isNotEmpty) {
+          klineCache[stock.code] = cached;
+        } else {
+          uncachedStocks.add(stock);
         }
+      }
 
+      if (uncachedStocks.isNotEmpty) {
+        for (int i = 0; i < uncachedStocks.length; i += klineBatchSize) {
+          final end = min(i + klineBatchSize, uncachedStocks.length);
+          final batch = uncachedStocks.sublist(i, end);
+
+          final klineResults = await Future.wait(
+            batch.map((stock) => _apiClient
+                .getStockHistory(stock.code)
+                .catchError((_) => <HistoryKline>[])),
+          );
+
+          for (int j = 0; j < batch.length; j++) {
+            klineCache[batch[j].code] = klineResults[j];
+          }
+
+          emit(ExploreProgress(
+            status: ExploreStatus.fetchingKlines,
+            totalStocks: allStocks.length,
+            analyzedStocks: allStocks.length - uncachedStocks.length + end,
+          ));
+        }
+      } else {
         emit(ExploreProgress(
           status: ExploreStatus.fetchingKlines,
           totalStocks: allStocks.length,
-          analyzedStocks: end,
+          analyzedStocks: allStocks.length,
         ));
       }
 
