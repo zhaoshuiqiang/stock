@@ -552,6 +552,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
     setState(() {
       switch (p.status) {
         case OpportunityStatus.fetching:
+        case OpportunityStatus.fetchingKlines:
         case OpportunityStatus.analyzing:
         case OpportunityStatus.saving:
           _oppLoading = true;
@@ -3341,6 +3342,9 @@ class WatchlistScreenState extends State<WatchlistScreen>
     switch (p?.status) {
       case OpportunityStatus.fetching:
         statusText = '获取自选列表...';
+        break;
+      case OpportunityStatus.fetchingKlines:
+        statusText = '预取K线 $completed/$total';
         break;
       case OpportunityStatus.analyzing:
         statusText = '分析中 $completed/$total';

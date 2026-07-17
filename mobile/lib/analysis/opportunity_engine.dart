@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
@@ -142,6 +143,7 @@ class OpportunityResult {
 enum OpportunityStatus {
   idle,
   fetching,
+  fetchingKlines,
   analyzing,
   saving,
   complete,
@@ -182,7 +184,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
         _dbService = DatabaseService(),
         _calibrationService = DecisionCalibrationService();
 
-  /// 执行机会分析（优化版：MarketTiming仅计算一次，并发度提升，K线天数缩减）
+  /// 执行机会分析（三阶段优化：K线预取→CPU分析，IO与CPU分离）
   Future<void> analyze() async {
     if (!tryStart(
         OpportunityProgress(status: OpportunityStatus.alreadyRunning))) {
@@ -190,7 +192,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
     }
 
     try {
-      // 1. 获取自选列表
+      // ── 阶段1: 获取自选列表 + 批量行情 + 市场环境 ──
       emit(OpportunityProgress(status: OpportunityStatus.fetching));
       final watchlist = await _dbService.getWatchlist();
       if (watchlist.isEmpty) {
@@ -200,7 +202,6 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       }
       final totalCount = watchlist.length;
 
-      // 2. 批量获取行情 + 市场环境（并行）
       final prefixedCodes = watchlist
           .map((item) => _apiClient.addMarketPrefix(item.code))
           .toList();
@@ -224,34 +225,84 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       final marketTimingResult = futureResults[1] as MarketTimingResult?;
       final marketContext = futureResults[2] as MarketContext?;
 
+      // ── 阶段2: 批量预取K线数据（IO密集，与CPU分析分离） ──
+      emit(OpportunityProgress(
+          status: OpportunityStatus.fetchingKlines,
+          totalCount: totalCount,
+          completedCount: 0));
+
+      const klineBatchSize = 15;
+      const klineDays = 120;
+      final klineCache = <String, List<HistoryKline>>{};
+      int klineFetched = 0;
+
+      for (int i = 0; i < watchlist.length; i += klineBatchSize) {
+        final end = min(i + klineBatchSize, watchlist.length);
+        final batch = watchlist.sublist(i, end);
+
+        final klineResults = await Future.wait(
+          batch.map((item) {
+            final prefixedCode = _apiClient.addMarketPrefix(item.code);
+            return _apiClient
+                .getStockHistory(prefixedCode,
+                    days: klineDays, maxRacingSources: 3)
+                .catchError((_) => <HistoryKline>[]);
+          }),
+        );
+
+        for (int j = 0; j < batch.length; j++) {
+          final prefixedCode = _apiClient.addMarketPrefix(batch[j].code);
+          klineCache[prefixedCode] = klineResults[j];
+        }
+
+        klineFetched = end;
+        emit(OpportunityProgress(
+            status: OpportunityStatus.fetchingKlines,
+            totalCount: totalCount,
+            completedCount: klineFetched));
+      }
+
+      // 阶段2.5: 补充缺失行情（批量接口未覆盖的股票）
+      final missingQuoteCodes = watchlist
+          .where((item) => !quoteMap.containsKey(_apiClient.addMarketPrefix(item.code)))
+          .map((item) => _apiClient.addMarketPrefix(item.code))
+          .toList();
+      if (missingQuoteCodes.isNotEmpty) {
+        final extraQuotes = await Future.wait(
+          missingQuoteCodes.map((code) =>
+              _apiClient.getRealtimeQuote(code).catchError((_) => null)),
+        );
+        for (final q in extraQuotes.whereType<QuoteData>()) {
+          quoteMap[q.code] = q;
+        }
+      }
+
+      // ── 阶段3: 纯CPU分析（使用缓存数据，无网络IO） ──
       emit(OpportunityProgress(
           status: OpportunityStatus.analyzing,
           totalCount: totalCount,
           completedCount: 0));
 
-      // 3. 分批分析，并发10（与发现页一致使用120天K线）
-      const batchSize = 10;
-      const klineDays = 120;
+      const analyzeBatchSize = 20;
       final results = <OpportunityResult?>[];
       final analysisList = <AnalysisResult>[];
       int completedCount = 0;
 
-      for (int i = 0; i < watchlist.length; i += batchSize) {
-        final batch =
-            watchlist.sublist(i, (i + batchSize).clamp(0, watchlist.length));
-        final batchResults = await Future.wait(batch.map((item) async {
+      for (int i = 0; i < watchlist.length; i += analyzeBatchSize) {
+        final end = min(i + analyzeBatchSize, watchlist.length);
+        final batch = watchlist.sublist(i, end);
+
+        for (final item in batch) {
           try {
             final prefixedCode = _apiClient.addMarketPrefix(item.code);
-            QuoteData? quote = quoteMap[prefixedCode];
-            if (quote == null) {
-              try {
-                quote = await _apiClient.getRealtimeQuote(prefixedCode);
-              } catch (_) {}
+            final klines = klineCache[prefixedCode] ?? [];
+            if (klines.isEmpty) {
+              results.add(null);
+              completedCount++;
+              continue;
             }
 
-            final klines =
-                await _apiClient.getStockHistory(prefixedCode, days: klineDays);
-            if (klines.isEmpty) return null;
+            final quote = quoteMap[prefixedCode];
 
             final calculated = calcAllIndicators(klines);
             var analysis = generateOpportunityAnalysisForTesting(
@@ -275,7 +326,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
                 .map((s) => '${s.type == 'buy' ? '▲' : '▼'}${s.signal}')
                 .toList();
 
-            return OpportunityResult(
+            results.add(OpportunityResult(
               code: StockCodeUtils.normalizeForArchive(item.code),
               name: item.name,
               price: quote?.price ?? last.close,
@@ -293,21 +344,21 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
               tradeLevels: analysis.tradeLevels,
               shortTermDecision: analysis.shortTermDecision,
               topSignals: topSignals,
-            );
+            ));
           } catch (_) {
-            return null;
+            results.add(null);
           }
-        }));
+          completedCount++;
+          klineCache.remove(_apiClient.addMarketPrefix(item.code));
+        }
 
-        results.addAll(batchResults);
-        completedCount += batch.length;
         emit(OpportunityProgress(
             status: OpportunityStatus.analyzing,
             totalCount: totalCount,
             completedCount: completedCount.clamp(0, totalCount)));
       }
 
-      // 4. 排序并保存
+      // ── 阶段4: 排序并保存 ──
       final deduped = <String, OpportunityResult>{};
       for (final item in results.whereType<OpportunityResult>()) {
         final normalized = StockCodeUtils.normalizeForArchive(item.code);
@@ -323,7 +374,6 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       await _dbService.replaceOpportunityResults(
           opportunities.map((o) => o.toMap(DateTime.now())).toList());
 
-      // 结果落库后立刻通知 UI 完成，解除“保存结果”卡死（让按钮恢复、列表刷新）
       emit(OpportunityProgress(
           status: OpportunityStatus.complete,
           results: opportunities,
@@ -331,8 +381,6 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
           completedCount: totalCount,
           marketTiming: marketTimingResult));
 
-      // 决策追踪属于副作用，且 refreshPending 会对 pending 决策逐个发起网络请求回测，
-      // 可能耗时很长。放到后台异步执行，避免阻塞 UI 一直卡在“保存结果”。
       unawaited(_runDecisionSideEffects(analysisList));
     } catch (e) {
       emit(OpportunityProgress(

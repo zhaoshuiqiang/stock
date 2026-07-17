@@ -10,6 +10,17 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.36.20260717',
+        'date': '2026-07-17',
+        'changes': [
+          '性能优化: 自选分析三阶段架构重构——K线预取与CPU分析分离，IO/CPU流水线化',
+          '性能优化: 分析批次从10增至20，K线预取批次15，减少批次间等待',
+          '性能优化: 批量行情分片从串行改为并行(Future.wait)',
+          '性能优化: K线竞速源可配置(maxRacingSources)，批量场景用3源减少无效HTTP',
+          '性能优化: K线缓存分析后即时释放，降低内存峰值',
+        ],
+      },
+      {
         'version': 'v3.35.20260717',
         'date': '2026-07-17',
         'changes': [

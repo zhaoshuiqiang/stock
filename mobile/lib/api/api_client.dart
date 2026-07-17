@@ -671,7 +671,7 @@ class ApiClient {
   }
 
   Future<List<HistoryKline>> getStockHistory(String code,
-      {int days = 120, bool bypassCache = false}) async {
+      {int days = 120, bool bypassCache = false, int maxRacingSources = 4}) async {
     final cacheKey = 'history_${code}_$days';
 
     // Check cache first (skip if bypassCache is true)
@@ -686,7 +686,7 @@ class ApiClient {
     }
 
     // Make the request
-    final future = _fetchStockHistory(code, days, cacheKey);
+    final future = _fetchStockHistory(code, days, cacheKey, maxRacingSources: maxRacingSources);
     _inFlightRequests[cacheKey] = future;
 
     try {
@@ -760,16 +760,20 @@ class ApiClient {
   }
 
   Future<List<HistoryKline>> _fetchStockHistory(
-      String code, int days, String cacheKey) async {
+      String code, int days, String cacheKey, {int maxRacingSources = 4}) async {
     // v3.34: 串行回退改并行竞速(Future.any)，首个成功即返回
     // 原串行回退链TDX→腾讯→新浪→东财，最坏情况耗时36-44秒
     // 并行竞速后，最坏情况耗时仅为单个源的超时时间(≈5秒)
-    final sources = <Future<List<HistoryKline>>>[
+    final allSources = <Future<List<HistoryKline>>>[
       _fetchStockHistoryFromTDX(code, days),
       _fetchStockHistoryFromTencent(code, days),
       _fetchStockHistoryFromSina(code, days),
       _fetchStockHistoryFromEastMoney(code, days),
     ];
+
+    final sources = maxRacingSources >= allSources.length
+        ? allSources
+        : allSources.sublist(0, maxRacingSources);
 
     // 竞速: 所有源并行发起，首个返回非空结果的获胜
     final completer = Completer<List<HistoryKline>>();
@@ -1754,30 +1758,34 @@ class ApiClient {
   Future<List<QuoteData>> getBatchRealtimeQuotes(List<String> codes) async {
     if (codes.isEmpty) return [];
 
-    // 去重（保序），避免对重复代码发起冗余请求
     final uniqueCodes = <String>[];
     final seen = <String>{};
     for (final c in codes) {
       if (seen.add(c)) uniqueCodes.add(c);
     }
 
-    // 腾讯批量接口单次代码过多易触发超长 URL / 限流，按 ≤100 分片并发请求
     const chunkSize = 100;
-    final results = <QuoteData>[];
+    final chunks = <List<String>>[];
     for (var i = 0; i < uniqueCodes.length; i += chunkSize) {
       final end = (i + chunkSize) > uniqueCodes.length
           ? uniqueCodes.length
           : i + chunkSize;
-      final chunk = uniqueCodes.sublist(i, end);
-      try {
-        final chunkResult = await _fetchBatchRealtimeQuotes(
-          chunk,
-          'batch_quotes_${chunk.join(',')}',
-        );
-        results.addAll(chunkResult);
-      } catch (e) {
-        debugPrint('[行情] 批量行情分片失败($i-$end): $e');
-      }
+      chunks.add(uniqueCodes.sublist(i, end));
+    }
+
+    final chunkResults = await Future.wait(
+      chunks.map((chunk) => _fetchBatchRealtimeQuotes(
+        chunk,
+        'batch_quotes_${chunk.join(',')}',
+      ).catchError((e) {
+        debugPrint('[行情] 批量行情分片失败(${chunk.first}-...): $e');
+        return <QuoteData>[];
+      })),
+    );
+
+    final results = <QuoteData>[];
+    for (final chunkResult in chunkResults) {
+      results.addAll(chunkResult);
     }
     return results;
   }
