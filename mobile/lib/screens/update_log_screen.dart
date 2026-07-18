@@ -10,6 +10,14 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.41.20260718',
+        'date': '2026-07-18',
+        'changes': [
+          '修复: 自选页分析数量不足——K线获取失败/分析异常被静默吞掉，现在会报告失败数量',
+          '移除: 决策命中功能——默认过滤器导致数据为空且capture静默失败，功能不可用已删除',
+        ],
+      },
+      {
         'version': 'v3.40.20260717',
         'date': '2026-07-17',
         'changes': [

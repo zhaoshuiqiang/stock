@@ -156,6 +156,7 @@ class OpportunityProgress {
   final OpportunityStatus status;
   final int completedCount;
   final int totalCount;
+  final int failedCount;
   final List<OpportunityResult>? results;
   final String? message;
   final MarketTimingResult? marketTiming;
@@ -164,6 +165,7 @@ class OpportunityProgress {
     required this.status,
     this.completedCount = 0,
     this.totalCount = 0,
+    this.failedCount = 0,
     this.results,
     this.message,
     this.marketTiming,
@@ -235,6 +237,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       const klineDays = 120;
       final klineCache = <String, List<HistoryKline>>{};
       int klineFetched = 0;
+      int klineFailed = 0;
 
       // v3.39: 先从API缓存中提取已缓存的K线，跳过已缓存股票的HTTP请求
       final uncachedStocks = <WatchlistItem>[];
@@ -260,20 +263,25 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
               return _apiClient
                   .getStockHistory(prefixedCode,
                       days: klineDays, maxRacingSources: 3)
-                  .catchError((_) => <HistoryKline>[]);
+                  .catchError((e) {
+                debugPrint('[OpportunityEngine] K线获取失败: $prefixedCode - $e');
+                return <HistoryKline>[];
+              });
             }),
           );
 
           for (int j = 0; j < batch.length; j++) {
             final prefixedCode = _apiClient.addMarketPrefix(batch[j].code);
             klineCache[prefixedCode] = klineResults[j];
+            if (klineResults[j].isEmpty) klineFailed++;
           }
 
           klineFetched += batch.length;
           emit(OpportunityProgress(
               status: OpportunityStatus.fetchingKlines,
               totalCount: totalCount,
-              completedCount: klineFetched));
+              completedCount: klineFetched,
+              failedCount: klineFailed));
         }
       } else {
         emit(OpportunityProgress(
@@ -307,6 +315,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       final results = <OpportunityResult?>[];
       final analysisList = <AnalysisResult>[];
       int completedCount = 0;
+      int analysisFailed = 0;
 
       for (int i = 0; i < watchlist.length; i += analyzeBatchSize) {
         final end = min(i + analyzeBatchSize, watchlist.length);
@@ -317,6 +326,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
             final prefixedCode = _apiClient.addMarketPrefix(item.code);
             final klines = klineCache[prefixedCode] ?? [];
             if (klines.isEmpty) {
+              debugPrint('[OpportunityEngine] 跳过(无K线): ${item.code} ${item.name}');
               results.add(null);
               completedCount++;
               continue;
@@ -365,8 +375,10 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
               shortTermDecision: analysis.shortTermDecision,
               topSignals: topSignals,
             ));
-          } catch (_) {
+          } catch (e) {
+            debugPrint('[OpportunityEngine] 分析异常: ${item.code} ${item.name} - $e');
             results.add(null);
+            analysisFailed++;
           }
           completedCount++;
           klineCache.remove(_apiClient.addMarketPrefix(item.code));
@@ -390,6 +402,11 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
       final opportunities = deduped.values.toList()
         ..sort((a, b) => b.score.compareTo(a.score));
 
+      final totalFailed = klineFailed + analysisFailed;
+      if (totalFailed > 0) {
+        debugPrint('[OpportunityEngine] 分析完成: ${opportunities.length}/$totalCount 成功, $totalFailed 失败(K线$klineFailed + 分析$analysisFailed)');
+      }
+
       emit(OpportunityProgress(status: OpportunityStatus.saving));
       await _dbService.replaceOpportunityResults(
           opportunities.map((o) => o.toMap(DateTime.now())).toList());
@@ -399,6 +416,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
           results: opportunities,
           totalCount: totalCount,
           completedCount: totalCount,
+          failedCount: totalFailed,
           marketTiming: marketTimingResult));
 
       unawaited(_runDecisionSideEffects(analysisList));

@@ -563,6 +563,17 @@ class WatchlistScreenState extends State<WatchlistScreen>
             _oppResults = p.results!;
             _rebuildOppMap();
           }
+          if (p.failedCount > 0 && mounted) {
+            ScaffoldMessenger.of(context).clearSnackBars();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                    '分析完成 ${p.results?.length ?? 0}/${p.totalCount}，${p.failedCount}只获取数据失败'),
+                backgroundColor: _accentColor,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
           break;
         case OpportunityStatus.error:
           _oppLoading = false;
