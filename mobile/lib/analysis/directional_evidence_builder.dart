@@ -2,6 +2,7 @@ import 'market_regime_classifier.dart';
 import 'market_structure_analyzer.dart';
 import 'next_day_predictor.dart';
 import 'next_session_prediction.dart';
+import 'sector_momentum_calculator.dart';
 import 'signal_evidence_classifier.dart';
 import '../models/short_term_decision.dart';
 import '../models/stock_models.dart';
@@ -11,6 +12,7 @@ const String reversalMomentumComponentKey = 'reversal_momentum';
 const String volumeFlowComponentKey = 'volume_flow';
 const String relativeStrengthComponentKey = 'relative_strength';
 const String nextSessionComponentKey = 'next_session';
+const String sectorMomentumComponentKey = 'sector_momentum';
 
 const String oversoldReboundGuard = 'oversold_rebound_guard';
 const String chaseGuard = 'chase_guard';
@@ -28,6 +30,7 @@ class DirectionalEvidenceInput {
   final double? stockLastCompletedChangePct;
   final NextDayPredictionResult nextDayPrediction;
   final NextSessionPrediction nextSessionPrediction;
+  final SectorMomentumResult? sectorMomentum;
 
   DirectionalEvidenceInput({
     required this.data,
@@ -39,6 +42,7 @@ class DirectionalEvidenceInput {
     this.stockLastCompletedChangePct,
     required this.nextDayPrediction,
     required this.nextSessionPrediction,
+    this.sectorMomentum,
   });
 }
 
@@ -119,11 +123,12 @@ class _AggregatedEvidence {
 
 class DirectionalEvidenceBuilder {
   static const Map<String, double> componentWeights = <String, double>{
-    trendComponentKey: 0.30,
+    trendComponentKey: 0.25,
     reversalMomentumComponentKey: 0.25,
     volumeFlowComponentKey: 0.20,
     relativeStrengthComponentKey: 0.15,
-    nextSessionComponentKey: 0.10,
+    nextSessionComponentKey: 0.05,
+    sectorMomentumComponentKey: 0.10,
   };
 
   static DirectionalEvidenceResult build(DirectionalEvidenceInput input) {
@@ -169,6 +174,12 @@ class DirectionalEvidenceBuilder {
       ..._nextSessionEvidence(
         input.nextDayPrediction,
         input.nextSessionPrediction,
+      ),
+      _EvidenceObservation(
+        component: sectorMomentumComponentKey,
+        family: 'sector_momentum',
+        signedValue: input.sectorMomentum?.score ?? 0,
+        source: 'sector_momentum',
       ),
       ..._signalEvidence(
         input.buySignals,
@@ -229,6 +240,7 @@ class DirectionalEvidenceBuilder {
       volumeFlowComponentKey: 0,
       relativeStrengthComponentKey: 0,
       nextSessionComponentKey: 0,
+      sectorMomentumComponentKey: 0,
     };
   }
 

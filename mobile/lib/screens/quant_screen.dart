@@ -1090,7 +1090,7 @@ class _QuantScreenState extends State<QuantScreen> {
                       ),
                       child: Center(
                         child: Text(
-                          '${analysis.score}',
+                          '${analysis.score.toStringAsFixed(1)}',
                           style: TextStyle(
                             color: _getScoreColor(analysis.score),
                             fontSize: 18,

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import '../models/stock_models.dart';
 import 'next_session_feature_extractor.dart';
 import 'next_session_prediction.dart';
+import 'next_day_predictor.dart';
 
 class NextSessionPredictor {
   static const int minSampleSize = 8;
@@ -32,7 +33,11 @@ class NextSessionPredictor {
       if (i + 1 > currentIndex) continue;
       final sampleFeatures =
           NextSessionFeatureExtractor.extract(data, index: i);
-      final similarity = _similarity(features, sampleFeatures);
+      var similarity = _similarity(features, sampleFeatures);
+      final timeDecay = currentIndex > 0
+          ? (1.0 - (currentIndex - i) / currentIndex * 0.3).clamp(0.7, 1.0)
+          : 1.0;
+      similarity *= timeDecay;
       if (similarity < 0.5) continue;
 
       final current = data[i];
@@ -50,6 +55,7 @@ class NextSessionPredictor {
     if (samples.length < minSamples) {
       final sampleFactor = samples.length / minSamples;
       return NextSessionPrediction.neutral(
+        neutralProbability: 0,
         confidence: (sampleFactor * 0.25).clamp(0.0, 0.25),
         sampleCount: samples.length,
         scenarioTags: features.scenarioTags,
@@ -67,6 +73,9 @@ class NextSessionPredictor {
     final downsideWeight = samples
         .where((s) => s.nextCloseReturn < -0.5)
         .fold<double>(0, (sum, s) => sum + s.similarity);
+    final neutralWeight = samples
+        .where((s) => s.nextCloseReturn.abs() < 0.5)
+        .fold<double>(0, (sum, s) => sum + s.similarity);
     final expectedReturn = samples.fold<double>(
           0,
           (sum, s) => sum + s.nextCloseReturn * s.similarity,
@@ -79,6 +88,8 @@ class NextSessionPredictor {
         _shrinkProbability(closeUpWeight, totalWeight, minSamples);
     var downsideRiskProbability =
         _shrinkProbability(downsideWeight, totalWeight, minSamples);
+    var neutralProbability =
+        _shrinkProbability(neutralWeight, totalWeight, minSamples);
     var confidence =
         _confidence(nextCloseUpProbability, samples.length, minSamples);
 
@@ -102,6 +113,7 @@ class NextSessionPredictor {
       nextCloseUpProbability: _clampProbability(nextCloseUpProbability),
       expectedNextCloseReturn: expectedReturn,
       downsideRiskProbability: _clampProbability(downsideRiskProbability),
+      neutralProbability: _clampProbability(neutralProbability),
       confidence: confidence.clamp(0.0, 0.95),
       sampleCount: samples.length,
       scenarioTags: features.scenarioTags,
@@ -119,7 +131,32 @@ class NextSessionPredictor {
     distance += (a.return5 - b.return5).abs() / 12 * 0.8;
     distance += (a.rsi6 - b.rsi6).abs() / 100 * 0.4;
     distance += (a.macdHist - b.macdHist).abs() / 5 * 0.3;
+    distance += (a.volatility20 - b.volatility20).abs() / 5 * 0.4;
+    distance += _featureBinDistance(a.featureBins, b.featureBins);
     return (1 / (1 + distance)).clamp(0.0, 1.0);
+  }
+
+  static double _featureBinDistance(
+      Map<String, String> a, Map<String, String> b) {
+    const binWeights = <String, double>{
+      'adx': 1.5,
+      'macd_cross': 1.5,
+      'macd_hist': 1.2,
+      'kdj': 1.2,
+      'rsi': 1.0,
+      'volume': 0.8,
+      'ma5_ma10': 0.8,
+    };
+    const totalBinWeight = 8.0;
+    var binDistance = 0.0;
+    for (final key in binWeights.keys) {
+      if (a.containsKey(key) && b.containsKey(key)) {
+        if (a[key] != b[key]) {
+          binDistance += binWeights[key]!;
+        }
+      }
+    }
+    return binDistance / totalBinWeight;
   }
 
   static double _shrinkProbability(

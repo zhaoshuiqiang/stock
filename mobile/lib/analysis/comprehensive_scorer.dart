@@ -6,20 +6,23 @@ import 'next_day_predictor.dart';
 import 'next_session_prediction.dart';
 import 'sector_heat_detector.dart';
 import 'sector_rotation.dart';
+import 'sector_momentum_calculator.dart';
 
 class ComprehensiveScoreResult {
   final int totalScore;
-  /// v3.19: 该字段为遗留映射，生产路径实际采用 RecommendationPolicy 的标签
-  ///（见 signal_engine.dart 中 recommendationDecision.label），请勿将其作为推荐文案来源。
-  /// 保留仅用于内部/测试参考，避免与生产标签产生矛盾。
   final String recommendation;
   final FundamentalScore? fundamentalScore;
   final NewsSentiment? newsSentiment;
   final double positionAdvice;
   final String positionLabel;
+  final double chaseRiskFactor;
+  final double marketFactor;
+  final double predictionModifier;
+  final double sectorMomentumScore;
 
   ComprehensiveScoreResult({required this.totalScore, required this.recommendation,
-    this.fundamentalScore, this.newsSentiment, this.positionAdvice=0.5, this.positionLabel='中性仓位'});
+    this.fundamentalScore, this.newsSentiment, this.positionAdvice=0.5, this.positionLabel='中性仓位',
+    this.chaseRiskFactor=1.0, this.marketFactor=1.0, this.predictionModifier=1.0, this.sectorMomentumScore=0});
 }
 
 class ComprehensiveScorer {
@@ -34,10 +37,11 @@ class ComprehensiveScorer {
   static const double fundWeight = 0.07;
   static const double structWeight = 0.04;
 
-  static const double stTechWeight = 0.40;
-  static const double stCapWeight = 0.25;
-  static const double stRealWeight = 0.20;
+  static const double stTechWeight = 0.35;
+  static const double stCapWeight = 0.22;
+  static const double stRealWeight = 0.18;
   static const double stConfWeight = 0.10;
+  static const double stSectorWeight = 0.10;
   static const double stStructWeight = 0.05;
 
   /// 精确ST检测（避免EAST/WEST等误判）
@@ -63,6 +67,7 @@ class ComprehensiveScorer {
     IntradayProfile? intradayProfile,
     NextDayPredictionResult? nextDayPrediction,
     NextSessionPrediction? nextSessionPrediction,
+    SectorMomentumResult? sectorMomentum,
   }) {
     FundamentalScore? fundamentalScore;
     double fundamentalScoreValue = 5.0;
@@ -88,21 +93,21 @@ class ComprehensiveScorer {
     // v2.37: 评分评审后微调 — 结构2%→4%(ADX/MA布局对短线择时影响显著)，
     //        基本面5%→7%(避免极端高估低估个股被短线信号掩盖)，技术35%→33%、实时18%→16%(等比例让出)
     final isShortTerm = preferredDuration == 'shortTerm';
-    double techW, capW, realW, confW, sentW, fundW, structW;
+    double techW, capW, realW, confW, sentW, fundW, structW, sectorW;
     if (isShortTerm) {
-      techW=stTechWeight; capW=stCapWeight; realW=stRealWeight; confW=stConfWeight; sentW=0; fundW=0; structW=stStructWeight;
+      techW=stTechWeight; capW=stCapWeight; realW=stRealWeight; confW=stConfWeight; sentW=0; fundW=0; structW=stStructWeight; sectorW=stSectorWeight;
     } else {
-      techW=techWeight; capW=capWeight; realW=realWeight; confW=confWeight; sentW=sentWeight; fundW=fundWeight; structW=structWeight;
+      techW=techWeight; capW=capWeight; realW=realWeight; confW=confWeight; sentW=sentWeight; fundW=fundWeight; structW=structWeight; sectorW=0;
     }
     final hasFund = fundamentalScore != null, hasSent = newsSentiment != null, hasCapital = capitalFlowScore != null;
     if (isShortTerm) {
       if (!hasCapital) { techW += 0.05; realW += 0.05; capW = 0; }
     } else {
-      if (!hasFund && !hasSent && !hasCapital) { techW=0.50; realW=0.25; confW=0.18; structW=0.07; capW=sentW=fundW=0; }
-      else if (!hasFund && !hasSent) { techW=0.40; capW=0.22; realW=0.19; confW=0.14; structW=0.05; sentW=fundW=0; }
-      else if (!hasFund) { techW=0.35; capW=0.20; realW=0.17; confW=0.13; sentW=0.11; structW=0.04; fundW=0; }
-      else if (!hasSent) { techW=0.37; capW=0.20; realW=0.18; confW=0.13; fundW=0.08; structW=0.04; sentW=0; }
-      else if (!hasCapital) { techW=0.40; realW=0.20; confW=0.15; sentW=0.12; fundW=0.09; structW=0.04; capW=0; }
+      if (!hasFund && !hasSent && !hasCapital) { techW=0.50; realW=0.25; confW=0.18; structW=0.07; capW=sentW=fundW=sectorW=0; }
+      else if (!hasFund && !hasSent) { techW=0.40; capW=0.22; realW=0.19; confW=0.14; structW=0.05; sentW=fundW=sectorW=0; }
+      else if (!hasFund) { techW=0.35; capW=0.20; realW=0.17; confW=0.13; sentW=0.11; structW=0.04; fundW=sectorW=0; }
+      else if (!hasSent) { techW=0.37; capW=0.20; realW=0.18; confW=0.13; fundW=0.08; structW=0.04; sentW=sectorW=0; }
+      else if (!hasCapital) { techW=0.40; realW=0.20; confW=0.15; sentW=0.12; fundW=0.09; structW=0.04; capW=sectorW=0; }
     }
 
     // v2.30: 熊市基本面权重提升 — 下跌市中低估值防守价值更大
@@ -112,14 +117,21 @@ class ComprehensiveScorer {
       // 从其他维度按比例扣除以保持总和为 1.0
       final scaleFactor = (1.0 - fundW) / (1.0 - originalFundW);
       techW *= scaleFactor; capW *= scaleFactor; realW *= scaleFactor;
-      confW *= scaleFactor; sentW *= scaleFactor; structW *= scaleFactor;
+      confW *= scaleFactor; sentW *= scaleFactor; structW *= scaleFactor; sectorW *= scaleFactor;
     }
 
-    var rawScore = (technicalScore*techW + capitalScoreValue*capW + sentimentScoreValue*sentW + realtimeScore*realW + confluenceScore*confW + fundamentalScoreValue*fundW + structureScoreValue*structW).clamp(0.0, 10.0);
+    final sectorMomentumScore = sectorMomentum?.score ?? 0.0;
+    final sectorMomentumMapped = (sectorMomentumScore + 1.0) * 5.0;
+    var rawScore = (technicalScore*techW + capitalScoreValue*capW + sentimentScoreValue*sentW + realtimeScore*realW + confluenceScore*confW + fundamentalScoreValue*fundW + structureScoreValue*structW + sectorMomentumMapped*sectorW).clamp(0.0, 10.0);
 
     if (isShortTerm && intradayProfile != null) {
       final blendedRealtime = realtimeScore * 0.5 + intradayProfile.intradayScore * 0.5;
-      rawScore = (technicalScore*techW + capitalScoreValue*capW + sentimentScoreValue*sentW + blendedRealtime*realW + confluenceScore*confW + fundamentalScoreValue*fundW + structureScoreValue*structW).clamp(0.0, 10.0);
+      rawScore = (technicalScore*techW + capitalScoreValue*capW + sentimentScoreValue*sentW + blendedRealtime*realW + confluenceScore*confW + fundamentalScoreValue*fundW + structureScoreValue*structW + sectorMomentumMapped*sectorW).clamp(0.0, 10.0);
+    }
+
+    if (sectorMomentum != null) {
+      rawScore *= sectorMomentum.mainLineBonus;
+      rawScore *= sectorMomentum.retreatDiscount;
     }
 
     // v2.30: 行业RS折扣 — 行业内排名靠后的"强信号"是补涨陷阱
@@ -127,126 +139,92 @@ class ComprehensiveScorer {
       rawScore *= 0.90;
     }
 
-    final positionFactor = marketPositionFactor ?? 1.0;
-    double marketAdjustment = 1.0;
-    if (marketContext != null) marketAdjustment = marketContext.getMarketAdjustmentFactor();
-    final combinedAdjustment = marketAdjustment * 0.4 + positionFactor * 0.6;
-
-    // v2.30: 动量保护因子 — ADX>30且多头排列时降低惩罚，避免压制牛股
     final effectiveAdx = adxValue ?? (marketStructure?.adxValue ?? 25);
     final effectiveBullAlign = isBullAlign ?? (marketStructure?.maAlignment == '多头');
     final momentumFactor = _momentumProtectionFactor(data, effectiveAdx, effectiveBullAlign);
 
-    // v3.42: 追高惩罚合并为1层条件触发
-    // 涨幅2-5%不惩罚（A股短线强势确认区间）
-    // 涨幅5-8%+连涨3天轻惩罚×0.92，单日5-8%不惩罚
-    // 涨幅>8%重惩罚×0.75，涨停板×0.65
-    // 涨幅>5%时惩罚可被动量保护削弱（强趋势中追高可接受）
-    double chasePenalty = 1.0;
+    // Layer 1: chaseRiskFactor [0.40, 1.0] — chase penalty + bias penalty + trend consistency
+    double chaseP = 1.0;
     final cp = currentChangePct ?? quote?.changePct;
     if (cp != null && quote != null && quote.price > 0) {
       final consecutiveRise = _consecutiveRiseDays(data);
-      if (cp > 9.5) chasePenalty = 0.65;
-      else if (cp > 8) chasePenalty = 0.75;
-      else if (cp > 5 && consecutiveRise >= 3) chasePenalty = 0.92;
+      if (cp > 9.5) chaseP = 0.65;
+      else if (cp > 8) chaseP = 0.75;
+      else if (cp > 5 && consecutiveRise >= 3) chaseP = 0.92;
       if (cp > 5) {
-        chasePenalty = 1.0 - (1.0 - chasePenalty) * momentumFactor;
+        chaseP = 1.0 - (1.0 - chaseP) * momentumFactor;
       }
     }
-
-    // 乖离率惩罚：价格偏离均线越远，均值回归风险越大
-    // v2.30: 动量保护 — 强势趋势中惩罚减半
-    double biasPenalty = 1.0;
+    double biasP = 1.0;
     if (bias6 != null) {
       final biasAbs = bias6.abs();
       final isOversold = bias6 < 0;
-      if (biasAbs > 8) biasPenalty = isOversold ? 0.94 : 0.88;
-      else if (biasAbs > 5) biasPenalty = isOversold ? 0.97 : 0.93;
-      else if (biasAbs > 3) biasPenalty = isOversold ? 0.99 : 0.97;
-      // v2.30: 动量保护
-      biasPenalty = 1.0 - (1.0 - biasPenalty) * momentumFactor;
+      if (biasAbs > 8) biasP = isOversold ? 0.94 : 0.88;
+      else if (biasAbs > 5) biasP = isOversold ? 0.97 : 0.93;
+      else if (biasAbs > 3) biasP = isOversold ? 0.99 : 0.97;
+      biasP = 1.0 - (1.0 - biasP) * momentumFactor;
     }
-
-    final adjustedScore = (rawScore * combinedAdjustment * chasePenalty * biasPenalty).clamp(0.0, 10.0);
-
-    // v2.48.0: 近期价格趋势一致性校验 — 技术面看多但近期价格下跌时降低评分
-    // 防止均线多头但近期持续下跌的股票获得虚高评分
-    // v3.2: 加强惩罚力度 0.85→0.70 / 0.92→0.82（留档数据分析：-5%以上下跌时原惩罚不够）
-    double trendConsistencyFactor = 1.0;
-    if (data != null && data.length >= 3 && adjustedScore >= 5.5) {
+    double trendP = 1.0;
+    if (data != null && data.length >= 3 && rawScore >= 5.5) {
       final recentChange = (data.last.close - data[data.length - 3].close) / data[data.length - 3].close * 100;
-      if (recentChange < -5) {
-        trendConsistencyFactor = 0.70;
-      } else if (recentChange < -3) {
-        trendConsistencyFactor = 0.82;
+      if (recentChange < -5) trendP = 0.70;
+      else if (recentChange < -3) trendP = 0.82;
+    }
+    final chaseRiskFactor = (chaseP * biasP * trendP).clamp(0.40, 1.0);
+
+    // Layer 2: marketFactor [0.50, 1.0] — market adjustment + decline discount + heat discount + finance discount
+    double marketFactor = 1.0;
+    final positionFactor = marketPositionFactor ?? 1.0;
+    double marketAdjustment = 1.0;
+    if (marketContext != null) marketAdjustment = marketContext.getMarketAdjustmentFactor();
+    marketFactor *= (marketAdjustment * 0.4 + positionFactor * 0.6);
+    if (marketContext != null && quote != null && !isSTStock(quote.name)) {
+      final acp = marketContext.avgChangePct;
+      double declineFactor = 1.0;
+      if (acp <= -3.0) declineFactor = 0.80;
+      else if (acp <= -2.0) declineFactor = 0.87;
+      else if (acp <= -1.0) declineFactor = 0.93;
+      else if (acp <= -0.5) declineFactor = 0.97;
+      if (declineFactor < 1.0) {
+        final stockAlpha = (quote.changePct - acp);
+        if (stockAlpha > 2.0) {
+          // 逆市大幅跑赢，不折扣
+        } else if (stockAlpha > 0) {
+          declineFactor = 1.0 - (1.0 - declineFactor) * 0.5;
+        }
+        marketFactor *= declineFactor;
       }
     }
+    if (sectorName != null && sectorAnalysis != null && sectorAnalysis.isNotEmpty) {
+      final heatDiscount = SectorHeatDetector.getHeatDiscount(sectorName, sectorAnalysis);
+      if (heatDiscount < 1.0) marketFactor *= heatDiscount;
+    }
+    if (quote != null && _isHighBetaFinance(quote.name)) {
+      marketFactor *= 0.88;
+    }
+    marketFactor = marketFactor.clamp(0.50, 1.0);
 
-    // v3.2: 移除温和系数0.97 — 评分应当直接反映真实计算结果
-    //          之前温和系数导致评分偏移（6.5→6.3→6），降低了评分透明度
-    //          如果要控制评分分布，应在权重层面调整而非后处理压缩
-    var temperedScore = adjustedScore * trendConsistencyFactor;
-
-    // v3.42: 预测修正因子 — 次日/次交易预测结果反馈到评分
-    double predictionModifier = 1.0;
+    // Layer 3: predictionModifier [0.85, 1.05]
+    double predictionModifierValue = 1.0;
     if (nextDayPrediction != null && nextDayPrediction.sampleCount >= 15) {
       if (nextDayPrediction.downProbability > 0.60) {
-        predictionModifier *= 0.85;
+        predictionModifierValue *= 0.85;
       } else if (nextDayPrediction.upProbability > 0.60) {
-        predictionModifier *= 1.05;
+        predictionModifierValue *= 1.05;
       }
     }
     if (nextSessionPrediction != null && nextSessionPrediction.confidence > 0.5) {
       if (nextSessionPrediction.downsideRiskProbability > 0.55) {
-        predictionModifier *= 0.90;
-      }
-    }
-    temperedScore *= predictionModifier;
-
-    // v2.38.0: 板块情绪过热检测 — 过热板块个股评分乘以0.85折扣
-    if (sectorName != null && sectorAnalysis != null && sectorAnalysis.isNotEmpty) {
-      final heatDiscount = SectorHeatDetector.getHeatDiscount(sectorName, sectorAnalysis);
-      if (heatDiscount < 1.0) {
-        temperedScore *= heatDiscount;
+        predictionModifierValue *= 0.90;
       }
     }
 
-    // v3.15: 大盘下跌联动折扣 — 渐进式扣分，跌幅越大扣分越重
-    // 注：此折扣与 getMarketAdjustmentFactor() 的乘数折扣是双重保险设计：
-    //   - 乘数折扣：市场环境对原始评分的系统性调节（combinedAdjustment 权重40%）
-    //   - 加法折扣：普跌日对所有个股的额外扣分，防止虚假买入信号
-    // 双重机制确保普跌日能有效降低买入推荐数量，在熊市日尤其重要
-    // v3.3: 考虑个股相对大盘的相对强度 — 逆市上涨的股票不减分
-    if (marketContext != null && quote != null && !isSTStock(quote.name)) {
-      final acp = marketContext.avgChangePct;
-      double declineDeduction = 0;
-      if (acp <= -3.0) {
-        declineDeduction = 2.0;
-      } else if (acp <= -2.0) {
-        declineDeduction = 1.3;
-      } else if (acp <= -1.0) {
-        declineDeduction = 0.7;
-      } else if (acp <= -0.5) {
-        declineDeduction = 0.3;
-      }
-      if (declineDeduction > 0) {
-        // v3.3: 个股Alpha保护 — 逆市上涨(相对强度>2%)的股票不减分
-        final stockAlpha = (quote.changePct - acp);
-        if (stockAlpha > 2.0) {
-          // 逆市大幅跑赢，不减分
-        } else if (stockAlpha > 0) {
-          // 逆市小幅跑赢，减半扣分
-          temperedScore = (temperedScore - declineDeduction * 0.5).clamp(1.0, 10.0);
-        } else {
-          temperedScore = (temperedScore - declineDeduction).clamp(1.0, 10.0);
-        }
-      }
+    var temperedScore = rawScore * chaseRiskFactor * marketFactor * predictionModifierValue;
+    final totalPenalty = chaseRiskFactor * marketFactor * predictionModifierValue;
+    if (totalPenalty < 0.40) {
+      temperedScore = rawScore * 0.40;
     }
-
-    // v3.2: 金融板块Beta折扣 — 券商/银行/保险股评分×0.88（高Beta行业大盘联动风险大）
-    if (quote != null && _isHighBetaFinance(quote.name)) {
-      temperedScore *= 0.88;
-    }
+    temperedScore = temperedScore.clamp(0.0, 10.0);
 
     // ST股票封顶：最高"偏多观望"，防止推荐高风险标的
     final isST = quote != null && isSTStock(quote.name);
@@ -282,7 +260,9 @@ class ComprehensiveScorer {
 
     return ComprehensiveScoreResult(totalScore: totalScore, recommendation: recommendation,
       fundamentalScore: fundamentalScore, newsSentiment: newsSentiment,
-      positionAdvice: positionAdvice, positionLabel: positionLabel);
+      positionAdvice: positionAdvice, positionLabel: positionLabel,
+      chaseRiskFactor: chaseRiskFactor, marketFactor: marketFactor,
+      predictionModifier: predictionModifierValue, sectorMomentumScore: sectorMomentumScore);
   }
 
   /// v2.30: 动量保护因子

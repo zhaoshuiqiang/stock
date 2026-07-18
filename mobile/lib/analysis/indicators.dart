@@ -554,8 +554,53 @@ List<HistoryKline> calcCCI(List<HistoryKline> data, {int period = 14}) {
   return result;
 }
 
-List<HistoryKline> calcAllIndicators(List<HistoryKline> data) {
+
+/// Isolate dirty data (suspended / limit-lock days) from indicator calculations.
+///
+/// For dirty bars, replace OHLC with previous valid close (forward-fill),
+/// set volume=0 so they don't contribute to volume-weighted calculations.
+/// This prevents suspended/limit-lock days from distorting MA/MACD/RSI etc.
+List<HistoryKline> isolateDirtyData(List<HistoryKline> data) {
+  if (data.length < 2) return data;
+
+  final result = List<HistoryKline>.from(data);
+  double lastValidClose = data[0].close;
+
+  for (int i = 0; i < result.length; i++) {
+    final k = result[i];
+    bool isSuspended = k.volume <= 0 || k.volume.isNaN;
+    bool isLimitLock = k.open == k.high &&
+        k.high == k.low &&
+        k.low == k.close &&
+        k.changePct.abs() >= 9.5;
+
+    if (isSuspended || isLimitLock) {
+      result[i] = k.copyWith(
+        open: lastValidClose,
+        high: lastValidClose,
+        low: lastValidClose,
+        close: lastValidClose,
+        volume: 0,
+        amount: 0,
+        amplitude: 0,
+        changePct: 0,
+        change: 0,
+        turnover: 0,
+      );
+    } else {
+      lastValidClose = k.close;
+    }
+  }
+
+  return result;
+}
+
+List<HistoryKline> calcAllIndicators(List<HistoryKline> data, {bool enableDirtyIsolation = false}) {
   if (data.isEmpty || data.length < 2) return data;
+
+  if (enableDirtyIsolation) {
+    data = isolateDirtyData(data);
+  }
 
   var result = calcMA(data, [5, 10, 20, 60]);
   result = calcEMA(result, [5, 10, 20, 60]);

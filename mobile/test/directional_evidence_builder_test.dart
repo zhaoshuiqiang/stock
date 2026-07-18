@@ -6,11 +6,12 @@ import 'package:stock_analyzer/analysis/market_structure_analyzer.dart';
 import 'package:stock_analyzer/analysis/next_day_predictor.dart';
 import 'package:stock_analyzer/analysis/next_session_prediction.dart';
 import 'package:stock_analyzer/models/short_term_decision.dart';
+import 'package:stock_analyzer/analysis/sector_momentum_calculator.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 
 void main() {
   group('DirectionalEvidenceBuilder', () {
-    test('returns exactly the five direction component buckets', () {
+    test('returns exactly the six direction component buckets', () {
       final result = DirectionalEvidenceBuilder.build(_input());
 
       expect(
@@ -21,6 +22,7 @@ void main() {
           'volume_flow',
           'relative_strength',
           'next_session',
+          'sector_momentum',
         ]),
       );
       for (final value in result.components.values) {
@@ -148,7 +150,7 @@ void main() {
                 close: 110.16, open: 102, changePct: 8, rsi6: 78, wr14: 8),
           ],
           buySignals: <SignalItem>[
-            _signal(type: 'buy', indicator: 'MA', strength: 90),
+            _signal(type: 'buy', indicator: 'MA', strength: 95),
           ],
           stockLastCompletedChangePct: 6,
           marketContext: _market(
@@ -160,8 +162,8 @@ void main() {
             downCount: 900,
           ),
           nextDayPrediction: _prediction(
-            upProbability: 0.8,
-            downProbability: 0.2,
+            upProbability: 0.9,
+            downProbability: 0.1,
           ),
           nextSessionPrediction: const NextSessionPrediction(
             nextOpenUpProbability: 0.8,
@@ -172,6 +174,11 @@ void main() {
             sampleCount: 40,
             scenarioTags: <String>[],
             riskWarnings: <String>[],
+          ),
+          sectorMomentum: SectorMomentumResult(
+            score: 0.8,
+            isInMainLine: true,
+            momentumLabel: '主线·板块加速',
           ),
         ),
       );
@@ -397,7 +404,7 @@ void main() {
                 bias6: 9),
           ],
           buySignals: <SignalItem>[
-            _signal(type: 'buy', indicator: 'MA', strength: 90),
+            _signal(type: 'buy', indicator: 'MA', strength: 95),
           ],
           stockLastCompletedChangePct: 6,
           marketContext: _market(
@@ -408,6 +415,10 @@ void main() {
             upCount: 3600,
             downCount: 900,
           ),
+          nextDayPrediction: _prediction(
+            upProbability: 0.9,
+            downProbability: 0.1,
+          ),
           nextSessionPrediction: const NextSessionPrediction(
             nextOpenUpProbability: 0.8,
             nextCloseUpProbability: 0.8,
@@ -417,6 +428,11 @@ void main() {
             sampleCount: 40,
             scenarioTags: <String>[],
             riskWarnings: <String>[],
+          ),
+          sectorMomentum: SectorMomentumResult(
+            score: 0.8,
+            isInMainLine: true,
+            momentumLabel: '主线·板块加速',
           ),
         ),
       );
@@ -469,6 +485,26 @@ void main() {
       // to trigger chase protection without WR14 confirmation
       expect(result.guardReasons, isNot(contains('chase_guard')));
     });
+
+    test('sector_momentum dimension integrated into evidence', () {
+      final result = DirectionalEvidenceBuilder.build(_input(
+        sectorMomentum: SectorMomentumResult(
+          score: 0.5,
+          isInMainLine: true,
+          momentumLabel: '主线·板块加速',
+        ),
+      ));
+      expect(result.components.containsKey('sector_momentum'), isTrue);
+      expect(result.components['sector_momentum'], greaterThan(0));
+    });
+
+    test('6-dim weights sum to 1.0', () {
+      final weights = DirectionalEvidenceBuilder.componentWeights;
+      final total = weights.values.fold(0.0, (sum, w) => sum + w);
+      expect(total, closeTo(1.0, 0.001));
+      expect(weights.containsKey('sector_momentum'), isTrue);
+      expect(weights['sector_momentum'], equals(0.10));
+    });
   });
 }
 
@@ -483,6 +519,7 @@ DirectionalEvidenceInput _input({
   NextDayPredictionResult? nextDayPrediction,
   NextSessionPrediction nextSessionPrediction =
       const NextSessionPrediction.neutral(),
+  SectorMomentumResult? sectorMomentum,
 }) {
   final inputData = data ?? _neutralData();
   return DirectionalEvidenceInput(
@@ -495,6 +532,7 @@ DirectionalEvidenceInput _input({
     stockLastCompletedChangePct: stockLastCompletedChangePct,
     nextDayPrediction: nextDayPrediction ?? _prediction(),
     nextSessionPrediction: nextSessionPrediction,
+    sectorMomentum: sectorMomentum,
   );
 }
 

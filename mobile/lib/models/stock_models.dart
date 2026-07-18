@@ -1616,6 +1616,10 @@ class AnalysisResult {
 
   final IntradayProfile? intradayProfile;
 
+  final double chaseRiskFactor;
+  final double marketFactor;
+  final double sectorMomentumScore;
+
   AnalysisResult({
     this.quote,
     this.indicators = const {},
@@ -1655,6 +1659,9 @@ class AnalysisResult {
     this.directionForecast,
     this.opportunityScore,
     this.intradayProfile,
+    this.chaseRiskFactor = 1.0,
+    this.marketFactor = 1.0,
+    this.sectorMomentumScore = 0,
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> json) {

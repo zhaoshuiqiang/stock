@@ -1,3 +1,4 @@
+import 'dart:math';
 import '../models/stock_models.dart';
 import 'signal_evidence_classifier.dart';
 
@@ -5,7 +6,7 @@ import 'signal_evidence_classifier.dart';
 /// 负责检测短期、中期、长期的信号
 class SignalDetector {
   /// 检测所有分层信号
-  static List<SignalItem> detectLayeredSignals(List<HistoryKline> data) {
+  static List<SignalItem> detectLayeredSignals(List<HistoryKline> data, {String? code}) {
     if (data.isEmpty || data.length < 20) return [];
 
     final last = data[data.length - 1];
@@ -13,7 +14,7 @@ class SignalDetector {
 
     // 收集所有基础信号
     final baseSignals = <SignalItem>[];
-    baseSignals.addAll(_detectShortTermSignals(data, last, prev));
+    baseSignals.addAll(_detectShortTermSignals(data, last, prev, code: code));
     baseSignals.addAll(_detectMediumTermSignals(data, last, prev));
     baseSignals.addAll(_detectLongTermSignals(data, last, prev));
 
@@ -26,7 +27,7 @@ class SignalDetector {
 
   /// 短期信号检测（2-5天）
   static List<SignalItem> _detectShortTermSignals(
-      List<HistoryKline> data, HistoryKline last, HistoryKline prev) {
+      List<HistoryKline> data, HistoryKline last, HistoryKline prev, {String? code}) {
     final signals = <SignalItem>[];
     signals.addAll(_detectKDJSignals(last, prev));
     signals.addAll(_detectRSISignals(last, prev));
@@ -36,7 +37,88 @@ class SignalDetector {
     signals.addAll(_detectWRSignals(last));
     signals.addAll(_detectGapSignals(data, last, prev));
     signals.addAll(_detectCandlestickPatterns(data, last, prev));
-    return signals;
+    
+    // ── A股特色信号：涨停板 + 尾盘 ──
+    if (last.close > 0 && prev.close > 0) {
+      final limitPct = _limitThreshold(code);
+      final changePct = (last.close - prev.close) / prev.close * 100;
+      // 涨停打开：当日涨停但收盘未封板
+      if (changePct >= limitPct * 0.95 && last.high > last.close) {
+        signals.add(SignalItem(
+          type: 'sell',
+          indicator: '涨停板',
+          signal: '涨停打开',
+          description: '涨停打开，封板失败',
+          strength: 80,
+          timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.80,
+          signalCount: 2,
+        ));
+      }
+    }
+
+    if (last.close > 0 && prev.close > 0) {
+      final limitPct = _limitThreshold(code);
+      final changePct = (last.close - prev.close) / prev.close * 100;
+      // 涨停回封：当日涨停且收盘封板但盘中曾打开
+      if (changePct >= limitPct && (last.high - last.close).abs() < last.close * 0.005 && last.low < last.close * 0.99) {
+        signals.add(SignalItem(
+          type: 'buy',
+          indicator: '涨停板',
+          signal: '涨停回封',
+          description: '涨停回封，多空博弈后多方胜出',
+          strength: 75,
+          timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.75,
+          signalCount: 2,
+        ));
+      }
+    }
+
+    if (last.close > 0 && prev.close > 0 && last.high > last.low) {
+      final changePct = (last.close - prev.close) / prev.close * 100;
+      final upperShadow = (last.high - [last.open, last.close].reduce(max)) / (last.high - last.low);
+      final closePosition = (last.close - last.low) / (last.high - last.low);
+      // 尾盘急拉(日K降级)：长上影线+涨幅>3%+收盘位置偏低
+      if (changePct > 3 && upperShadow > 0.5 && closePosition < 0.5) {
+        signals.add(SignalItem(
+          type: 'sell',
+          indicator: '尾盘',
+          signal: '尾盘急拉',
+          description: '长上影线疑似尾盘拉升',
+          strength: 70,
+          timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.70,
+          signalCount: 1,
+        ));
+      }
+    }
+
+    if (last.close > 0 && prev.close > 0 && last.high > last.low) {
+      final changePct = (last.close - prev.close) / prev.close * 100;
+      final bodyLow = [last.open, last.close].reduce(min);
+      final lowerShadow = (bodyLow - last.low) / (last.high - last.low);
+      final upperShadow = (last.high - [last.open, last.close].reduce(max)) / (last.high - last.low);
+      // 尾盘急跌：放量下挫+下影线较长+收盘位置低+阴线
+      if (changePct < -2 && lowerShadow > 0.25 && upperShadow < 0.15 && last.close < last.open) {
+        signals.add(SignalItem(
+          type: 'sell',
+          indicator: '尾盘',
+          signal: '尾盘急跌',
+          description: '尾盘放量下挫，空方主导',
+          strength: 65,
+          timestamp: last.date,
+          duration: SignalDuration.shortTerm,
+          confidence: 0.65,
+          signalCount: 1,
+        ));
+      }
+    }
+
+return signals;
   }
 
   /// KDJ金叉/死叉检测
@@ -1213,5 +1295,12 @@ class SignalDetector {
     }
 
     return signals;
+  }
+
+  static double _limitThreshold(String? code) {
+    if (code == null) return 9.5;
+    if (code.startsWith('3') || code.startsWith('688')) return 19.5; // 创业板/科创板
+    if (code.startsWith('8') || code.startsWith('4')) return 29.5; // 北交所
+    return 9.5; // 主板
   }
 }

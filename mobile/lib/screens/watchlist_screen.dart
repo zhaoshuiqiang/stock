@@ -1679,7 +1679,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        '评分 ${opp.score}',
+                        '评分 ${opp.score.toStringAsFixed(1)}',
                         style: const TextStyle(
                           color: _accentColor,
                           fontSize: 12,
@@ -4003,7 +4003,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          '${opp.score}分',
+                          '${opp.score.toStringAsFixed(1)}分',
                           style: const TextStyle(
                             color: _accentColor,
                             fontSize: 12,

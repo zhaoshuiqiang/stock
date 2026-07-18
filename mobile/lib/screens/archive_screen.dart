@@ -310,7 +310,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
                     _buildCompareRow('推荐', record.recommendation,
                         currentAnalysis.recommendation),
                     _buildCompareRow(
-                        '评分', '${record.score}', '${currentAnalysis.score}'),
+                        '评分', record.score.toStringAsFixed(1), currentAnalysis.score.toStringAsFixed(1)),
                     _buildCompareRow(
                         '风险', record.riskLevel, currentAnalysis.riskLevel),
                     _buildCompareRow('价格', record.price.toStringAsFixed(2),
@@ -1045,7 +1045,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
                                           fontWeight: FontWeight.bold)),
                                 ),
                                 const SizedBox(height: 4),
-                                Text('${record.score}分',
+                                Text('${record.score.toStringAsFixed(1)}分',
                                     style: const TextStyle(
                                         color: Colors.white70,
                                         fontSize: 12,

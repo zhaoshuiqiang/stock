@@ -1,3 +1,5 @@
+import '../analysis/sector_momentum_calculator.dart';
+
 enum RecommendationDirection { bullish, neutral, bearish }
 
 /// 方向分数阈值：方向判定为 bull/中立/bear 的临界值
@@ -105,6 +107,7 @@ class ShortTermDecision {
   final DateTime? evidenceTradeDate;
   final String modelVersion;
   final double rawComprehensiveScore;
+  final SectorMomentumResult? sectorMomentum;
 
   ShortTermDecision({
     required this.directionScore,
@@ -124,6 +127,7 @@ class ShortTermDecision {
     this.evidenceTradeDate,
     required this.modelVersion,
     required this.rawComprehensiveScore,
+    this.sectorMomentum,
   })  : calibrationByHorizon = Map<int, CalibrationEstimate>.unmodifiable(
           calibrationByHorizon,
         ),

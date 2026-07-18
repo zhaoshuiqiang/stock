@@ -98,6 +98,7 @@ NextSessionBacktestEvaluation _evaluation({
       nextCloseUpProbability: probability,
       expectedNextCloseReturn: nextCloseReturn,
       downsideRiskProbability: 1 - probability,
+      neutralProbability: 0,
       confidence: 0.7,
       sampleCount: 20,
       scenarioTags: const [],

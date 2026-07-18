@@ -10,6 +10,20 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.1.20260718',
+        'date': '2026-07-18',
+        'changes': [
+          '新增: 板块动量维度——SectorMomentumCalculator整合板块轮动/过热/涨停潮数据',
+          '优化: 方向证据6维——新增sector_momentum(10%权重)，趋势25%+次交易5%让出',
+          '优化: 惩罚简化3层——追高风险/市场环境/预测修正替代原7层乘法惩罚',
+          '新增: 4种A股特色信号——涨停打开/涨停回封/尾盘急拉/尾盘急跌',
+          '优化: 预测模块整合——NextDayPredictor合并到NextSessionPredictor，扩展20+7维特征',
+          '修复: 回测T+1约束——买入当日不可卖出，ATR止损延迟到T+2',
+          '修复: 回测脏数据隔离——停牌/一字板日不参与指标计算',
+        ],
+      },
+
+      {
         'version': 'v3.42.20260718',
         'date': '2026-07-18',
         'changes': [

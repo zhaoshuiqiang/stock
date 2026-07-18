@@ -234,7 +234,7 @@ class StockCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      '$score分',
+                      '${score!.toStringAsFixed(1)}分',
                       style: const TextStyle(
                         color: Color(0xFF58A6FF),
                         fontSize: 13,

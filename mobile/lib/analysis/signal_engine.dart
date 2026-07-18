@@ -8,6 +8,7 @@ import 'technical_scorer.dart';
 import 'realtime_scorer.dart';
 import 'confluence_scorer.dart';
 import 'comprehensive_scorer.dart';
+import 'sector_momentum_calculator.dart';
 import 'risk_analyzer.dart';
 import 'opportunity_identifier.dart';
 import 'suggestion_generator.dart';
@@ -388,8 +389,17 @@ AnalysisResult generateAnalysis(
   final momentumPersistence = MomentumPersistenceAnalyzer.analyze(data);
 
   // 1f. 次日涨跌概率预测（新增）
-  final nextDayPrediction = NextDayPredictor.predict(data, quote);
   final nextSessionPrediction = NextSessionPredictor.predict(data);
+  final nextDayPrediction = NextDayPredictionResult(
+    upProbability: nextSessionPrediction.nextCloseUpProbability,
+    downProbability: nextSessionPrediction.downsideRiskProbability,
+    neutralProbability: nextSessionPrediction.neutralProbability,
+    sampleCount: nextSessionPrediction.sampleCount,
+    description: '基于K近邻合并预测',
+    featureBins: data.isNotEmpty
+        ? NextDayPredictor.extractFeatureBinsPublic(data.last)
+        : {},
+  );
 
   final buySignals = signals.where((s) => s.type == 'buy').toList();
   final sellSignals = signals.where((s) => s.type == 'sell').toList();
@@ -414,6 +424,15 @@ AnalysisResult generateAnalysis(
   }
 
   // 5. 综合评分 (v2.38: 传递 sectorName/sectorAnalysis 用于板块情绪过热检测)
+  final effectiveSectorName = sectorName ?? quote?.sectorName;
+  SectorMomentumResult? sectorMomentumResult;
+  if (effectiveSectorName != null && sectorAnalysis != null && sectorAnalysis.isNotEmpty) {
+    sectorMomentumResult = SectorMomentumCalculator.calculate(
+      sectorName: effectiveSectorName,
+      sectorAnalysis: sectorAnalysis,
+      stockChangePct: quote?.changePct ?? 0,
+    );
+  }
   final compResult = ComprehensiveScorer.combine(
     technicalScore: techResult.totalScore,
     realtimeScore: realtimeScore,
@@ -429,11 +448,12 @@ AnalysisResult generateAnalysis(
     adxValue: marketStructure.adxValue,
     isBullAlign: marketStructure.maAlignment == '多头',
     industryRSScore: percentile.industryRSScore,
-    sectorName: sectorName ?? quote?.sectorName,
+    sectorName: effectiveSectorName,
     sectorAnalysis: sectorAnalysis,
     intradayProfile: intradayProfile,
     nextDayPrediction: nextDayPrediction,
     nextSessionPrediction: nextSessionPrediction,
+    sectorMomentum: sectorMomentumResult,
   );
 
   // 6. 推荐理由（见下方步骤13，全部上下文就绪后生成）
@@ -785,6 +805,9 @@ AnalysisResult generateAnalysis(
     directionForecast: directionForecast,
     opportunityScore: opportunityScore,
     intradayProfile: intradayProfile,
+    chaseRiskFactor: compResult.chaseRiskFactor,
+    marketFactor: compResult.marketFactor,
+    sectorMomentumScore: compResult.sectorMomentumScore,
   );
 }
 
@@ -813,6 +836,7 @@ Map<String, dynamic> _combinedPredictionJson(
   return {
     ...nextDayPrediction.toJson(),
     'next_session': _nextSessionPredictionToJson(nextSessionPrediction),
+    'neutral_probability': nextSessionPrediction.neutralProbability,
   };
 }
 
@@ -828,6 +852,7 @@ Map<String, dynamic> _nextSessionPredictionToJson(
     'sample_count': prediction.sampleCount,
     'scenario_tags': prediction.scenarioTags,
     'risk_warnings': prediction.riskWarnings,
+    'neutral_probability': prediction.neutralProbability,
   };
 }
 

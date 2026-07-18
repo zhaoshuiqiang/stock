@@ -360,7 +360,11 @@ class BacktestEngine {
   }) {
     if (data.length < minBars) return _emptyResult();
 
-    final calcData = prepare(List<HistoryKline>.from(data));
+    var preprocessedData = List<HistoryKline>.from(data);
+    if (config.skipDirtyData) {
+      preprocessedData = isolateDirtyData(preprocessedData);
+    }
+    final calcData = prepare(preprocessedData);
     if (calcData.length < minBars) return _emptyResult();
 
     final tradeReturns = <double>[];
@@ -371,6 +375,7 @@ class BacktestEngine {
     double maxDrawdown = 0;
     int skippedSignals = 0;
     int skippedTrades = 0;
+    int? buyDayIndex;
 
     // T+1 执行修正：遍历到 length-2，因为需要 i+1 (next day) 来执行
     for (int i = 1; i < calcData.length - 1; i++) {
@@ -395,6 +400,7 @@ class BacktestEngine {
         }
         buyPrice = next.open; // ← T+1 开盘价执行
         peakCloseSinceEntry = next.open; // P1-7: 初始化持仓最高价
+        buyDayIndex = i + 1; // T+1约束：记录买入执行日
         continue;
       }
 
@@ -406,6 +412,12 @@ class BacktestEngine {
         if (unrealizedEquity > peakEquity) peakEquity = unrealizedEquity;
         final floatingDd = (peakEquity - unrealizedEquity) / peakEquity;
         if (floatingDd > maxDrawdown) maxDrawdown = floatingDd;
+      }
+
+      // ---- T+1约束：买入当日不可卖出 ----
+      if (buyDayIndex != null && i <= buyDayIndex) {
+        // 仍在买入执行日或之前，跳过出场判断
+        continue;
       }
 
       // ---- 出场信号（仅持仓时） ----
@@ -426,6 +438,7 @@ class BacktestEngine {
         final dd = (peakEquity - currentEquity) / peakEquity;
         if (dd > maxDrawdown) maxDrawdown = dd;
         buyPrice = null;
+        buyDayIndex = null;
         continue;
       }
 
@@ -450,6 +463,7 @@ class BacktestEngine {
           final dd = (peakEquity - currentEquity) / peakEquity;
           if (dd > maxDrawdown) maxDrawdown = dd;
           buyPrice = null;
+          buyDayIndex = null;
           continue;
         }
       }
@@ -457,6 +471,7 @@ class BacktestEngine {
 
     // 仍有持仓 → 按最后一天收盘价平仓
     if (buyPrice != null) {
+      buyDayIndex = null;
       final last = calcData.last;
       final returnPct = _safeReturnPct(buyPrice, last.close);
       final netReturn = _applyCost(returnPct);

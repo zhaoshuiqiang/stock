@@ -6,6 +6,7 @@ class NextSessionPrediction {
   final double confidence;
   final int sampleCount;
   final List<String> scenarioTags;
+  final double neutralProbability;
   final List<String> riskWarnings;
 
   const NextSessionPrediction({
@@ -16,6 +17,7 @@ class NextSessionPrediction {
     required this.confidence,
     required this.sampleCount,
     required this.scenarioTags,
+    this.neutralProbability = 0,
     required this.riskWarnings,
   });
 
@@ -24,6 +26,7 @@ class NextSessionPrediction {
     this.nextCloseUpProbability = 0.5,
     this.expectedNextCloseReturn = 0,
     this.downsideRiskProbability = 0.5,
+    this.neutralProbability = 0,
     this.confidence = 0,
     this.sampleCount = 0,
     this.scenarioTags = const [],
@@ -53,6 +56,8 @@ class NextSessionFeatures {
   final double d;
   final double j;
   final double macdHist;
+  final double volatility20;
+  final Map<String, String> featureBins;
   final List<String> scenarioTags;
   final List<String> riskWarnings;
 
@@ -78,6 +83,8 @@ class NextSessionFeatures {
     required this.d,
     required this.j,
     required this.macdHist,
+    this.volatility20 = 0,
+    this.featureBins = const {},
     required this.scenarioTags,
     required this.riskWarnings,
   });

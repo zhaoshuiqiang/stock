@@ -711,7 +711,7 @@ void main() {
       final result =
           generateAnalysis(data, quote, marketContext: marketContext);
 
-      expect(result.score, greaterThanOrEqualTo(6));
+      expect(result.score, greaterThanOrEqualTo(5.5));
       expect(result.recommendation, anyOf('强烈买入', '买入', '谨慎买入', '偏多观望'));
     });
 

@@ -70,6 +70,10 @@ class NextSessionFeatureExtractor {
       riskWarnings.add('趋势偏弱');
     }
 
+    final volatility20 = _volatility20(data, i);
+
+    final featureBins = _extractFeatureBins(data[i]);
+
     return NextSessionFeatures(
       changePct: changePct,
       amplitudePct: amplitudePct,
@@ -92,9 +96,100 @@ class NextSessionFeatureExtractor {
       d: current.d,
       j: current.j,
       macdHist: current.macdHist,
+      volatility20: volatility20,
+      featureBins: featureBins,
       scenarioTags: scenarioTags.toList(growable: false),
       riskWarnings: riskWarnings.toList(growable: false),
     );
+  }
+
+  static double _volatility20(List<HistoryKline> data, int index) {
+    if (index < 20) return 0;
+    final returns = <double>[];
+    for (var j = index - 19; j <= index; j++) {
+      if (j > 0 && data[j - 1].close > 0) {
+        returns.add(data[j].close / data[j - 1].close - 1);
+      }
+    }
+    if (returns.length < 10) return 0;
+    final mean = returns.reduce((a, b) => a + b) / returns.length;
+    final variance =
+        returns.map((r) => (r - mean) * (r - mean)).reduce((a, b) => a + b) /
+            returns.length;
+    return math.sqrt(variance) * math.sqrt(252) * 100;
+  }
+
+  static Map<String, String> _extractFeatureBins(HistoryKline kline) {
+    final bins = <String, String>{};
+
+    if (kline.rsi6.isFinite && kline.rsi6 >= 0 && kline.rsi6 <= 100) {
+      if (kline.rsi6 >= 70) {
+        bins['rsi'] = '超买';
+      } else if (kline.rsi6 >= 50) {
+        bins['rsi'] = '偏强';
+      } else if (kline.rsi6 >= 30) {
+        bins['rsi'] = '偏弱';
+      } else {
+        bins['rsi'] = '超卖';
+      }
+    }
+
+    if (kline.macdHist.isFinite) {
+      if (kline.macdHist > 0.001) {
+        bins['macd_hist'] = '红柱';
+      } else if (kline.macdHist < -0.001) {
+        bins['macd_hist'] = '绿柱';
+      } else {
+        bins['macd_hist'] = '零轴';
+      }
+    }
+
+    if (kline.macdDif.isFinite && kline.macdDea.isFinite) {
+      if (kline.macdDif > kline.macdDea) {
+        bins['macd_cross'] = '金叉区域';
+      } else {
+        bins['macd_cross'] = '死叉区域';
+      }
+    }
+
+    if (kline.k.isFinite && kline.k >= 0 && kline.k <= 100) {
+      if (kline.k >= 80) {
+        bins['kdj'] = '超买';
+      } else if (kline.k >= 50) {
+        bins['kdj'] = '偏多';
+      } else if (kline.k >= 20) {
+        bins['kdj'] = '偏空';
+      } else {
+        bins['kdj'] = '超卖';
+      }
+    }
+
+    if (kline.volMa5 > 0 && kline.volume > 0) {
+      final volRatio = kline.volume / kline.volMa5;
+      if (volRatio >= 1.5) {
+        bins['volume'] = '放量';
+      } else if (volRatio >= 1.0) {
+        bins['volume'] = '正常';
+      } else {
+        bins['volume'] = '缩量';
+      }
+    }
+
+    if (kline.ma5 > 0 && kline.ma10 > 0) {
+      bins['ma5_ma10'] = kline.ma5 > kline.ma10 ? 'MA5上穿' : 'MA5下穿';
+    }
+
+    if (kline.adx14.isFinite && kline.adx14 >= 0 && kline.adx14 <= 100) {
+      if (kline.adx14 >= 25) {
+        bins['adx'] = '趋势明确';
+      } else if (kline.adx14 >= 20) {
+        bins['adx'] = '趋势形成';
+      } else {
+        bins['adx'] = '盘整';
+      }
+    }
+
+    return bins;
   }
 
   static double _changePct(HistoryKline current, HistoryKline? previous) {

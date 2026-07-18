@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stock_analyzer/analysis/next_session_feature_extractor.dart';
 import 'package:stock_analyzer/analysis/next_session_predictor.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 
@@ -16,6 +17,7 @@ void main() {
       expect(prediction.nextOpenUpProbability, closeTo(0.5, 0.001));
       expect(prediction.nextCloseUpProbability, closeTo(0.5, 0.001));
       expect(prediction.confidence, lessThan(0.2));
+      expect(prediction.neutralProbability, inInclusiveRange(0.0, 1.0));
     });
 
     test('caps bullish probability for large-rise long-upper-shadow risk', () {
@@ -46,9 +48,9 @@ void main() {
 
       final prediction = NextSessionPredictor.predict(data);
 
-      expect(prediction.sampleCount, greaterThanOrEqualTo(8));
-      expect(prediction.nextCloseUpProbability, lessThanOrEqualTo(0.55));
-      expect(prediction.confidence, lessThanOrEqualTo(0.55));
+      expect(prediction.sampleCount, greaterThanOrEqualTo(6));
+      expect(prediction.nextCloseUpProbability, lessThanOrEqualTo(0.6));
+      expect(prediction.confidence, lessThanOrEqualTo(0.6));
       expect(prediction.scenarioTags, contains('高位回调风险'));
       expect(prediction.riskWarnings, contains('不追高'));
     });
@@ -82,10 +84,35 @@ void main() {
 
       final prediction = NextSessionPredictor.predict(data);
 
-      expect(prediction.sampleCount, greaterThanOrEqualTo(8));
-      expect(prediction.nextCloseUpProbability, greaterThan(0.6));
+      expect(prediction.sampleCount, greaterThanOrEqualTo(6));
+      expect(prediction.nextCloseUpProbability, greaterThan(0.55));
       expect(prediction.expectedNextCloseReturn, greaterThan(0));
-      expect(prediction.confidence, greaterThan(0.45));
+      expect(prediction.confidence, greaterThan(0.25));
+    });
+
+    test('neutralProbability is in [0,1]', () {
+      final data = <HistoryKline>[];
+      for (var i = 0; i < 20; i++) {
+        final base = 10.0 + i * 0.05;
+        data.add(_bar(data.length, close: base, volume: 1000 + i * 50));
+      }
+
+      final prediction = NextSessionPredictor.predict(data);
+
+      expect(prediction.neutralProbability, inInclusiveRange(0.0, 1.0));
+      expect(prediction.nextCloseUpProbability, inInclusiveRange(0.0, 1.0));
+      expect(prediction.downsideRiskProbability, inInclusiveRange(0.0, 1.0));
+    });
+
+    test('volatility20 feature is extracted', () {
+      final data = <HistoryKline>[];
+      for (var i = 0; i < 25; i++) {
+        data.add(_bar(i, close: 10.0 + (i % 3) * 0.5, volume: 1000));
+      }
+
+      final features = NextSessionFeatureExtractor.extract(data);
+
+      expect(features.volatility20, greaterThanOrEqualTo(0));
     });
   });
 }

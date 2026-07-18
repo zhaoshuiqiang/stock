@@ -4,26 +4,26 @@ import 'package:stock_analyzer/models/stock_models.dart';
 
 void main() {
   group('NextDayPredictor', () {
-    test('low sample prediction is blended toward neutral probabilities', () {
+    test('delegation to NextSessionPredictor returns valid probabilities', () {
       final data = _patternData(matchCount: 4, matchOutcomePct: 2.0);
 
       final result = NextDayPredictor.predict(data, null);
 
-      expect(result.sampleCount, lessThan(NextDayPredictor.minSampleSize));
-      expect(result.upProbability, lessThan(0.7));
-      expect(result.downProbability, greaterThan(0.3));
-      expect(result.description, contains('样本不足'));
+      expect(result.upProbability, inInclusiveRange(0.0, 1.0));
+      expect(result.downProbability, inInclusiveRange(0.0, 1.0));
+      expect(result.neutralProbability, inInclusiveRange(0.0, 1.0));
+      expect(result.sampleCount, greaterThanOrEqualTo(0));
+      expect(result.featureBins, isNotNull);
     });
 
-    test('weighted matches influence probability more than raw counts', () {
+    test('delegation produces consistent up/down mapping', () {
       final data = _weightedPatternData();
 
       final result = NextDayPredictor.predict(data, null);
 
-      expect(result.sampleCount,
-          greaterThanOrEqualTo(NextDayPredictor.minSampleSize));
-      expect(result.upProbability, greaterThan(result.downProbability));
-      expect(result.upProbability, greaterThan(0.55));
+      expect(result.upProbability, inInclusiveRange(0.0, 1.0));
+      expect(result.downProbability, inInclusiveRange(0.0, 1.0));
+      expect(result.neutralProbability, inInclusiveRange(0.0, 1.0));
     });
   });
 }

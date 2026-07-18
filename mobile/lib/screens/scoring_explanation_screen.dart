@@ -20,7 +20,7 @@ class ScoringExplanationScreen extends StatelessWidget {
           _buildSectionTitle('综合评分体系'),
           const SizedBox(height: 8),
           _buildParagraph(
-            '评分系统采用7维加权融合算法，综合技术面、资金面、实时行情、共振信号、市场情绪、基本面和市场结构7个维度，最终输出1-10分的综合评分。',
+            '评分系统采用7维加权融合算法（短线模式8维），综合技术面、资金面、实时行情、共振信号、市场情绪、基本面、市场结构和板块动量等维度，最终输出1-10分的综合评分。惩罚机制采用3层乘法模型：追高风险因子×市场环境因子×预测修正因子。',
             theme,
           ),
           const SizedBox(height: 16),
@@ -92,6 +92,7 @@ class ScoringExplanationScreen extends StatelessWidget {
       {'name': '市场情绪', 'weight': 0.10, 'color': const Color(0xFF03a9f4), 'desc': '新闻情感分析'},
       {'name': '基本面', 'weight': 0.07, 'color': const Color(0xFFe91e63), 'desc': 'PE/PB/市值等估值指标'},
       {'name': '市场结构', 'weight': 0.04, 'color': const Color(0xFF607d8b), 'desc': 'ADX趋势强度+均线对齐'},
+      {'name': '板块动量(短线)', 'weight': 0.10, 'color': const Color(0xFF00bcd4), 'desc': '主线加成/退潮折扣/过热检测(仅短线模式)'},
     ];
 
     return Container(
@@ -222,6 +223,20 @@ class ScoringExplanationScreen extends StatelessWidget {
         ],
       },
       {
+        'title': '板块动量评分 (短线模式)',
+        'color': const Color(0xFF00bcd4),
+        'items': [
+          '主线板块个股：加成1.0-1.3倍',
+          '板块加速(accelerating)：+0.25分',
+          '板块退潮(decelerating+跌>1%)：-0.30分',
+          '板块过热：主线加成受限，仅+0.15',
+          '板块涨停潮(≥3家涨停)：+0.15分',
+          '板块龙头(相对强度>0.8)：+0.10分',
+          '板块跟风(相对强度<0.3)：-0.10分',
+          '退潮折扣：评分×0.85',
+        ],
+      },
+      {
         'title': '市场结构评分 (0-10分)',
         'color': const Color(0xFF607d8b),
         'items': [
@@ -278,51 +293,49 @@ class ScoringExplanationScreen extends StatelessWidget {
   List<Widget> _buildAdjustmentCards(ThemeData theme) {
     final adjustments = [
       {
-        'title': '追高惩罚',
+        'title': '第1层：追高风险因子 [0.40, 1.0]',
         'color': const Color(0xFFef5350),
         'items': [
-          '涨停(>9.5%)：惩罚0.80，不被动量保护削弱',
-          '大涨(8%-9.5%)：惩罚0.82~0.90',
-          '中阳(5%-8%)：惩罚0.88~0.94',
-          '连涨3天以上：加重惩罚',
+          '合并原追高惩罚+乖离率惩罚+趋势一致性',
+          '涨停(>9.5%)：chaseP=0.65',
+          '大涨(8%-9.5%)：chaseP=0.75',
+          '连涨3天+涨幅5%：chaseP=0.92',
+          'BIAS>8%：biasP=0.88(超买)/0.94(超卖减轻)',
+          '近3日跌>5%：trendP=0.70(趋势一致性)',
+          '动量保护：ADX>30+多头排列时惩罚减半',
+          '三层乘积下限0.40',
         ],
       },
       {
-        'title': '乖离率惩罚',
+        'title': '第2层：市场环境因子 [0.50, 1.0]',
         'color': const Color(0xFFff9800),
         'items': [
-          'BIAS>8%：惩罚0.88（超买，均值回归风险）',
-          'BIAS>5%：惩罚0.93',
-          'BIAS>3%：惩罚0.97',
-          '超卖时惩罚减轻（抄底信号）',
+          '合并原大盘调整+下跌折扣+板块过热+金融股折扣',
+          '大盘调整：marketAdjustment×0.4+positionFactor×0.6',
+          '大盘跌>3%：declineFactor=0.80(逆市跑赢可豁免)',
+          '板块过热：heatDiscount折扣',
+          '金融股(券商/银行/保险)：×0.88',
+          '总乘积clamp到[0.50, 1.0]',
         ],
       },
       {
-        'title': '动量保护',
+        'title': '第3层：预测修正因子 [0.85, 1.05]',
         'color': const Color(0xFF4caf50),
         'items': [
-          'ADX>30且均线多头排列：惩罚减半',
-          '放量上涨确认的趋势：保护因子0.5',
-          '多头排列但无量：保护因子0.7',
-          '涨停股不享受动量保护',
+          'NextDayPredictor下跌概率>60%：×0.85',
+          'NextDayPredictor上涨概率>60%：×1.05',
+          'NextSession下行风险>55%且置信度>0.5：×0.90',
+          '总惩罚乘积不低于0.40（保底机制）',
         ],
       },
       {
-        'title': '板块情绪过热检测',
-        'color': const Color(0xFF9c27b0),
+        'title': '板块动量加成/折扣',
+        'color': const Color(0xFF00bcd4),
         'items': [
-          '板块连涨3天+涨停家数≥5：过热',
-          '板块涨幅>8%+涨停家数≥8：过热',
-          '过热板块个股评分乘以0.85折扣',
-          '避免追高热点板块',
-        ],
-      },
-      {
-        'title': '行业RS折扣',
-        'color': const Color(0xFF03a9f4),
-        'items': [
-          '行业相对强度排名后30%：评分×0.90',
-          '行业内排名靠后的"强信号"是补涨陷阱',
+          '主线板块：评分×mainLineBonus(1.0-1.3)',
+          '板块退潮：评分×0.85',
+          '板块过热：主线加成受限',
+          '行业RS排名后30%：评分×0.90',
         ],
       },
     ];

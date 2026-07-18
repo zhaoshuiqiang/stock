@@ -5,13 +5,13 @@ import 'signal_detector.dart';
 /// 信号层：合并分层信号与特有信号，提供统一的信号检测入口
 class SignalLayer {
   /// 检测所有信号：先获取分层信号，再合并特有信号（去重）
-  static List<SignalItem> detectAllSignals(List<HistoryKline> data) {
+  static List<SignalItem> detectAllSignals(List<HistoryKline> data, {String? code}) {
     if (data.isEmpty || data.length < 2) return [];
 
     // 获取分层信号
     List<SignalItem> signals;
     try {
-      signals = SignalDetector.detectLayeredSignals(data);
+      signals = SignalDetector.detectLayeredSignals(data, code: code);
     } catch (e) {
       debugPrint('SignalLayer.detectAllSignals: detectLayeredSignals failed: $e');
       signals = [];
