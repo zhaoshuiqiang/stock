@@ -408,7 +408,7 @@ class AnalysisResultCard extends StatelessWidget {
   }
 
   /// 获取评分颜色（与comprehensive_scorer推荐逻辑一致）
-  Color _getScoreColor(int score) {
+  Color _getScoreColor(double score) {
     if (score >= 8) return const Color(0xFF26a69a); // 强烈买入 (8-10)
     if (score >= 7) return const Color(0xFF4caf50); // 买入 (7)
     if (score >= 6) return const Color(0xFF8bc34a); // 谨慎买入 (6)

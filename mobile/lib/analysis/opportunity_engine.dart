@@ -44,7 +44,7 @@ class OpportunityResult {
   final String name;
   final double price;
   final double changePct;
-  final int score;
+  final double score;
   final String recommendation;
   final String riskLevel;
   final int buySignalCount;
@@ -125,7 +125,7 @@ class OpportunityResult {
       name: map['name'] as String,
       price: (map['price'] as num?)?.toDouble() ?? 0,
       changePct: (map['change_pct'] as num?)?.toDouble() ?? 0,
-      score: (map['score'] as num?)?.toInt() ?? 0,
+      score: (map['score'] as num?)?.toDouble() ?? 0,
       recommendation: map['recommendation'] as String? ?? '',
       riskLevel: map['risk_level'] as String? ?? '',
       buySignalCount: (map['buy_signal_count'] as num?)?.toInt() ?? 0,

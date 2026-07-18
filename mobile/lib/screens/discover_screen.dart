@@ -1694,7 +1694,7 @@ class DiscoverScreenState extends State<DiscoverScreen>
   Widget _buildMainLineCard(Map<String, dynamic> p, int rank) {
     final code = p['code'] as String? ?? '';
     final name = p['name'] as String? ?? '';
-    final score = (p['score'] as num?)?.toInt() ?? 0;
+    final score = (p['score'] as num?)?.toDouble() ?? 0.0;
     final rec = p['recommendation'] as String? ?? '';
     final sector = p['sector'] as String? ?? '';
     final bonus = (p['bonus'] as num?)?.toDouble() ?? 1.0;

@@ -89,7 +89,7 @@ class DecisionSnapshotRecord {
   final double evidenceConfidence;
   final String recommendationLevel;
   final String recommendationLabel;
-  final int legacyScore;
+  final double legacyScore;
   final bool actionable;
   final List<String> recommendationGates;
   final MarketRegime marketRegime;
@@ -165,7 +165,7 @@ class DecisionSnapshotRecord {
         evidenceConfidence: 0,
         recommendationLevel: 'neutralWatch',
         recommendationLabel: '中性',
-        legacyScore: 5,
+        legacyScore: 5.0,
         actionable: false,
         marketRegime: MarketRegime.unknown,
         modelVersion: 'test',
@@ -236,7 +236,7 @@ class DecisionSnapshotRecord {
         evidenceConfidence: (map['evidence_confidence'] as num).toDouble(),
         recommendationLevel: map['recommendation_level'] as String,
         recommendationLabel: map['recommendation_label'] as String,
-        legacyScore: (map['legacy_score'] as num).toInt(),
+        legacyScore: (map['legacy_score'] as num).toDouble(),
         actionable: _trackingBool(map['actionable']),
         recommendationGates:
             _trackingStringList(map['recommendation_gates_json']),
@@ -1563,7 +1563,7 @@ class AnalysisResult {
   final QuoteData? quote;
   final Map<String, dynamic> indicators;
   final List<SignalItem> signals;
-  final int score;
+  final double score;
   final String recommendation;
   final String riskLevel;
   final List<String> riskFactors;
@@ -1573,20 +1573,16 @@ class AnalysisResult {
   final List<Map<String, dynamic>> confluenceDetails;
   final List<String> reasons;
   final List<Map<String, String>> opportunities;
-
-  // 新增字段
-  final List<TradingStrategy> shortTermStrategies; // 短线策略列表
-  final List<TradingStrategy> longTermStrategies; // 长线策略列表
-  final MarketContext? marketContext; // 市场环境
-  final double confidenceScore; // 推荐可信度（0.0-1.0）
-  final List<RecommendationReason> detailedReasons; // 详细推荐理由
-  final Map<String, BacktestResult>? backtestResults; // 回测结果
-  final String? backtestSummary; // 回测综合摘要
-
-  // 多维分析新增字段 - 参考 TradingAgents
-  final FundamentalScore? fundamentalScore; // 基本面评分
-  final NewsSentiment? newsSentiment; // 新闻情绪
-  final List<ValidatedSignal>? validatedSignals; // 对抗验证信号
+  final List<TradingStrategy> shortTermStrategies;
+  final List<TradingStrategy> longTermStrategies;
+  final MarketContext? marketContext;
+  final double confidenceScore;
+  final List<RecommendationReason> detailedReasons;
+  final Map<String, BacktestResult>? backtestResults;
+  final String? backtestSummary;
+  final FundamentalScore? fundamentalScore;
+  final NewsSentiment? newsSentiment;
+  final List<ValidatedSignal>? validatedSignals;
   final Map<String, double>? confidenceBreakdown; // 置信度分项明细
   final double?
       calculatorConfidence; // v3.19: ConfidenceCalculator 输出的综合置信度（含回测胜率/预测准确率/对抗验证），用于与证据置信度对照展示
@@ -1624,7 +1620,7 @@ class AnalysisResult {
     this.quote,
     this.indicators = const {},
     this.signals = const [],
-    this.score = 0,
+    this.score = 0.0,
     this.recommendation = '',
     this.riskLevel = '中等',
     this.riskFactors = const [],
@@ -1721,7 +1717,7 @@ class AnalysisResult {
           : null,
       indicators: json['indicators'] as Map<String, dynamic>? ?? {},
       signals: signals,
-      score: json['score'] ?? 0,
+      score: (json['score'] as num?)?.toDouble() ?? 0.0,
       recommendation: json['recommendation'] ?? json['advice'] ?? '',
       riskLevel: json['risk_level'] ?? json['risk'] ?? '中等',
       riskFactors: json['risk_factors'] != null
@@ -1872,7 +1868,7 @@ class AnalysisResult {
     QuoteData? quote,
     Map<String, dynamic>? indicators,
     List<SignalItem>? signals,
-    int? score,
+    double? score,
     String? recommendation,
     String? riskLevel,
     List<String>? riskFactors,
@@ -2308,7 +2304,7 @@ class ArchiveRecord {
   final String name;
   final double price;
   final double changePct;
-  final int score;
+  final double score;
   final String recommendation;
   final String riskLevel;
   final int buySignalCount;
@@ -2364,7 +2360,7 @@ class ArchiveRecord {
       name: map['name'] as String,
       price: (map['price'] as num?)?.toDouble() ?? 0.0,
       changePct: (map['change_pct'] as num?)?.toDouble() ?? 0.0,
-      score: (map['score'] as num?)?.toInt() ?? 0,
+      score: (map['score'] as num?)?.toDouble() ?? 0.0,
       recommendation: map['recommendation'] as String,
       riskLevel: map['risk_level'] as String,
       buySignalCount: (map['buy_signal_count'] as num?)?.toInt() ?? 0,
@@ -2422,12 +2418,11 @@ class ExploreResult {
   final double changePct;
   final double pe;
   final double pb;
-  final int score;
+  final double score;
   final String recommendation;
   final String sector;
   final int confluenceScore;
   final DateTime analyzedAt;
-  // Phase 2-3: 概念标签 + 收益追踪
   final String? conceptSummary;
   final double? day5Return;
   final double? day10Return;
@@ -2441,7 +2436,7 @@ class ExploreResult {
     this.changePct = 0,
     this.pe = 0,
     this.pb = 0,
-    this.score = 0,
+    this.score = 0.0,
     this.recommendation = '',
     this.sector = '',
     this.confluenceScore = 0,
@@ -2491,7 +2486,7 @@ class ExploreResult {
       changePct: (map['change_pct'] as num?)?.toDouble() ?? 0,
       pe: (map['pe'] as num?)?.toDouble() ?? 0,
       pb: (map['pb'] as num?)?.toDouble() ?? 0,
-      score: (map['score'] as num?)?.toInt() ?? 0,
+      score: (map['score'] as num?)?.toDouble() ?? 0.0,
       recommendation: map['recommendation'] as String? ?? '',
       sector: map['sector'] as String? ?? '',
       confluenceScore: (map['confluence_score'] as num?)?.toInt() ?? 0,

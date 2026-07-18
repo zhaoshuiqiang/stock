@@ -30,10 +30,10 @@ void main() {
       expect(analysis.confidenceScore,
           analysis.shortTermDecision!.evidenceConfidence / 100);
 
-      expect(analysis.dimensionScores?['短线交易'], isNotNull);
-      expect(analysis.dimensionScores!['短线交易'], greaterThanOrEqualTo(5));
+      expect(analysis.dimensionScores?['趋势'], isNotNull);
+      expect(analysis.dimensionScores!['趋势'], greaterThanOrEqualTo(3));
       expect(
-        analysis.reasons.any((r) => r.contains('短线交易')),
+        analysis.reasons.any((r) => r.contains('趋势') || r.contains('反转动量')),
         isTrue,
       );
     });

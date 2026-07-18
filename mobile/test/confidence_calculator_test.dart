@@ -111,7 +111,7 @@ void main() {
         direction: RecommendationDirection.neutral,
       );
 
-      expect(bd['signal_freshness'], 0.5);
+      expect(bd['signal_freshness'], 0.35);
     });
   });
 }

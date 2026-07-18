@@ -46,7 +46,7 @@ class TradingDashboard extends StatelessWidget {
                     direction: analysis!.shortTermDecision!.direction,
                     level: RecommendationLevel.neutralWatch,
                     label: analysis!.recommendation,
-                    legacyScore: analysis!.score.clamp(1, 10),
+                    legacyScore: analysis!.score.clamp(1.0, 10.0),
                     actionable: analysis!.score >= 6,
                   ),
             )
@@ -211,7 +211,7 @@ class TradingDashboard extends StatelessWidget {
 
     return Row(
       children: [
-        _buildMetricChip('评分', '${a.score}/10', scoreColor),
+        _buildMetricChip('评分', '${a.score.toStringAsFixed(1)}/10', scoreColor),
         const SizedBox(width: 8),
         _buildMetricChip('推荐', a.recommendation, scoreColor),
         const SizedBox(width: 8),
@@ -258,7 +258,7 @@ class TradingDashboard extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                '综合 ${a.score}/10',
+                '综合 ${a.score.toStringAsFixed(1)}/10',
                 style: const TextStyle(color: Color(0xFF58A6FF), fontSize: 12),
               ),
             ],

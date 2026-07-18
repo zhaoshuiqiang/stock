@@ -23,8 +23,7 @@ void main() {
         mainNetFlow: 1000000,
         mainNetFlowRate: 12.0,
       );
-      // v3.34: cp>8追高惩罚-1.2, 5.0 - 1.2 + 1.5 + 0.8 = 6.1
-      expect(RealtimeScorer.score(quote), equals(6.1));
+      expect(RealtimeScorer.score(quote), closeTo(7.3, 0.01));
     });
 
     test('strong fall gets low score', () {
@@ -108,8 +107,7 @@ void main() {
         mainNetFlow: 500000,
         mainNetFlowRate: 3.0,
       );
-      // v3.34: cp=3.0, cp>3为false→cp>1:+0.8, 5.0+0.8+0.5+0.8=7.1
-      expect(RealtimeScorer.score(quote), equals(7.1));
+      expect(RealtimeScorer.score(quote), closeTo(7.3, 0.01));
     });
 
     test('zero turnover does not affect score', () {

@@ -88,6 +88,7 @@ class ShortTermRiskEvaluator {
       }
     }
     if ((quote?.changePct ?? 0) >= 8) score += 15;
+    if ((quote?.changePct ?? 0) >= 5 && _consecutiveRiseDays(data) >= 3) score += 10;
     final wr14 = last.wr14;
     if (last.rsi6 >= 80 || wr14 != null && wr14 <= 10) score += 10;
     if (last.rsi6 > 0 && last.rsi6 <= 20 || wr14 != null && wr14 >= 90) {
@@ -131,6 +132,19 @@ class ShortTermRiskEvaluator {
     if (normalized.startsWith('8') || normalized.startsWith('43')) return 29;
     if (normalized.startsWith('688') || normalized.startsWith('30')) return 19;
     return 9.5;
+  }
+
+  static int _consecutiveRiseDays(List<HistoryKline> data) {
+    if (data.length < 2) return 0;
+    int count = 0;
+    for (int i = data.length - 1; i >= 0; i--) {
+      if (data[i].close > data[i].open && data[i].changePct > 0) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    return count;
   }
 
   static double _bounded(double value) => value.clamp(0.0, 100.0).toDouble();

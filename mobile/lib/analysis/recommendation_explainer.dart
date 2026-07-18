@@ -16,6 +16,9 @@ class RecommendationExplainer {
   /// [mainNetFlow] - 主力净流入金额（万元），正=流入，负=流出
   /// [score] - 综合评分 (0-10)
   /// [recommendation] - 推荐等级文本
+  static String _fmtScore(double s) =>
+      s == s.roundToDouble() ? s.toInt().toString() : s.toStringAsFixed(1);
+
   static String explain({
     Map<String, double>? dimensionScores,
     List<String> topSignals = const [],
@@ -23,12 +26,11 @@ class RecommendationExplainer {
     int sellSignalCount = 0,
     int confluenceScore = 0,
     double mainNetFlow = 0,
-    int score = 0,
+    double score = 0,
     String recommendation = '',
   }) {
     final parts = <String>[];
 
-    // 1. 信号维度：提取最强信号
     final signalPart = _formatSignalPart(
       topSignals: topSignals,
       buyCount: buySignalCount,
@@ -36,16 +38,13 @@ class RecommendationExplainer {
     );
     if (signalPart.isNotEmpty) parts.add(signalPart);
 
-    // 2. 资金维度
     final capitalPart = _formatCapitalPart(mainNetFlow, dimensionScores);
     if (capitalPart.isNotEmpty) parts.add(capitalPart);
 
-    // 3. 共振维度
     final confluencePart =
         _formatConfluencePart(confluenceScore, dimensionScores);
     if (confluencePart.isNotEmpty) parts.add(confluencePart);
 
-    // 4. 风险提示（卖出信号多或评分低时）
     if (sellSignalCount >= 3 || (score > 0 && score < 5)) {
       final risks = <String>[];
       if (sellSignalCount >= 3) risks.add('卖信号偏多($sellSignalCount)');
@@ -55,19 +54,18 @@ class RecommendationExplainer {
       }
     }
 
+    final scoreStr = _fmtScore(score);
     if (parts.isEmpty) {
-      // 兜底：用评分和推荐等级
       if (score > 0) {
-        if (recommendation.trim().isEmpty) return '综合评分 $score/10';
-        return '综合评分 $score/10，$recommendation';
+        if (recommendation.trim().isEmpty) return '综合评分 $scoreStr/10';
+        return '综合评分 $scoreStr/10，$recommendation';
       }
       return '暂无明显驱动因素';
     }
 
     final explanation = parts.join(' + ');
-    // 追加评分摘要
     if (score > 0) {
-      return '$explanation（评分$score/10）';
+      return '$explanation（评分$scoreStr/10）';
     }
     return explanation;
   }
@@ -143,7 +141,7 @@ class RecommendationExplainer {
     int sellSignalCount = 0,
     int confluenceScore = 0,
     double mainNetFlow = 0,
-    int score = 0,
+    double score = 0,
     String recommendation = '',
   }) {
     final full = explain(

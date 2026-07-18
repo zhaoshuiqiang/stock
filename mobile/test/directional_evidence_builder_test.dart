@@ -141,9 +141,9 @@ void main() {
       final result = DirectionalEvidenceBuilder.build(
         _input(
           data: <HistoryKline>[
-            _kline(0, close: 100),
-            _kline(1, close: 101),
-            _kline(2, close: 102),
+            _kline(0, close: 100, open: 99, changePct: 1),
+            _kline(1, close: 101, open: 100, changePct: 1),
+            _kline(2, close: 102, open: 101, changePct: 1),
             _kline(3,
                 close: 110.16, open: 102, changePct: 8, rsi6: 78, wr14: 8),
           ],
@@ -385,16 +385,16 @@ void main() {
       final result = DirectionalEvidenceBuilder.build(
         _input(
           data: <HistoryKline>[
-            _kline(0, close: 100),
-            _kline(1, close: 101),
-            _kline(2, close: 102),
+            _kline(0, close: 100, open: 99, changePct: 1),
+            _kline(1, close: 101, open: 100, changePct: 1),
+            _kline(2, close: 102, open: 101, changePct: 1),
             _kline(3,
                 close: 110.16,
                 open: 102,
                 changePct: 8,
-                rsi6: 65, // RSI<70, so guard falls through to WR14/bias6
-                wr14: -999, // WR14=-999 treated as null, use bias6 fallback
-                bias6: 9), // bias6>=8=overbought
+                rsi6: 65,
+                wr14: -999,
+                bias6: 9),
           ],
           buySignals: <SignalItem>[
             _signal(type: 'buy', indicator: 'MA', strength: 90),

@@ -1,4 +1,7 @@
+import '../models/short_term_decision.dart';
 import '../models/stock_models.dart';
+import 'backtest_engine.dart';
+import 'market_structure_analyzer.dart';
 
 class EvidenceConfidenceResult {
   final double score;
@@ -13,14 +16,22 @@ class EvidenceConfidenceResult {
   double get dataCoverage => components['data_coverage'] ?? 0;
   double get freshness => components['freshness'] ?? 0;
   double get historyStability => components['history_stability'] ?? 0;
+  double get fundamentalSupport => components['fundamental_support'] ?? 0;
+  double get sentimentConfirm => components['sentiment_confirm'] ?? 0;
+  double get marketEnvironment => components['market_environment'] ?? 0;
+  double get backtestWinRate => components['backtest_winrate'] ?? 0;
 }
 
 class EvidenceConfidenceCalculator {
   static const Map<String, double> weights = {
-    'component_agreement': 0.40,
-    'data_coverage': 0.25,
-    'freshness': 0.20,
-    'history_stability': 0.15,
+    'component_agreement': 0.25,
+    'data_coverage': 0.20,
+    'freshness': 0.15,
+    'history_stability': 0.10,
+    'fundamental_support': 0.10,
+    'sentiment_confirm': 0.08,
+    'market_environment': 0.07,
+    'backtest_winrate': 0.05,
   };
 
   static EvidenceConfidenceResult calculate({
@@ -28,13 +39,24 @@ class EvidenceConfidenceCalculator {
     required List<SignalItem> directionalSignals,
     required List<String> dataQualityFlags,
     double historicalStability = 50,
+    FundamentalScore? fundamentalScore,
+    NewsSentiment? newsSentiment,
+    MarketContext? marketContext,
+    MarketStructureResult? marketStructure,
+    Map<String, BacktestResult>? backtestResults,
+    RecommendationDirection? direction,
     DateTime? now,
   }) {
+    final resolvedDirection = direction ?? _inferDirection(directionComponents);
     final components = <String, double>{
       'component_agreement': _agreement(directionComponents),
       'data_coverage': _coverage(directionComponents, dataQualityFlags),
       'freshness': _freshness(directionalSignals, now ?? DateTime.now()),
       'history_stability': historicalStability,
+      'fundamental_support': _fundamentalSupport(fundamentalScore, resolvedDirection),
+      'sentiment_confirm': _sentimentConfirm(newsSentiment, resolvedDirection),
+      'market_environment': _marketEnvironment(marketContext, marketStructure, resolvedDirection),
+      'backtest_winrate': _backtestWinRate(backtestResults),
     }.map((key, value) => MapEntry(key, _bounded(value)));
     final score = components.entries.fold<double>(
       0,
@@ -44,6 +66,75 @@ class EvidenceConfidenceCalculator {
       score: _bounded(score),
       components: Map.unmodifiable(components),
     );
+  }
+
+  static RecommendationDirection _inferDirection(Map<String, double> components) {
+    final sum = components.values.fold<double>(0, (a, b) => a + b);
+    if (sum >= 0.15) return RecommendationDirection.bullish;
+    if (sum <= -0.15) return RecommendationDirection.bearish;
+    return RecommendationDirection.neutral;
+  }
+
+  static double _fundamentalSupport(FundamentalScore? fs, RecommendationDirection dir) {
+    if (fs == null) return 50;
+    if (dir == RecommendationDirection.bullish && fs.totalScore >= 6) {
+      return (70 + (fs.totalScore - 6) * 10).clamp(0.0, 100.0);
+    }
+    if (dir == RecommendationDirection.bearish && fs.totalScore <= 4) {
+      return (70 + (4 - fs.totalScore) * 10).clamp(0.0, 100.0);
+    }
+    if (dir == RecommendationDirection.bullish && fs.totalScore < 4) return 30;
+    if (dir == RecommendationDirection.bearish && fs.totalScore > 6) return 30;
+    return 50;
+  }
+
+  static double _sentimentConfirm(NewsSentiment? ns, RecommendationDirection dir) {
+    if (ns == null) return 50;
+    if (dir == RecommendationDirection.bullish && ns.score > 2) {
+      return (70 + (ns.score - 2) * 3).clamp(0.0, 100.0);
+    }
+    if (dir == RecommendationDirection.bearish && ns.score < -2) {
+      return (70 + (-2 - ns.score) * 3).clamp(0.0, 100.0);
+    }
+    if (dir == RecommendationDirection.bullish && ns.score < -2) return 30;
+    if (dir == RecommendationDirection.bearish && ns.score > 2) return 30;
+    return 50;
+  }
+
+  static double _marketEnvironment(
+    MarketContext? mc,
+    MarketStructureResult? ms,
+    RecommendationDirection dir,
+  ) {
+    var score = 50.0;
+    if (mc != null) {
+      if (dir == RecommendationDirection.bullish && mc.avgChangePct > 0.5) score += 20;
+      else if (dir == RecommendationDirection.bearish && mc.avgChangePct < -0.5) score += 20;
+      else if (dir == RecommendationDirection.bullish && mc.avgChangePct < -1) score -= 20;
+      else if (dir == RecommendationDirection.bearish && mc.avgChangePct > 1) score -= 20;
+    }
+    if (ms != null) {
+      final isBullish = ms.structure == MarketStructure.bullTrend ||
+          ms.structure == MarketStructure.accumulation;
+      final isBearish = ms.structure == MarketStructure.bearTrend ||
+          ms.structure == MarketStructure.distribution;
+      if (dir == RecommendationDirection.bullish && isBullish) score += 15;
+      else if (dir == RecommendationDirection.bearish && isBearish) score += 15;
+      else if (dir == RecommendationDirection.bullish && isBearish) score -= 15;
+      else if (dir == RecommendationDirection.bearish && isBullish) score -= 15;
+    }
+    return score;
+  }
+
+  static double _backtestWinRate(Map<String, BacktestResult>? results) {
+    if (results == null || results.isEmpty) return 50;
+    final winRates = results.values
+        .where((r) => r.totalSignals > 0 && r.winRate > 0)
+        .map((r) => r.winRate)
+        .toList();
+    if (winRates.isEmpty) return 50;
+    final avg = winRates.reduce((a, b) => a + b) / winRates.length;
+    return (30 + avg * 70).clamp(0.0, 100.0);
   }
 
   static double _agreement(Map<String, double> components) {

@@ -53,7 +53,7 @@ Future<Database> _openRecommendationDb() async {
 
 AnalysisResult _analysis({
   required String code,
-  int score = 6,
+  double score = 6,
   Map<String, double>? dimensionScores,
 }) {
   return AnalysisResult(

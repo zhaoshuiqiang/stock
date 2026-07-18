@@ -29,7 +29,7 @@ class SuggestionGenerator {
     required QuoteData? quote,
     required List<SignalItem> buySignals,
     required List<SignalItem> sellSignals,
-    required int totalScore,
+    required double totalScore,
     double confidenceScore = 0.5,
     MarketStructureResult? marketStructure,
   }) {

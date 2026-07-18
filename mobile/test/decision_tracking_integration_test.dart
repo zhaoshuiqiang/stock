@@ -57,7 +57,7 @@ void main() {
     expect(snapshots, hasLength(1));
     expect(snapshots.single['direction'], 'bearish');
     expect(snapshots.single['recommendation_level'], 'strongBearish');
-    expect(snapshots.single['legacy_score'], 1);
+    expect(snapshots.single['legacy_score'], closeTo(1.4, 0.01));
     expect(await db.query('archive_records'), isEmpty);
     expect(await db.query('recommendation_tracking'), isEmpty);
     await db.close();

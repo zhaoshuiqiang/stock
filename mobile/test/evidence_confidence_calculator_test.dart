@@ -5,10 +5,14 @@ import 'package:stock_analyzer/models/stock_models.dart';
 void main() {
   test('uses the specified confidence component weights', () {
     expect(EvidenceConfidenceCalculator.weights, {
-      'component_agreement': 0.40,
-      'data_coverage': 0.25,
-      'freshness': 0.20,
-      'history_stability': 0.15,
+      'component_agreement': 0.25,
+      'data_coverage': 0.20,
+      'freshness': 0.15,
+      'history_stability': 0.10,
+      'fundamental_support': 0.10,
+      'sentiment_confirm': 0.08,
+      'market_environment': 0.07,
+      'backtest_winrate': 0.05,
     });
   });
 

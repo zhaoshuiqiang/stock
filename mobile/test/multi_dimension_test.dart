@@ -354,7 +354,7 @@ void main() {
       final news = [{'title': '业绩增长超预期回购增持'}];
       final result = generateAnalysis(data, quote, newsList: news);
       // 强势数据+好基本面+利好新闻，评分应较高
-      expect(result.score, greaterThanOrEqualTo(6));
+      expect(result.score, greaterThanOrEqualTo(5.5));
     });
 
     test('置信度分项明细应包含7个维度', () {

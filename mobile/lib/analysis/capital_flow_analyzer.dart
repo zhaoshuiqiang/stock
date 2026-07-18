@@ -2,8 +2,8 @@ import '../models/stock_models.dart';
 
 class CapitalFlowResult {
   final double score;
-  final double mainNetFlow5d;
-  final double mainNetFlow10d;
+  final double priceVolumeMomentum5d;
+  final double priceVolumeMomentum10d;
   final double flowTrend;
   final String trendLabel;
   final List<String> signals;
@@ -11,7 +11,7 @@ class CapitalFlowResult {
   final String? accumulationPattern;
 
   CapitalFlowResult({
-    required this.score, required this.mainNetFlow5d, required this.mainNetFlow10d,
+    required this.score,     required this.priceVolumeMomentum5d, required this.priceVolumeMomentum10d,
     required this.flowTrend, required this.trendLabel, required this.signals,
     this.continuityScore = 0, this.accumulationPattern,
   });
@@ -24,7 +24,7 @@ class CapitalFlowAnalyzer {
   }) {
     final signals = <String>[];
     double score = 5.0;
-    double mainNetFlow5d = 0, mainNetFlow10d = 0, flowTrend = 0;
+    double priceVolumeMomentum5d = 0, priceVolumeMomentum10d = 0, flowTrend = 0;
 
     if (quote != null && (quote.mainNetFlow != 0 || quote.mainNetFlowRate != 0)) {
       final rate = quote.mainNetFlowRate;
@@ -47,10 +47,10 @@ class CapitalFlowAnalyzer {
       final avgVol5 = recent5.map((d) => d.volume).reduce((a, b) => a + b) / 5;
       final avgVol10 = recent10.map((d) => d.volume).reduce((a, b) => a + b) / 10;
 
-      if (priceChange5d > 3 && avgVol5 > avgVol10 * 1.3) { score += 1.0; signals.add('近5日放量上涨，主力做多'); }
+      if (priceChange5d > 3 && avgVol5 > avgVol10 * 1.3) { score += 1.0; signals.add('近5日放量上涨，量价动量偏多'); }
       if (priceChange5d < -3 && avgVol5 < avgVol10 * 0.7) { score += 0.5; signals.add('近5日缩量下跌，抛压减轻'); }
       if (priceChange5d < -3 && avgVol5 > avgVol10 * 1.3) { score -= 1.5; signals.add('近5日放量下跌，注意风险'); }
-      if (priceChange5d > 5 && avgVol5 < avgVol10 * 0.8 && priceChange10d > 8) { score += 0.8; signals.add('趋势上涨中缩量，主力锁仓'); }
+      if (priceChange5d > 5 && avgVol5 < avgVol10 * 0.8 && priceChange10d > 8) { score += 0.8; signals.add('趋势上涨中缩量，量价动量锁仓'); }
       if (priceChange10d > 5 && priceChange5d < 2 && avgVol5 < avgVol10 * 0.7) { score -= 0.5; signals.add('量价背离：上涨趋势量能衰减'); }
 
       final obv5ago = klineData[klineData.length - 5].obv;
@@ -66,9 +66,9 @@ class CapitalFlowAnalyzer {
       // v3.19: 原 volFactor5d/volFactor10d 计算式完全相同（复制粘贴），合并为单一 volFactor。
       final priceFactor5d = priceChange5d / 100.0;
       final volFactor = avgVol10 > 0 ? avgVol5 / avgVol10 : 1.0;
-      mainNetFlow5d = priceFactor5d * volFactor * 10;
-      mainNetFlow10d = (priceChange10d / 100.0) * volFactor * 10;
-      flowTrend = mainNetFlow5d > 0.1 ? 0.7 : mainNetFlow5d > 0.03 ? 0.3 : mainNetFlow5d > -0.03 ? 0 : mainNetFlow5d > -0.1 ? -0.3 : -0.7;
+      priceVolumeMomentum5d = priceFactor5d * volFactor * 10;
+      priceVolumeMomentum10d = (priceChange10d / 100.0) * volFactor * 10;
+      flowTrend = priceVolumeMomentum5d > 0.1 ? 0.7 : priceVolumeMomentum5d > 0.03 ? 0.3 : priceVolumeMomentum5d > -0.03 ? 0 : priceVolumeMomentum5d > -0.1 ? -0.3 : -0.7;
     }
 
     if (klineData.length >= 20 && klineData.last.volMa5 > 0) {
@@ -99,15 +99,15 @@ class CapitalFlowAnalyzer {
         final early10 = klineData.sublist(klineData.length - 15, klineData.length - 5);
         final avgVol5 = recent5.map((d) => d.volume).reduce((a, b) => a + b) / 5;
         final avgVolEarly10 = early10.map((d) => d.volume).reduce((a, b) => a + b) / 10;
-        if (avgVol5 < avgVolEarly10 * 0.6) { score -= 1.0; signals.add('大涨后缩量，主力派发迹象'); }
+        if (avgVol5 < avgVolEarly10 * 0.6) { score -= 1.0; signals.add('大涨后缩量，量价动量派发'); }
       }
     }
 
-    String tl = '资金流向平衡';
-    if (flowTrend > 0.5) tl = '资金持续流入';
-    else if (flowTrend > 0.1) tl = '资金温和流入';
-    else if (flowTrend < -0.5) tl = '资金持续流出';
-    else if (flowTrend < -0.1) tl = '资金温和流出';
+    String tl = '量价动量平衡';
+    if (flowTrend > 0.5) tl = '量价动量偏多';
+    else if (flowTrend > 0.1) tl = '量价动量温和偏多';
+    else if (flowTrend < -0.5) tl = '量价动量偏空';
+    else if (flowTrend < -0.1) tl = '量价动量温和偏空';
 
     double contScore = 0;
     String? accumPattern;
@@ -122,12 +122,12 @@ class CapitalFlowAnalyzer {
         else if (isOutflow && consecutiveInflow == 0) consecutiveOutflow++;
         else break;
       }
-      if (consecutiveInflow >= 5) { contScore = 2.5; signals.add('连续5日主力净流入'); }
-      else if (consecutiveInflow >= 3) { contScore = 1.5; signals.add('连续${consecutiveInflow}日主力净流入'); }
-      else if (consecutiveInflow >= 2) { contScore = 0.8; signals.add('连续2日主力净流入'); }
-      if (consecutiveOutflow >= 5) { contScore = -2.5; signals.add('连续5日主力净流出'); }
-      else if (consecutiveOutflow >= 3) { contScore = -1.5; signals.add('连续${consecutiveOutflow}日主力净流出'); }
-      else if (consecutiveOutflow >= 2) { contScore = -0.8; signals.add('连续2日主力净流出'); }
+      if (consecutiveInflow >= 5) { contScore = 2.5; signals.add('连续5日量价动量偏多'); }
+      else if (consecutiveInflow >= 3) { contScore = 1.5; signals.add('连续${consecutiveInflow}日量价动量偏多'); }
+      else if (consecutiveInflow >= 2) { contScore = 0.8; signals.add('连续2日量价动量偏多'); }
+      if (consecutiveOutflow >= 5) { contScore = -2.5; signals.add('连续5日量价动量偏空'); }
+      else if (consecutiveOutflow >= 3) { contScore = -1.5; signals.add('连续${consecutiveOutflow}日量价动量偏空'); }
+      else if (consecutiveOutflow >= 2) { contScore = -0.8; signals.add('连续2日量价动量偏空'); }
       score += contScore;
 
       if (klineData.length >= 20) {
@@ -157,7 +157,7 @@ class CapitalFlowAnalyzer {
     }
 
     score = score.clamp(0.0, 10.0);
-    return CapitalFlowResult(score: score, mainNetFlow5d: mainNetFlow5d, mainNetFlow10d: mainNetFlow10d,
+    return CapitalFlowResult(score: score, priceVolumeMomentum5d: priceVolumeMomentum5d, priceVolumeMomentum10d: priceVolumeMomentum10d,
         flowTrend: flowTrend, trendLabel: tl, signals: signals,
         continuityScore: contScore, accumulationPattern: accumPattern);
   }

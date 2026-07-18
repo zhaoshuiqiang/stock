@@ -287,7 +287,7 @@ class RecommendationDecision {
   final RecommendationDirection direction;
   final RecommendationLevel level;
   final String label;
-  final int legacyScore;
+  final double legacyScore;
   final bool actionable;
   final List<String> gates;
 
@@ -321,11 +321,7 @@ class RecommendationDecision {
         RecommendationLevel.neutralWatch,
       ),
       label: json['label'] as String? ?? '',
-      legacyScore: _intValue(
-        json['legacy_score'],
-        'legacy_score',
-        fallback: 5,
-      ),
+      legacyScore: (json['legacy_score'] as num?)?.toDouble() ?? 5.0,
       actionable: json['actionable'] as bool? ?? false,
       gates: _stringList(json['gates']),
     );

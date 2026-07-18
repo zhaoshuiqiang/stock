@@ -59,13 +59,12 @@ void main() {
       final result = CapitalFlowAnalyzer.analyze(klineData: klines, quote: quote);
 
       // 上涨+放量时，5日和10日资金流向都应为正
-      expect(result.mainNetFlow5d, greaterThan(0),
-          reason: '放量上涨时5日资金流向应为正');
-      expect(result.mainNetFlow10d, greaterThan(0),
-          reason: '放量上涨时10日资金流向应为正');
-      // 两者符号一致
-      expect(result.mainNetFlow5d * result.mainNetFlow10d, greaterThanOrEqualTo(0),
-          reason: '5日和10日资金流向符号应一致');
+      expect(result.priceVolumeMomentum5d, greaterThan(0),
+          reason: '放量上涨时5日量价动量应为正');
+      expect(result.priceVolumeMomentum10d, greaterThan(0),
+          reason: '放量上涨时10日量价动量应为正');
+      expect(result.priceVolumeMomentum5d * result.priceVolumeMomentum10d, greaterThanOrEqualTo(0),
+          reason: '5日和10日量价动量符号应一致');
     });
 
     test('近3日close为0时不崩溃（除零保护）', () {

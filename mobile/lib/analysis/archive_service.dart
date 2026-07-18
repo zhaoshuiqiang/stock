@@ -108,7 +108,7 @@ class ArchiveService {
         changePct: opp.changePct,
         updateTime: DateTime.now(),
       ),
-      score: opp.score,
+      score: opp.score.toDouble(),
       recommendation: opp.recommendation,
       shortTermDecision: opp.shortTermDecision,
     );
@@ -127,7 +127,7 @@ class ArchiveService {
       name: opp?.name ?? quote?.name ?? name,
       price: opp?.price ?? quote?.price ?? 0,
       changePct: opp?.changePct ?? quote?.changePct ?? 0,
-      score: opp?.score ?? a?.score ?? 0,
+      score: (opp?.score ?? a?.score ?? 0).toDouble(),
       recommendation: opp?.recommendation ?? a?.recommendation ?? '',
       riskLevel: opp?.riskLevel ?? a?.riskLevel ?? '中等',
       buySignalCount: opp?.buySignalCount ?? 0,

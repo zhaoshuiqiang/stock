@@ -9,7 +9,7 @@ class StockCard extends StatelessWidget {
   final double? pe;
   final double? pb;
   final double? volumeRatio;
-  final int? score;
+  final double? score;
   final String? recommendation;
   final String? riskLevel;
   final List<Widget>? tags;

@@ -1,13 +1,13 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 
-/// 7维评分雷达图
+/// 5维决策证据雷达图
 ///
-/// 以技术/资金/实时/共振/情绪/基本面/结构 7个维度绘制雷达图，
+/// 以趋势/反转动量/量价流/相对强度/次交易预测 5个维度绘制雷达图，
 /// 各维度分值 0-10。中心展示综合评分。
 class ScoreRadarChart extends StatelessWidget {
   final Map<String, double> scores;
-  final int? totalScore;
+  final double? totalScore;
   final double size;
   final List<String> dimensions;
   final List<Color> dimensionColors;
@@ -21,20 +21,16 @@ class ScoreRadarChart extends StatelessWidget {
     this.dimensionColors = kDimensionColors,
   });
 
-  /// 7维标准顺序（与综合评分权重顺序一致）
   static const kDimensions = [
-    '技术面', '资金面', '实时行情', '共振', '情绪', '基本面', '结构',
+    '趋势', '反转动量', '量价流', '相对强度', '次交易预测',
   ];
 
-  /// 每个维度对应的主题色
   static const kDimensionColors = [
-    Color(0xFF26a69a), // 技术面 - 青绿
-    Color(0xFF4caf50), // 资金面 - 绿
-    Color(0xFFff9800), // 实时行情 - 橙
-    Color(0xFF9c27b0), // 共振 - 紫
-    Color(0xFF03a9f4), // 情绪 - 蓝
-    Color(0xFFe91e63), // 基本面 - 粉红
-    Color(0xFF607d8b), // 结构 - 蓝灰
+    Color(0xFF26a69a), // 趋势 - 青绿
+    Color(0xFFff9800), // 反转动量 - 橙
+    Color(0xFF4caf50), // 量价流 - 绿
+    Color(0xFF03a9f4), // 相对强度 - 蓝
+    Color(0xFF9c27b0), // 次交易预测 - 紫
   ];
 
   @override
@@ -53,7 +49,7 @@ class ScoreRadarChart extends StatelessWidget {
 
 class _RadarPainter extends CustomPainter {
   final Map<String, double> scores;
-  final int? totalScore;
+  final double? totalScore;
   final List<String> dimensions;
   final List<Color> dimensionColors;
 
@@ -191,7 +187,7 @@ class _RadarPainter extends CustomPainter {
 
     // ─── 6. 中心综合评分 ──────────────────────────────────────
     if (totalScore != null) {
-      final scoreText = '$totalScore';
+      final scoreText = totalScore!.toStringAsFixed(1);
       final scoreSpan = TextSpan(
         text: scoreText,
         style: const TextStyle(

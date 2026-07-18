@@ -1463,7 +1463,7 @@ class _QuantScreenState extends State<QuantScreen> {
 
   // ─── 辅助方法 ──────────────────────────────────────────────────
 
-  Color _getScoreColor(int score) {
+  Color _getScoreColor(double score) {
     if (score >= 8) return const Color(0xFF26a69a);
     if (score >= 7) return const Color(0xFF4caf50);
     if (score >= 6) return const Color(0xFF8bc34a);

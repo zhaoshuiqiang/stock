@@ -1,5 +1,6 @@
 import '../models/short_term_decision.dart';
 import '../models/stock_models.dart';
+import 'backtest_engine.dart';
 import 'directional_evidence_builder.dart';
 import 'evidence_confidence_calculator.dart';
 import 'market_structure_analyzer.dart';
@@ -25,6 +26,9 @@ class ShortTermDecisionInput {
   final Map<String, dynamic>? tradeLevels;
   final List<TradingStrategy> activeStrategies;
   final double rawComprehensiveScore;
+  final FundamentalScore? fundamentalScore;
+  final NewsSentiment? newsSentiment;
+  final Map<String, BacktestResult>? backtestResults;
 
   const ShortTermDecisionInput({
     required this.data,
@@ -39,6 +43,9 @@ class ShortTermDecisionInput {
     this.tradeLevels,
     required this.activeStrategies,
     required this.rawComprehensiveScore,
+    this.fundamentalScore,
+    this.newsSentiment,
+    this.backtestResults,
   });
 }
 
@@ -80,6 +87,12 @@ class ShortTermDecisionEngine {
       directionComponents: evidence.components,
       directionalSignals: directionalSignals,
       dataQualityFlags: evidence.dataQualityFlags,
+      fundamentalScore: input.fundamentalScore,
+      newsSentiment: input.newsSentiment,
+      marketContext: input.marketContext,
+      marketStructure: input.marketStructure,
+      backtestResults: input.backtestResults,
+      direction: direction,
     );
     final selection = PrimaryStrategySelector.select(
       strategies: input.activeStrategies,

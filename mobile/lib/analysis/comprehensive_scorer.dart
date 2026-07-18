@@ -2,6 +2,8 @@ import '../models/stock_models.dart';
 import 'fundamental_analyzer.dart';
 import 'news_sentiment_analyzer.dart';
 import 'market_structure_analyzer.dart';
+import 'next_day_predictor.dart';
+import 'next_session_prediction.dart';
 import 'sector_heat_detector.dart';
 import 'sector_rotation.dart';
 
@@ -59,6 +61,8 @@ class ComprehensiveScorer {
     List<SectorAnalysis>? sectorAnalysis,
     String preferredDuration = 'mediumTerm',
     IntradayProfile? intradayProfile,
+    NextDayPredictionResult? nextDayPrediction,
+    NextSessionPrediction? nextSessionPrediction,
   }) {
     FundamentalScore? fundamentalScore;
     double fundamentalScoreValue = 5.0;
@@ -133,21 +137,19 @@ class ComprehensiveScorer {
     final effectiveBullAlign = isBullAlign ?? (marketStructure?.maAlignment == '多头');
     final momentumFactor = _momentumProtectionFactor(data, effectiveAdx, effectiveBullAlign);
 
-    // v3.34: 留档数据分析——追高惩罚力度严重不足
-    // 原: 涨幅>3%仅抖0.94折扣，且被动量保护削弱后仅抖0.97，胜率仍仅18%
-    // 修复: 大幅加强惩罚，涨幅>3%时折扣不再被动量保护削弱
+    // v3.42: 追高惩罚合并为1层条件触发
+    // 涨幅2-5%不惩罚（A股短线强势确认区间）
+    // 涨幅5-8%+连涨3天轻惩罚×0.92，单日5-8%不惩罚
+    // 涨幅>8%重惩罚×0.75，涨停板×0.65
+    // 涨幅>5%时惩罚可被动量保护削弱（强趋势中追高可接受）
     double chasePenalty = 1.0;
     final cp = currentChangePct ?? quote?.changePct;
     if (cp != null && quote != null && quote.price > 0) {
       final consecutiveRise = _consecutiveRiseDays(data);
-      if (cp > 9.5) chasePenalty = 0.65;       // 涨停板: 次日不确定性极高
-      else if (cp > 8) chasePenalty = 0.72;    // 大涨: 追高风险极大
-      else if (cp > 5) chasePenalty = 0.80;    // 中阳线: 追高风险大
-      else if (cp > 3) chasePenalty = 0.88;    // 偏强: 已涨偏多
-      else if (cp > 2) chasePenalty = 0.94;    // 温和上涨: 轻微折扣
-      else if (cp > 1) chasePenalty = 0.97;    // 小涨: 几乎不影响
-      // v3.34: 涨幅>3%时惩罚不被动量保护削弱——数据证明动量保护是追高失败的重要原因
-      if (cp <= 3) {
+      if (cp > 9.5) chasePenalty = 0.65;
+      else if (cp > 8) chasePenalty = 0.75;
+      else if (cp > 5 && consecutiveRise >= 3) chasePenalty = 0.92;
+      if (cp > 5) {
         chasePenalty = 1.0 - (1.0 - chasePenalty) * momentumFactor;
       }
     }
@@ -184,6 +186,22 @@ class ComprehensiveScorer {
     //          之前温和系数导致评分偏移（6.5→6.3→6），降低了评分透明度
     //          如果要控制评分分布，应在权重层面调整而非后处理压缩
     var temperedScore = adjustedScore * trendConsistencyFactor;
+
+    // v3.42: 预测修正因子 — 次日/次交易预测结果反馈到评分
+    double predictionModifier = 1.0;
+    if (nextDayPrediction != null && nextDayPrediction.sampleCount >= 15) {
+      if (nextDayPrediction.downProbability > 0.60) {
+        predictionModifier *= 0.85;
+      } else if (nextDayPrediction.upProbability > 0.60) {
+        predictionModifier *= 1.05;
+      }
+    }
+    if (nextSessionPrediction != null && nextSessionPrediction.confidence > 0.5) {
+      if (nextSessionPrediction.downsideRiskProbability > 0.55) {
+        predictionModifier *= 0.90;
+      }
+    }
+    temperedScore *= predictionModifier;
 
     // v2.38.0: 板块情绪过热检测 — 过热板块个股评分乘以0.85折扣
     if (sectorName != null && sectorAnalysis != null && sectorAnalysis.isNotEmpty) {

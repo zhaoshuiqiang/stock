@@ -10,6 +10,18 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v3.42.20260718',
+        'date': '2026-07-18',
+        'changes': [
+          '重构: 评分体系统一——综合评分从整数改为连续浮点，与5维决策证据雷达图对齐',
+          '优化: 追高惩罚合并为1层条件触发——连涨3天+5%才启动，单日5-8%不再惩罚',
+          '优化: 预测结果反馈到评分——下跌概率>60%扣分，上涨概率>60%加分',
+          '优化: 置信度合并——8维证据置信度替代4维，消除重复计算',
+          '优化: 资金流诚实化——伪指标mainNetFlow5d重命名为priceVolumeMomentum5d',
+          '删除: ShortTermScorer死代码',
+        ],
+      },
+      {
         'version': 'v3.41.20260718',
         'date': '2026-07-18',
         'changes': [

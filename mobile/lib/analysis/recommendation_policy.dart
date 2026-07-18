@@ -51,7 +51,7 @@ class RecommendationPolicy {
         direction: direction,
         level: RecommendationLevel.bullishWatch,
         label: '偏多观望',
-        legacyScore: 6,
+        legacyScore: 6.0,
         actionable: false,
         gates: gates,
       );
@@ -62,7 +62,7 @@ class RecommendationPolicy {
         direction: direction,
         level: RecommendationLevel.bearishWatch,
         label: '偏空观望',
-        legacyScore: 4,
+        legacyScore: 4.0,
         actionable: false,
         gates: gates,
       );
@@ -73,8 +73,8 @@ class RecommendationPolicy {
       level: baseLevel,
       label: _labelOf(baseLevel),
       legacyScore: _isExceptionalStrongBullish(baseLevel, decision, gates)
-          ? 10
-          : _legacyScoreOf(baseLevel),
+          ? 10.0
+          : _continuousScoreOf(decision.directionScore, gates),
       actionable: _isActionableLevel(baseLevel),
       gates: gates,
     );
@@ -199,27 +199,12 @@ class RecommendationPolicy {
     }
   }
 
-  static int _legacyScoreOf(RecommendationLevel level) {
-    switch (level) {
-      case RecommendationLevel.strongBearish:
-        return 1;
-      case RecommendationLevel.bearish:
-        return 2;
-      case RecommendationLevel.cautiousBearish:
-        return 3;
-      case RecommendationLevel.bearishWatch:
-        return 4;
-      case RecommendationLevel.neutralWatch:
-        return 5;
-      case RecommendationLevel.bullishWatch:
-        return 6;
-      case RecommendationLevel.cautiousBullish:
-        return 7;
-      case RecommendationLevel.bullish:
-        return 8;
-      case RecommendationLevel.strongBullish:
-        return 9;
+  static double _continuousScoreOf(double directionScore, List<String> gates) {
+    var score = (5.0 + directionScore / 100.0 * 5.0).clamp(1.0, 10.0);
+    for (final _ in gates) {
+      score -= 0.5;
     }
+    return score.clamp(1.0, 10.0);
   }
 
   static bool _isActionableLevel(RecommendationLevel level) {

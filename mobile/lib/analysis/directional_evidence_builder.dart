@@ -203,6 +203,7 @@ class DirectionalEvidenceBuilder {
     }
 
     if (_hasChaseSetup(input.data.last, input.quote) &&
+        _consecutiveRiseDays(input.data) >= 3 &&
         guardedDirectionScore > 34 &&
         !(trend >= 0.45 && volumeFlow >= 0.45)) {
       guardedDirectionScore = 34;
@@ -546,6 +547,19 @@ class DirectionalEvidenceBuilder {
     // WR14低值=超买(<=20), bias6高值=超买(>=8)
     if (last.wr14 != null) return last.wr14! <= 20;
     return last.bias6 >= 8;
+  }
+
+  static int _consecutiveRiseDays(List<HistoryKline> data) {
+    if (data.length < 2) return 0;
+    int count = 0;
+    for (int i = data.length - 1; i >= 0; i--) {
+      if (data[i].close > data[i].open && data[i].changePct > 0) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    return count;
   }
 
   static double _clampUnit(double value) {

@@ -41,6 +41,10 @@ List<SignalItem> detectSignals(List<HistoryKline> data) {
   return SignalLayer.detectUniqueSignals(data);
 }
 
+double _componentToScore(double component) {
+  return ((component + 1) / 2 * 10).clamp(0.0, 10.0);
+}
+
 double _predictionSupportForRecommendation(
   RecommendationDirection direction,
   NextDayPredictionResult prediction,
@@ -428,6 +432,8 @@ AnalysisResult generateAnalysis(
     sectorName: sectorName ?? quote?.sectorName,
     sectorAnalysis: sectorAnalysis,
     intradayProfile: intradayProfile,
+    nextDayPrediction: nextDayPrediction,
+    nextSessionPrediction: nextSessionPrediction,
   );
 
   // 6. 推荐理由（见下方步骤13，全部上下文就绪后生成）
@@ -503,6 +509,9 @@ AnalysisResult generateAnalysis(
         ...longTermStrategies,
       ],
       rawComprehensiveScore: compResult.totalScore.toDouble(),
+      fundamentalScore: compResult.fundamentalScore,
+      newsSentiment: compResult.newsSentiment,
+      backtestResults: backtestResults,
     ),
   );
   final shortTermDecision = decisionResult.decision;
@@ -560,20 +569,14 @@ AnalysisResult generateAnalysis(
 
   // 13. 详细推荐理由（增强版：含市场结构/策略/回测/置信度上下文）
   // v3.2: 提前计算维度评分用于评分贡献明细展示
+  // v3.42: 维度评分改为5维决策证据，与推荐逻辑100%对齐
+  final _dc = shortTermDecision.directionComponents;
   final dimensionScores = <String, double>{
-    '技术面': techResult.totalScore,
-    '资金面': capitalFlowScore ?? 5.0,
-    '实时行情': realtimeScore,
-    '共振': confluenceResult.score,
-    '情绪': compResult.newsSentiment != null
-        ? (compResult.newsSentiment!.score + 10) / 2
-        : 5.0,
-    '基本面': compResult.fundamentalScore?.totalScore ?? 5.0,
-    '结构': marketStructure.structureScore,
-    '短线交易': shortTermDecision.tradeQualityScore / 10,
-    '动量持续性': momentumPersistence.persistenceScore * 10,
-    '次日预测': nextDayPrediction.upProbability * 10,
-    '次交易预测': nextSessionPrediction.nextCloseUpProbability * 10,
+    '趋势': _componentToScore(_dc['trend'] ?? 0),
+    '反转动量': _componentToScore(_dc['reversal_momentum'] ?? 0),
+    '量价流': _componentToScore(_dc['volume_flow'] ?? 0),
+    '相对强度': _componentToScore(_dc['relative_strength'] ?? 0),
+    '次交易预测': _componentToScore(_dc['next_session'] ?? 0),
   };
   final reasons = _generateReasons(
     buySignals,
@@ -590,6 +593,7 @@ AnalysisResult generateAnalysis(
     confidenceScore: confidenceScore,
     recommendation: recommendation,
     dimensionScores: dimensionScores,
+    confluenceScoreValue: confluenceResult.score.round(),
   );
   reasons.add(
       '短线交易质量：${shortTermDecision.tradeQualityScore.toStringAsFixed(0)}，风险：${shortTermDecision.riskScore.toStringAsFixed(0)}');
@@ -883,13 +887,14 @@ List<String> _generateReasons(
   List<SignalItem> sellSignals,
   HistoryKline last,
   QuoteData? quote, {
-  int? totalScore,
+  double? totalScore,
   MarketStructureResult? marketStructure,
   Map<String, BacktestResult>? backtestResults,
   List<TradingStrategy>? activeStrategies,
   double confidenceScore = 0.5,
   String recommendation = '',
   Map<String, double>? dimensionScores,
+  int confluenceScoreValue = 0,
 }) {
   final reasons = <String>[];
   final buyCount = buySignals.length;
@@ -902,7 +907,7 @@ List<String> _generateReasons(
     topSignals: topSignals.map((s) => s.signal).take(2).toList(),
     buySignalCount: buyCount,
     sellSignalCount: sellCount,
-    confluenceScore: (dimensionScores?['共振'] ?? 0).round(),
+    confluenceScore: confluenceScoreValue,
     mainNetFlow: quote?.mainNetFlow ?? 0,
     score: totalScore ?? 0,
     recommendation: recommendation,
