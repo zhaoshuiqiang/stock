@@ -10,6 +10,16 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.2.20260718',
+        'date': '2026-07-18',
+        'changes': [
+          '修复: 发现页评分偏差——批量行情未覆盖的股票回退到残缺数据(缺pe/pb/资金流)，现单独补获完整行情',
+          '修复: 板块动量信号丢失——sectorMomentum未传入ShortTermDecisionEngine，方向证据10%权重始终为0',
+          '修复: K线竞速源不一致——OpportunityEngine硬编码3源(缺东方财富)，改为4源与ExploreEngine一致',
+        ],
+      },
+
+      {
         'version': 'v4.1.20260718',
         'date': '2026-07-18',
         'changes': [

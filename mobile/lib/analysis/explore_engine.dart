@@ -186,6 +186,21 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         ));
       }
 
+      // 4.5 补充缺失行情（批量接口未覆盖的股票，避免使用残缺数据回退）
+      final missingQuoteCodes = allStocks
+          .where((s) => !quoteCache.containsKey(s.code))
+          .map((s) => s.code)
+          .toList();
+      if (missingQuoteCodes.isNotEmpty) {
+        final extraQuotes = await Future.wait(
+          missingQuoteCodes.map((code) =>
+              _apiClient.getRealtimeQuote(code).catchError((_) => null)),
+        );
+        for (final q in extraQuotes.whereType<QuoteData>()) {
+          quoteCache[q.code] = q;
+        }
+      }
+
       // 5. 分析阶段（使用缓存数据，无需网络请求）
       emit(ExploreProgress(
         status: ExploreStatus.analyzing,

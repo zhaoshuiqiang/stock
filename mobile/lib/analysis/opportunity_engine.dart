@@ -262,7 +262,7 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
               final prefixedCode = _apiClient.addMarketPrefix(item.code);
               return _apiClient
                   .getStockHistory(prefixedCode,
-                      days: klineDays, maxRacingSources: 3)
+                      days: klineDays, maxRacingSources: 4)
                   .catchError((e) {
                 debugPrint('[OpportunityEngine] K线获取失败: $prefixedCode - $e');
                 return <HistoryKline>[];

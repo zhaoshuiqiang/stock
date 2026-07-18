@@ -10,6 +10,7 @@ import 'primary_strategy_selector.dart';
 import 'recommendation_policy.dart';
 import 'short_term_risk_evaluator.dart';
 import 'strategy_engine.dart';
+import 'sector_momentum_calculator.dart';
 import 'trade_quality_evaluator.dart';
 
 class ShortTermDecisionInput {
@@ -29,6 +30,7 @@ class ShortTermDecisionInput {
   final FundamentalScore? fundamentalScore;
   final NewsSentiment? newsSentiment;
   final Map<String, BacktestResult>? backtestResults;
+  final SectorMomentumResult? sectorMomentum;
 
   const ShortTermDecisionInput({
     required this.data,
@@ -46,6 +48,7 @@ class ShortTermDecisionInput {
     this.fundamentalScore,
     this.newsSentiment,
     this.backtestResults,
+    this.sectorMomentum,
   });
 }
 
@@ -75,6 +78,7 @@ class ShortTermDecisionEngine {
             input.data.isEmpty ? null : input.data.last.changePct,
         nextDayPrediction: input.nextDayPrediction,
         nextSessionPrediction: input.nextSessionPrediction,
+        sectorMomentum: input.sectorMomentum,
       ),
     );
     final direction = _directionOf(evidence.directionScore);
@@ -129,6 +133,7 @@ class ShortTermDecisionEngine {
       evidenceTradeDate: input.data.isEmpty ? null : input.data.last.date,
       modelVersion: modelVersion,
       rawComprehensiveScore: input.rawComprehensiveScore,
+      sectorMomentum: input.sectorMomentum,
     );
     return ShortTermDecisionResult(
       decision: decision,

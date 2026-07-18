@@ -532,6 +532,7 @@ AnalysisResult generateAnalysis(
       fundamentalScore: compResult.fundamentalScore,
       newsSentiment: compResult.newsSentiment,
       backtestResults: backtestResults,
+      sectorMomentum: sectorMomentumResult,
     ),
   );
   final shortTermDecision = decisionResult.decision;
