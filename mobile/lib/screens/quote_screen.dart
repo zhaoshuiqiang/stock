@@ -65,6 +65,7 @@ class QuoteScreenState extends State<QuoteScreen>
   QuoteData? _quote;
   List<HistoryKline> _klines = [];
   AnalysisResult? _analysis;
+  Position? _heldPosition;
   List<Map<String, dynamic>>? _scoreTrend; // v3.13: 评分趋势数据
   MarketContext? _marketContext;
   bool _isLoading = true;
@@ -121,6 +122,7 @@ class QuoteScreenState extends State<QuoteScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _tabController = TabController(length: 7, vsync: this);
+    _loadHeldPosition();
     _loadData();
     _checkFavorite();
     _startRealtime();
@@ -2546,6 +2548,15 @@ class QuoteScreenState extends State<QuoteScreen>
     );
   }
 
+  Future<void> _loadHeldPosition() async {
+    try {
+      final map = await _dbService.getPositionMap();
+      if (mounted) setState(() => _heldPosition = map[widget.code]);
+    } catch (e) {
+      debugPrint('QuoteScreen._loadHeldPosition: $e');
+    }
+  }
+
   Widget _buildDashboard() {
     return TradingDashboard(
       quote: _quote,
@@ -2554,6 +2565,7 @@ class QuoteScreenState extends State<QuoteScreen>
       lastUpdateTime: _lastUpdateTime,
       scoreTrend: _scoreTrend,
       onRefresh: () => _refreshAnalysis(),
+      position: _heldPosition,
     );
   }
 

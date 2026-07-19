@@ -15,6 +15,10 @@ import 'market_structure_analyzer.dart';
 import 'recommendation_tracker.dart';
 import 'decision_tracker.dart';
 import 'decision_calibration_service.dart';
+import 'directional_evidence_builder.dart';
+import 'isolate_scan.dart';
+import 'recommendation_policy.dart';
+import 'scoring_config.dart';
 
 /// 探索引擎：后台批量分析沪深主板股票，筛选买入级别以上标的
 /// 使用全局单例 + BroadcastStream，确保切换Tab不中断分析
@@ -216,23 +220,29 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         final end = min(i + analyzeBatchSize, allStocks.length);
         final batch = allStocks.sublist(i, end);
 
-        // 同步分析（无网络IO），使用 compute 或 isolate 加速大量计算
-        for (int j = 0; j < batch.length; j++) {
-          final stock = batch[j];
-          final klineData = klineCache[stock.code] ?? <HistoryKline>[];
-          final quote = quoteCache[stock.code] ?? stock;
-          final result = await _analyzeCached(
-            stock,
-            klineData,
-            quote,
-            analysisList,
-            marketContext,
-          );
-          if (result != null) {
-            results.add(result);
+        // 同步分析（无网络IO）；P4.1: 开关开启时迁入后台 isolate 加速
+        if (ScoringConfig.useIsolateScan) {
+          final batchResults = await _analyzeBatchIsolate(
+              batch, klineCache, quoteCache, analysisList, marketContext);
+          results.addAll(batchResults);
+        } else {
+          for (int j = 0; j < batch.length; j++) {
+            final stock = batch[j];
+            final klineData = klineCache[stock.code] ?? <HistoryKline>[];
+            final quote = quoteCache[stock.code] ?? stock;
+            final result = await _analyzeCached(
+              stock,
+              klineData,
+              quote,
+              analysisList,
+              marketContext,
+            );
+            if (result != null) {
+              results.add(result);
+            }
+            // 释放内存：分析完成后立即清理K线缓存
+            klineCache.remove(stock.code);
           }
-          // 释放内存：分析完成后立即清理K线缓存
-          klineCache.remove(stock.code);
         }
 
         emit(ExploreProgress(
@@ -350,63 +360,130 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         return null;
       }
 
-      var analysis = generateAnalysis(
+      final analysis = generateAnalysis(
         indicators,
         quote,
         marketContext: marketContext,
         enableAsyncSideEffects: false,
       );
-      try {
-        analysis = await _calibrationService.enrich(
-          analysis,
-          asOfTradeDate: indicators.last.date,
-        );
-      } catch (e) {
-        debugPrint('ExploreEngine.calibration: $e');
-      }
-
-      analysisList.add(analysis);
-
-      if (!_isBuyRecommendation(analysis.recommendation)) {
-        return null;
-      }
-
-      // Phase 2: 概念标签
-      String? conceptSummary;
-      try {
-        conceptSummary =
-            ConceptTagProvider.instance.getConceptSummary(stock.code);
-      } catch (e) {
-        debugPrint('ExploreEngine.conceptTags: $e');
-      }
-
-      // Phase 3: 推荐追踪（收集到列表，循环结束后批量写入）
-      // Phase 1: 市场结构
-      final structureLabel = analysis.marketStructure != null
-          ? MarketStructureAnalyzer.getLabel(
-              analysis.marketStructure!.structure)
-          : '';
-
-      return ExploreResult(
-        code: stock.code,
-        name: stock.name,
-        price: quote.price,
-        changePct: quote.changePct,
-        pe: quote.pe,
-        pb: quote.pb,
-        score: analysis.score,
-        recommendation: analysis.recommendation,
-        confluenceScore: analysis.confluenceScore,
-        analyzedAt: DateTime.now(),
-        conceptSummary: (conceptSummary != null && conceptSummary.isNotEmpty)
-            ? conceptSummary
-            : null,
-        marketStructure: structureLabel.isNotEmpty ? structureLabel : null,
-      );
+      return await _finishAnalysis(
+          stock, quote, analysis, indicators.last.date, analysisList);
     } catch (e) {
       debugPrint('Analyze cached ${stock.code} failed: $e');
       return null;
     }
+  }
+
+  /// P4.1: 批量分析迁入后台 isolate（CPU 密集的指标计算 + generateAnalysis）。
+  /// 校准(DB)/概念标签(单例)仍在主 isolate 完成，见 [_finishAnalysis]。
+  /// 仅当 ScoringConfig.useIsolateScan 开启时使用；失败则返回空并降级。
+  Future<List<ExploreResult>> _analyzeBatchIsolate(
+    List<QuoteData> batch,
+    Map<String, List<HistoryKline>> klineCache,
+    Map<String, QuoteData> quoteCache,
+    List<AnalysisResult> analysisList,
+    MarketContext? marketContext,
+  ) async {
+    final stockByCode = <String, QuoteData>{};
+    final quoteByCode = <String, QuoteData>{};
+    final items = <IsolateScanItem>[];
+    for (final stock in batch) {
+      final klineData = klineCache[stock.code] ?? const <HistoryKline>[];
+      final quote = quoteCache[stock.code] ?? stock;
+      if (klineData.length < 20) continue;
+      if (!_passValuationFilter(quote, shortTermMode: true)) continue;
+      stockByCode[stock.code] = stock;
+      quoteByCode[stock.code] = quote;
+      items.add(
+          IsolateScanItem(code: stock.code, klines: klineData, quote: quote));
+    }
+    // 释放内存：进入 isolate 后主缓存不再需要
+    for (final stock in batch) {
+      klineCache.remove(stock.code);
+    }
+    if (items.isEmpty) return const <ExploreResult>[];
+    List<IsolateScanResult> scanResults;
+    try {
+      scanResults = await compute(
+        runBatchAnalysis,
+        IsolateScanRequest(
+          items: items,
+          marketContext: marketContext,
+          activeWeights: DirectionalEvidenceBuilder.effectiveWeights,
+          activeThresholds: RecommendationPolicy.active,
+        ),
+      );
+    } catch (e) {
+      debugPrint('ExploreEngine.isolateScan failed: $e');
+      return const <ExploreResult>[];
+    }
+    final out = <ExploreResult>[];
+    for (final r in scanResults) {
+      final stock = stockByCode[r.code];
+      final quote = quoteByCode[r.code];
+      if (stock == null || quote == null) continue;
+      final er = await _finishAnalysis(
+          stock, quote, r.analysis, r.evidenceDate, analysisList);
+      if (er != null) out.add(er);
+    }
+    return out;
+  }
+
+  /// 分析结果收尾：校准(DB) + 买入过滤 + 概念标签 + 结构 + 映射为 ExploreResult。
+  /// 主 isolate 专用（含 DB 与单例访问）；isolate/非 isolate 两条路径共用。
+  Future<ExploreResult?> _finishAnalysis(
+    QuoteData stock,
+    QuoteData quote,
+    AnalysisResult analysisIn,
+    DateTime evidenceDate,
+    List<AnalysisResult> analysisList,
+  ) async {
+    var analysis = analysisIn;
+    try {
+      analysis = await _calibrationService.enrich(
+        analysis,
+        asOfTradeDate: evidenceDate,
+      );
+    } catch (e) {
+      debugPrint('ExploreEngine.calibration: $e');
+    }
+
+    analysisList.add(analysis);
+
+    if (!_isBuyRecommendation(analysis.recommendation)) {
+      return null;
+    }
+
+    // Phase 2: 概念标签
+    String? conceptSummary;
+    try {
+      conceptSummary =
+          ConceptTagProvider.instance.getConceptSummary(stock.code);
+    } catch (e) {
+      debugPrint('ExploreEngine.conceptTags: $e');
+    }
+
+    // Phase 1: 市场结构
+    final structureLabel = analysis.marketStructure != null
+        ? MarketStructureAnalyzer.getLabel(analysis.marketStructure!.structure)
+        : '';
+
+    return ExploreResult(
+      code: stock.code,
+      name: stock.name,
+      price: quote.price,
+      changePct: quote.changePct,
+      pe: quote.pe,
+      pb: quote.pb,
+      score: analysis.score,
+      recommendation: analysis.recommendation,
+      confluenceScore: analysis.confluenceScore,
+      analyzedAt: DateTime.now(),
+      conceptSummary: (conceptSummary != null && conceptSummary.isNotEmpty)
+          ? conceptSummary
+          : null,
+      marketStructure: structureLabel.isNotEmpty ? structureLabel : null,
+    );
   }
 
   @visibleForTesting

@@ -131,6 +131,21 @@ class DirectionalEvidenceBuilder {
     sectorMomentumComponentKey: 0.10,
   };
 
+  /// v4.3: optional data-driven override for [componentWeights], installed by
+  /// DirectionalWeightOptimizer when ScoringConfig.useDynamicDirectionWeights is
+  /// on. Null == use the static defaults (byte-identical to pre-v4.3 behavior).
+  static Map<String, double>? _weightOverride;
+
+  /// Weights actually used to fold evidence into the direction score.
+  static Map<String, double> get effectiveWeights =>
+      _weightOverride ?? componentWeights;
+
+  /// Install (null clears) the dynamic weight override. Callers must pass a map
+  /// with the same keys as [componentWeights]; normalization is the caller's job.
+  static void applyWeightOverride(Map<String, double>? weights) {
+    _weightOverride = weights;
+  }
+
   static DirectionalEvidenceResult build(DirectionalEvidenceInput input) {
     final market = MarketRegimeClassifier.classify(input.marketContext);
     final dataQualityFlags = <String>[...market.dataQualityFlags];
@@ -196,7 +211,7 @@ class DirectionalEvidenceBuilder {
     final volumeFlow = components[volumeFlowComponentKey] ?? 0;
 
     final stockEvidence = 100 *
-        componentWeights.entries.fold<double>(
+        effectiveWeights.entries.fold<double>(
           0,
           (total, entry) => total + (components[entry.key] ?? 0) * entry.value,
         );

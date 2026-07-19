@@ -43,6 +43,10 @@ class ApiClient {
   // v3.2: 静态in-flight追踪防止重复并发请求
   static final Map<String, Future> _inFlightRequests = {};
   static const int _maxCacheSize = 400;
+  // v4.3: best-effort ROE cache (ROE changes quarterly, so long TTL);
+  // populated only on the single-stock detail path to keep batch scans fast.
+  static final Map<String, (double?, DateTime)> _roeCache = {};
+  static const Duration _roeCacheDuration = Duration(hours: 6);
   bool _disposed = false;
 
   /// 重建HTTP客户端（连接池失效时调用）
@@ -592,6 +596,93 @@ class ApiClient {
   }
 
   /// 多数据源交叉验证获取实时行情
+  /// v4.3: best-effort weighted ROE (%) for [code] from EastMoney datacenter
+  /// F10. Cached with a long TTL; returns null on any failure or implausible
+  /// value so callers fall back to neutral fundamental scoring.
+  Future<double?> getRoe(String code) async {
+    final cached = _roeCache[code];
+    if (cached != null &&
+        DateTime.now().difference(cached.$2) < _roeCacheDuration) {
+      return cached.$1;
+    }
+    try {
+      final secucode = _toSecucode(code);
+      if (secucode == null) return null;
+      final url = Uri.parse(
+        'https://datacenter.eastmoney.com/securities/api/data/v1/get'
+        '?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=ALL'
+        '&filter=(SECUCODE=%22$secucode%22)'
+        '&pageSize=1&sortColumns=REPORT_DATE&sortTypes=-1'
+        '&source=HSF10&client=PC',
+      );
+      final response = await _httpGet(url, headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://emweb.securities.eastmoney.com/',
+      });
+      if (response == null) return null;
+      final roe = parseRoeFromDatacenterJson(json.decode(response.body));
+      _roeCache[code] = (roe, DateTime.now());
+      return roe;
+    } catch (e) {
+      debugPrint('[API] getRoe($code) failed: $e');
+      return null;
+    }
+  }
+
+  /// Convert internal code (sh600519 / sz000001 / bj / bare 6-digit) to the
+  /// EastMoney SECUCODE format (600519.SH / 000001.SZ). Null if unknown.
+  static String? _toSecucode(String code) {
+    final c = code.toLowerCase().trim();
+    if (c.startsWith('sh')) return '${c.substring(2)}.SH';
+    if (c.startsWith('sz')) return '${c.substring(2)}.SZ';
+    if (c.startsWith('bj')) return '${c.substring(2)}.BJ';
+    if (RegExp(r'^\d{6}$').hasMatch(c)) {
+      return (c.startsWith('6') || c.startsWith('9')) ? '$c.SH' : '$c.SZ';
+    }
+    return null;
+  }
+
+  /// Testable pure parser: extract a plausible ROE (%) from the EastMoney
+  /// datacenter JSON, tolerant to exact column naming by scanning for any key
+  /// containing "ROE". Returns null when absent or implausible.
+  static double? parseRoeFromDatacenterJson(dynamic decoded) {
+    try {
+      if (decoded is! Map) return null;
+      final result = decoded['result'];
+      if (result is! Map) return null;
+      final data = result['data'];
+      if (data is! List || data.isEmpty) return null;
+      final row = data.first;
+      if (row is! Map) return null;
+      const preferred = ['ROEJQ', 'ROE_WEIGHT', 'WEIGHTAVGROE', 'ROE'];
+      for (final key in preferred) {
+        if (row.containsKey(key)) {
+          final v = _asPlausibleRoe(row[key]);
+          if (v != null) return v;
+        }
+      }
+      for (final entry in row.entries) {
+        if (entry.key.toString().toUpperCase().contains('ROE')) {
+          final v = _asPlausibleRoe(entry.value);
+          if (v != null) return v;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static double? _asPlausibleRoe(dynamic v) {
+    double? d;
+    if (v is num) {
+      d = v.toDouble();
+    } else if (v is String) {
+      d = double.tryParse(v);
+    }
+    if (d == null || d.isNaN || d.isInfinite) return null;
+    if (d < -1000 || d > 1000) return null;
+    return d;
+  }
+
   Future<ValidatedQuoteData?> getRealtimeQuoteWithValidation(
       String code) async {
     final results = await Future.wait([

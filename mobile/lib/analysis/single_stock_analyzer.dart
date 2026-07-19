@@ -27,9 +27,14 @@ class SingleStockAnalyzer {
         ApiClient().getStockSector(code),
         ApiClient().getHotSectors(),
         MarketContextProvider.getMarketContext(),
+        ApiClient().getRoe(code),
       ]);
 
-      final quote = (results[0] as ValidatedQuoteData?)?.quote;
+      var quote = (results[0] as ValidatedQuoteData?)?.quote;
+      final roe = results[5] as double?;
+      if (quote != null && roe != null) {
+        quote = quote.copyWith(roe: roe);
+      }
       final klines = results[1] as List<HistoryKline>?;
       final sectorName = results[2] as String?;
       final hotSectors = results[3] as List<SectorInfo>?;

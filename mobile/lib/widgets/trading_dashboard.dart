@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../models/stock_models.dart';
 import 'score_radar_chart.dart';
+import 'score_breakdown_card.dart';
+import 'position_context_card.dart';
+import 'skeleton_loader.dart';
 import 'score_trend_chart.dart';
 import 'short_term_decision_panel.dart';
 import '../models/short_term_decision.dart';
@@ -14,6 +17,7 @@ class TradingDashboard extends StatelessWidget {
   final bool isRefreshing;
   final String lastUpdateTime;
   final List<Map<String, dynamic>>? scoreTrend;
+  final Position? position;
 
   const TradingDashboard({
     super.key,
@@ -23,6 +27,7 @@ class TradingDashboard extends StatelessWidget {
     this.isRefreshing = false,
     this.lastUpdateTime = '',
     this.scoreTrend,
+    this.position,
   });
 
   @override
@@ -55,6 +60,21 @@ class TradingDashboard extends StatelessWidget {
           const SizedBox(height: 10),
           if (analysis!.dimensionScores != null) _buildScoreRadarCard(),
           const SizedBox(height: 10),
+          if (analysis!.dimensionScores != null) ...[
+            ScoreBreakdownCard.fromAnalysis(analysis!),
+            const SizedBox(height: 10),
+          ],
+          if (position != null) ...[
+            PositionContextCard(
+              score: analysis!.score,
+              currentPrice: quote?.price ?? position!.avgPrice,
+              avgPrice: position!.avgPrice,
+              quantity: position!.quantity,
+              atr: (analysis!.tradeLevels?['atr'] as num?)?.toDouble() ?? 0,
+              riskScore: analysis!.shortTermDecision?.riskScore ?? 50,
+            ),
+            const SizedBox(height: 10),
+          ],
           _buildKeySignals(),
           if (analysis!.tradeLevels != null) ...[
             const SizedBox(height: 10),
@@ -1208,14 +1228,10 @@ class TradingDashboard extends StatelessWidget {
   // ─── 加载状态 ───────────────────────────────────────────
 
   Widget _buildLoading() {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(40),
-        child: CircularProgressIndicator(
-          color: Color(0xFF58A6FF),
-          strokeWidth: 2,
-        ),
-      ),
+    // P4.3: skeleton placeholder approximating the dashboard while loading,
+    // replacing the bare spinner for a smoother perceived load.
+    return const SingleChildScrollView(
+      child: SkeletonList(lines: 8),
     );
   }
 

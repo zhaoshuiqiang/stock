@@ -54,7 +54,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 24,
+      version: 25,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -436,6 +436,15 @@ class DatabaseService {
               'CREATE INDEX IF NOT EXISTS idx_recommendation_tracking_date ON recommendation_tracking(signal_date)');
           await txn.execute(
               'CREATE INDEX IF NOT EXISTS idx_explore_results_score ON explore_results(score)');
+          // v4.3 (DB v25): analytics-table sort/filter indexes for hot queries
+          await txn.execute(
+              'CREATE INDEX IF NOT EXISTS idx_opportunity_results_score ON opportunity_results(score)');
+          await txn.execute(
+              'CREATE INDEX IF NOT EXISTS idx_opportunity_results_analyzed_at ON opportunity_results(analyzed_at)');
+          await txn.execute(
+              'CREATE INDEX IF NOT EXISTS idx_sector_pick_results_score ON sector_pick_results(score)');
+          await txn.execute(
+              'CREATE INDEX IF NOT EXISTS idx_rt_closed_date ON recommendation_tracking(is_closed, signal_date)');
         });
       },
     );

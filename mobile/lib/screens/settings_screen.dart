@@ -6,6 +6,7 @@ import '../analysis/ai_layer.dart';
 import 'update_log_screen.dart';
 import 'indicator_reference_screen.dart';
 import 'strategy_reference_screen.dart';
+import '../analysis/scoring_config.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -16,11 +17,13 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   AIProvider? _selectedProvider;
+  RiskProfile _riskProfile = RiskProfile.balanced;
 
   @override
   void initState() {
     super.initState();
     _loadProviderSetting();
+    _loadRiskProfile();
   }
 
   Future<void> _loadProviderSetting() async {
@@ -47,6 +50,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('已切换至${provider.label}，重启应用生效')),
       );
+    }
+  }
+
+  Future<void> _loadRiskProfile() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString('risk_profile');
+    setState(() {
+      _riskProfile = v == 'conservative'
+          ? RiskProfile.conservative
+          : v == 'aggressive'
+              ? RiskProfile.aggressive
+              : RiskProfile.balanced;
+    });
+    ScoringConfig.riskProfile = _riskProfile;
+  }
+
+  Future<void> _saveRiskProfile(RiskProfile p) async {
+    setState(() => _riskProfile = p);
+    ScoringConfig.riskProfile = p;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('risk_profile', p.name);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已更新风险偏好')),
+      );
+    }
+  }
+
+  String _riskLabel(RiskProfile p) {
+    switch (p) {
+      case RiskProfile.conservative:
+        return '保守';
+      case RiskProfile.balanced:
+        return '均衡';
+      case RiskProfile.aggressive:
+        return '激进';
+    }
+  }
+
+  String _riskDesc(RiskProfile p) {
+    switch (p) {
+      case RiskProfile.conservative:
+        return '门控更严：更少但更高置信的买入';
+      case RiskProfile.balanced:
+        return '默认：不调整门控';
+      case RiskProfile.aggressive:
+        return '门控更松：更多买入信号';
     }
   }
 
@@ -133,6 +183,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Text(
                       '提示：切换后需要重启应用才能生效。API Key请通过环境变量配置。',
                       style: textTheme.bodySmall?.copyWith(color: Colors.grey[500]),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Card(
+              color: const Color(0xFF161B22),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.tune, size: 20, color: Colors.orange),
+                        const SizedBox(width: 8),
+                        Text('风险偏好',
+                            style: textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('调整推荐门控松紧（个性化，立即生效）：',
+                        style: TextStyle(color: Colors.grey)),
+                    Column(
+                      children: RiskProfile.values.map((p) {
+                        return RadioListTile<RiskProfile>(
+                          title: Text(_riskLabel(p)),
+                          subtitle: Text(_riskDesc(p)),
+                          value: p,
+                          groupValue: _riskProfile,
+                          onChanged: (v) {
+                            if (v != null) _saveRiskProfile(v);
+                          },
+                          activeColor: Colors.orange,
+                        );
+                      }).toList(),
                     ),
                   ],
                 ),

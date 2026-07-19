@@ -1,4 +1,6 @@
 import '../models/short_term_decision.dart';
+import 'recommendation_thresholds.dart';
+import 'scoring_config.dart';
 
 const String _tradeQualityBelowThreshold = 'trade_quality_below_threshold';
 const String _riskAboveThreshold = 'risk_above_threshold';
@@ -12,35 +14,34 @@ const Set<String> _criticalDataFlags = <String>{
   'quote_data_missing',
 };
 
-// 方向分数阈值（9级强度映射）
-const double _kStrongBearishThreshold = -55.0;
-const double _kBearishThreshold = -35.0;
-const double _kCautiousBearishThreshold = -20.0;
+// 方向中性带 ±12 固定（与方向判定一致）；其余幅度带见 RecommendationThresholds（可校准，P2.2）
 const double _kBearishWatchThreshold = -12.0;
 const double _kBullishWatchThreshold = 12.0;
-const double _kCautiousBullishThreshold = 20.0;
-const double _kBullishThreshold = 35.0;
-const double _kStrongBullishThreshold = 55.0;
 
-// 多头执行门控阈值
-const double _kStrongBullishQualityMin = 70.0;
-const double _kStrongBullishRiskMax = 45.0;
-const double _kStrongBullishConfidenceMin = 65.0;
-const double _kBullishQualityMin = 60.0;
-const double _kBullishRiskMax = 60.0;
-const double _kBullishConfidenceMin = 55.0;
-const double _kCautiousBullishQualityMin = 55.0;
-const double _kCautiousBullishRiskMax = 70.0;
+// 多头/空头执行门控阈值已移至 RecommendationThresholds（可校准，P2.2）
 
-// 空头证据门控阈值
-const double _kBearishConfidenceMin = 55.0;
-
-// 例外强多头阈值（legacyScore=10）
+// 例外强多头阈值（legacyScore=10）——保留常量，不参与阈值校准
 const double _kExceptionalQualityMin = 85.0;
 const double _kExceptionalRiskMax = 30.0;
 const double _kExceptionalConfidenceMin = 80.0;
 
 class RecommendationPolicy {
+  // P2.2: calibratable thresholds. Only consulted when the
+  // ScoringConfig.useCalibratedThresholds flag is on; otherwise the getter
+  // returns RecommendationThresholds.defaults so behavior is byte-identical.
+  static RecommendationThresholds? _thresholdOverride;
+
+  static RecommendationThresholds get active {
+    final base = ScoringConfig.useCalibratedThresholds
+        ? (_thresholdOverride ?? RecommendationThresholds.defaults)
+        : RecommendationThresholds.defaults;
+    return base.forRiskProfile(ScoringConfig.riskProfile);
+  }
+
+  static void applyThresholdOverride(RecommendationThresholds? thresholds) {
+    _thresholdOverride = thresholds;
+  }
+
   static RecommendationDecision evaluate(ShortTermDecision decision) {
     final direction = _directionOf(decision.directionScore);
     final baseLevel = _levelOf(decision.directionScore);
@@ -91,13 +92,14 @@ class RecommendationPolicy {
   }
 
   static RecommendationLevel _levelOf(double directionScore) {
-    if (directionScore <= _kStrongBearishThreshold) {
+    final t = active;
+    if (directionScore <= -t.strongBullish) {
       return RecommendationLevel.strongBearish;
     }
-    if (directionScore <= _kBearishThreshold) {
+    if (directionScore <= -t.bullish) {
       return RecommendationLevel.bearish;
     }
-    if (directionScore <= _kCautiousBearishThreshold) {
+    if (directionScore <= -t.cautiousBullish) {
       return RecommendationLevel.cautiousBearish;
     }
     if (directionScore <= _kBearishWatchThreshold) {
@@ -106,13 +108,13 @@ class RecommendationPolicy {
     if (directionScore < _kBullishWatchThreshold) {
       return RecommendationLevel.neutralWatch;
     }
-    if (directionScore < _kCautiousBullishThreshold) {
+    if (directionScore < t.cautiousBullish) {
       return RecommendationLevel.bullishWatch;
     }
-    if (directionScore < _kBullishThreshold) {
+    if (directionScore < t.bullish) {
       return RecommendationLevel.cautiousBullish;
     }
-    if (directionScore < _kStrongBullishThreshold) {
+    if (directionScore < t.strongBullish) {
       return RecommendationLevel.bullish;
     }
     return RecommendationLevel.strongBullish;
@@ -123,6 +125,7 @@ class RecommendationPolicy {
     ShortTermDecision decision,
   ) {
     final gates = <String>[];
+    final t = active;
 
     if (_isActionableLevel(level) &&
         decision.dataQualityFlags.any(_criticalDataFlags.contains)) {
@@ -131,39 +134,39 @@ class RecommendationPolicy {
 
     switch (level) {
       case RecommendationLevel.strongBullish:
-        if (decision.tradeQualityScore < _kStrongBullishQualityMin) {
+        if (decision.tradeQualityScore < t.strongBullishQualityMin) {
           gates.add(_tradeQualityBelowThreshold);
         }
-        if (decision.riskScore > _kStrongBullishRiskMax) {
+        if (decision.riskScore > t.strongBullishRiskMax) {
           gates.add(_riskAboveThreshold);
         }
-        if (decision.evidenceConfidence < _kStrongBullishConfidenceMin) {
+        if (decision.evidenceConfidence < t.strongBullishConfidenceMin) {
           gates.add(_evidenceConfidenceBelowThreshold);
         }
         break;
       case RecommendationLevel.bullish:
-        if (decision.tradeQualityScore < _kBullishQualityMin) {
+        if (decision.tradeQualityScore < t.bullishQualityMin) {
           gates.add(_tradeQualityBelowThreshold);
         }
-        if (decision.riskScore > _kBullishRiskMax) {
+        if (decision.riskScore > t.bullishRiskMax) {
           gates.add(_riskAboveThreshold);
         }
-        if (decision.evidenceConfidence < _kBullishConfidenceMin) {
+        if (decision.evidenceConfidence < t.bullishConfidenceMin) {
           gates.add(_evidenceConfidenceBelowThreshold);
         }
         break;
       case RecommendationLevel.cautiousBullish:
-        if (decision.tradeQualityScore < _kCautiousBullishQualityMin) {
+        if (decision.tradeQualityScore < t.cautiousBullishQualityMin) {
           gates.add(_tradeQualityBelowThreshold);
         }
-        if (decision.riskScore > _kCautiousBullishRiskMax) {
+        if (decision.riskScore > t.cautiousBullishRiskMax) {
           gates.add(_riskAboveThreshold);
         }
         break;
       case RecommendationLevel.strongBearish:
       case RecommendationLevel.bearish:
       case RecommendationLevel.cautiousBearish:
-        if (decision.evidenceConfidence < _kBearishConfidenceMin) {
+        if (decision.evidenceConfidence < t.bearishConfidenceMin) {
           gates.add(_evidenceConfidenceBelowThreshold);
         }
         break;

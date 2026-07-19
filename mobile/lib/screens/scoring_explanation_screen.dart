@@ -1,12 +1,44 @@
 import 'package:flutter/material.dart';
 
+import '../analysis/directional_evidence_builder.dart';
+import '../analysis/recommendation_thresholds.dart';
+
+/// 评分逻辑说明 —— 如实反映线上生效的「短线决策引擎 v3」（P1.1）。
+///
+/// 权重与阈值均从引擎真实常量渲染
+/// （[DirectionalEvidenceBuilder.componentWeights] / [RecommendationThresholds.defaults]），
+/// 从根本上避免说明文档与实现漂移（历史上本页描述的是已不生效的 7 维影子路径）。
 class ScoringExplanationScreen extends StatelessWidget {
   const ScoringExplanationScreen({super.key});
+
+  static const Map<String, String> _dimLabels = {
+    trendComponentKey: '趋势',
+    reversalMomentumComponentKey: '反转动量',
+    volumeFlowComponentKey: '量价流',
+    relativeStrengthComponentKey: '相对强度',
+    nextSessionComponentKey: '次交易日预测',
+    sectorMomentumComponentKey: '板块动量',
+  };
+  static const Map<String, String> _dimDesc = {
+    trendComponentKey: '均线排列 + ADX 趋势强度',
+    reversalMomentumComponentKey: 'RSI / KDJ / BIAS 超买超卖反转',
+    volumeFlowComponentKey: '量比 + 主力资金方向',
+    relativeStrengthComponentKey: '个股相对大盘强弱',
+    nextSessionComponentKey: '次交易日涨跌预测',
+    sectorMomentumComponentKey: '板块轮动 / 主线 / 退潮',
+  };
+  static const List<Color> _dimColors = [
+    Color(0xFF26a69a),
+    Color(0xFF4caf50),
+    Color(0xFFff9800),
+    Color(0xFF9c27b0),
+    Color(0xFF03a9f4),
+    Color(0xFF00bcd4),
+  ];
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
     return Scaffold(
       backgroundColor: const Color(0xFF0D1117),
       appBar: AppBar(
@@ -17,31 +49,42 @@ class ScoringExplanationScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _buildSectionTitle('综合评分体系'),
+          _sectionTitle('评分与推荐如何生成'),
           const SizedBox(height: 8),
-          _buildParagraph(
-            '评分系统采用7维加权融合算法（短线模式8维），综合技术面、资金面、实时行情、共振信号、市场情绪、基本面、市场结构和板块动量等维度，最终输出1-10分的综合评分。惩罚机制采用3层乘法模型：追高风险因子×市场环境因子×预测修正因子。',
+          _paragraph(
+            '线上展示的评分与推荐来自「短线决策引擎 v3」：先由方向证据构建器把 6 个维度加权成方向分 '
+            'directionScore（-100 ~ +100），再按强度分档映射为 9 级推荐，并叠加交易质量 / 风险 / '
+            '证据置信度三道执行门控，最终折算成 1-10 分展示。综合评分（技术 / 资金 / 情绪等）作为其中'
+            '一个上下文输入参与，不再单独决定推荐。',
             theme,
           ),
           const SizedBox(height: 16),
+          _sectionTitle('方向证据维度权重'),
+          const SizedBox(height: 8),
           _buildWeightsCard(theme),
           const SizedBox(height: 16),
-          _buildSectionTitle('各维度评分详解'),
-          const SizedBox(height: 8),
-          ..._buildDimensionCards(theme),
-          const SizedBox(height: 16),
-          _buildSectionTitle('评分调整机制'),
-          const SizedBox(height: 8),
-          ..._buildAdjustmentCards(theme),
-          const SizedBox(height: 16),
-          _buildSectionTitle('推荐等级对照表'),
+          _sectionTitle('推荐等级对照（按方向分）'),
           const SizedBox(height: 8),
           _buildRecommendationTable(theme),
           const SizedBox(height: 16),
-          _buildSectionTitle('风险提示'),
+          _sectionTitle('执行门控（拦截"方向对但质量差"）'),
           const SizedBox(height: 8),
-          _buildParagraph(
-            '评分仅供参考，不构成投资建议。市场有风险，投资需谨慎。评分系统基于历史数据和技术指标计算，不保证未来收益。',
+          ..._buildGateCards(theme),
+          const SizedBox(height: 16),
+          _sectionTitle('胜率校准'),
+          const SizedBox(height: 8),
+          _paragraph(
+            '决策落库后按 1 / 3 / 5 日跟踪真实结果，使用 Wilson 置信区间与 Beta-Binomial 后验，在样本'
+            '充足（每桶 ≥ 100 且 ≥ 20 个交易日）时给出该方向分档的真实命中概率区间，用于校准展示分与'
+            '实际胜率的偏差（ECE）。',
+            theme,
+          ),
+          const SizedBox(height: 16),
+          _sectionTitle('风险提示'),
+          const SizedBox(height: 8),
+          _paragraph(
+            '评分仅供参考，不构成投资建议。市场有风险，投资需谨慎。评分基于历史数据与技术指标计算，不'
+            '保证未来收益。',
             theme,
             isWarning: true,
           ),
@@ -50,7 +93,7 @@ class ScoringExplanationScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSectionTitle(String title) {
+  Widget _sectionTitle(String title) {
     return Text(
       title,
       style: const TextStyle(
@@ -61,7 +104,7 @@ class ScoringExplanationScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildParagraph(String text, ThemeData theme, {bool isWarning = false}) {
+  Widget _paragraph(String text, ThemeData theme, {bool isWarning = false}) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -84,17 +127,9 @@ class ScoringExplanationScreen extends StatelessWidget {
   }
 
   Widget _buildWeightsCard(ThemeData theme) {
-    final weights = [
-      {'name': '技术面', 'weight': 0.33, 'color': const Color(0xFF26a69a), 'desc': '信号强度+趋势+动量+量价+波动率'},
-      {'name': '资金面', 'weight': 0.18, 'color': const Color(0xFF4caf50), 'desc': '主力资金净流入/流出'},
-      {'name': '实时行情', 'weight': 0.16, 'color': const Color(0xFFff9800), 'desc': '当日涨跌幅+换手率+振幅'},
-      {'name': '共振评分', 'weight': 0.12, 'color': const Color(0xFF9c27b0), 'desc': '跨指标多空一致性'},
-      {'name': '市场情绪', 'weight': 0.10, 'color': const Color(0xFF03a9f4), 'desc': '新闻情感分析'},
-      {'name': '基本面', 'weight': 0.07, 'color': const Color(0xFFe91e63), 'desc': 'PE/PB/市值等估值指标'},
-      {'name': '市场结构', 'weight': 0.04, 'color': const Color(0xFF607d8b), 'desc': 'ADX趋势强度+均线对齐'},
-      {'name': '板块动量(短线)', 'weight': 0.10, 'color': const Color(0xFF00bcd4), 'desc': '主线加成/退潮折扣/过热检测(仅短线模式)'},
-    ];
-
+    final entries = DirectionalEvidenceBuilder.componentWeights.entries.toList();
+    final maxW = entries.fold<double>(
+        0, (m, e) => e.value > m ? e.value : m);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -106,17 +141,27 @@ class ScoringExplanationScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            '7维权重分布',
-            style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+            '6 维方向证据（合计 100%）',
+            style: TextStyle(
+                color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 12),
-          ...weights.map((w) => _buildWeightBar(w, theme)),
+          for (var i = 0; i < entries.length; i++)
+            _weightBar(
+              _dimLabels[entries[i].key] ?? entries[i].key,
+              _dimDesc[entries[i].key] ?? '',
+              entries[i].value,
+              maxW > 0 ? entries[i].value / maxW : 0,
+              _dimColors[i % _dimColors.length],
+              theme,
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildWeightBar(Map<String, dynamic> w, ThemeData theme) {
+  Widget _weightBar(String name, String desc, double weight, double barFactor,
+      Color color, ThemeData theme) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
@@ -125,7 +170,9 @@ class ScoringExplanationScreen extends StatelessWidget {
             children: [
               Expanded(
                 flex: 2,
-                child: Text(w['name'], style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white)),
+                child: Text(name,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: Colors.white)),
               ),
               Expanded(
                 flex: 4,
@@ -139,10 +186,10 @@ class ScoringExplanationScreen extends StatelessWidget {
                     ),
                     child: FractionallySizedBox(
                       alignment: Alignment.centerLeft,
-                      widthFactor: w['weight'],
+                      widthFactor: barFactor.clamp(0.0, 1.0),
                       child: Container(
                         decoration: BoxDecoration(
-                          color: w['color'] as Color,
+                          color: color,
                           borderRadius: BorderRadius.circular(4),
                         ),
                       ),
@@ -154,230 +201,41 @@ class ScoringExplanationScreen extends StatelessWidget {
                 flex: 1,
                 child: Align(
                   alignment: Alignment.centerRight,
-                  child: Text('${(w['weight'] * 100).round()}%', style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey)),
+                  child: Text('${(weight * 100).round()}%',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: Colors.grey)),
                 ),
               ),
             ],
           ),
           Padding(
             padding: const EdgeInsets.only(left: 8),
-            child: Text(w['desc'] as String, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey)),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(desc,
+                  style:
+                      theme.textTheme.bodySmall?.copyWith(color: Colors.grey)),
+            ),
           ),
         ],
       ),
     );
   }
 
-  List<Widget> _buildDimensionCards(ThemeData theme) {
-    final dimensions = [
-      {
-        'title': '技术面评分 (0-10分)',
-        'color': const Color(0xFF26a69a),
-        'items': [
-          '信号评分：买入/卖出信号强度加权，占30%',
-          '趋势评分：均线排列+ADX趋势强度，占20%',
-          '动量评分：RSI超买超卖+BIAS乖离率，占20%',
-          '量价评分：量比+OBV趋势确认，占15%',
-          '波动率评分：ATR波动幅度，占15%',
-        ],
-      },
-      {
-        'title': '资金面评分 (0-10分)',
-        'color': const Color(0xFF4caf50),
-        'items': [
-          '主力资金净流入率>10%：+1.5分',
-          '主力资金净流入率>5%：+1.0分',
-          '主力资金净流入率>0%：+0.5分',
-          '主力资金净流出率<-6%：-1.5分',
-        ],
-      },
-      {
-        'title': '实时行情评分 (0-10分)',
-        'color': const Color(0xFFff9800),
-        'items': [
-          '涨幅2%-5%：最优区间，+2.0分',
-          '涨幅5%-8%：中阳线，+1.0分（v2.38降低，避免诱多）',
-          '涨幅>8%：大涨，+0.8分（抑制追高）',
-          '换手率2%-5%：活跃区间，+0.8分',
-          '振幅>8%：高波动，需结合量能判断',
-        ],
-      },
-      {
-        'title': '共振评分 (0-10分)',
-        'color': const Color(0xFF9c27b0),
-        'items': [
-          '10个指标维度：MA/MACD/RSI/KDJ/BOLL/量价/WR/CCI/缺口/背离',
-          '各指标权重不同：MA/MACD=1.5, VOL=1.2, BOLL=1.0, KDJ/RSI=0.8, WR/CCI=0.6',
-          '背离信号权重提升至1.0（强反转预警）',
-          '多头指标加权加分（上限+5），空头指标加权减分（下限-5）',
-        ],
-      },
-      {
-        'title': '基本面评分 (0-10分)',
-        'color': const Color(0xFFe91e63),
-        'items': [
-          '市盈率(PE)：行业百分位排名',
-          '市净率(PB)：行业百分位排名',
-          '市值规模：大盘股稳定性加分',
-          '熊市时权重提升30%（防守价值更大）',
-        ],
-      },
-      {
-        'title': '板块动量评分 (短线模式)',
-        'color': const Color(0xFF00bcd4),
-        'items': [
-          '主线板块个股：加成1.0-1.3倍',
-          '板块加速(accelerating)：+0.25分',
-          '板块退潮(decelerating+跌>1%)：-0.30分',
-          '板块过热：主线加成受限，仅+0.15',
-          '板块涨停潮(≥3家涨停)：+0.15分',
-          '板块龙头(相对强度>0.8)：+0.10分',
-          '板块跟风(相对强度<0.3)：-0.10分',
-          '退潮折扣：评分×0.85',
-        ],
-      },
-      {
-        'title': '市场结构评分 (0-10分)',
-        'color': const Color(0xFF607d8b),
-        'items': [
-          '牛市结构：顺势做多',
-          '熊市结构：防御策略',
-          '震荡盘整：低买高卖',
-          '吸筹结构：逢低布局',
-          '派发结构：防范回落',
-        ],
-      },
-    ];
-
-    return dimensions.map((d) => Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF30363D), width: 0.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 4,
-                height: 20,
-                decoration: BoxDecoration(color: d['color'] as Color, borderRadius: BorderRadius.circular(2)),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                d['title'] as String,
-                style: theme.textTheme.titleSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ...(d['items'] as List<String>).map((item) => Padding(
-            padding: const EdgeInsets.only(left: 12, top: 4),
-            child: Row(
-              children: [
-                Icon(Icons.check, size: 14, color: d['color'] as Color),
-                const SizedBox(width: 6),
-                Text(item, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey)),
-              ],
-            ),
-          )),
-        ],
-      ),
-    )).toList();
-  }
-
-  List<Widget> _buildAdjustmentCards(ThemeData theme) {
-    final adjustments = [
-      {
-        'title': '第1层：追高风险因子 [0.40, 1.0]',
-        'color': const Color(0xFFef5350),
-        'items': [
-          '合并原追高惩罚+乖离率惩罚+趋势一致性',
-          '涨停(>9.5%)：chaseP=0.65',
-          '大涨(8%-9.5%)：chaseP=0.75',
-          '连涨3天+涨幅5%：chaseP=0.92',
-          'BIAS>8%：biasP=0.88(超买)/0.94(超卖减轻)',
-          '近3日跌>5%：trendP=0.70(趋势一致性)',
-          '动量保护：ADX>30+多头排列时惩罚减半',
-          '三层乘积下限0.40',
-        ],
-      },
-      {
-        'title': '第2层：市场环境因子 [0.50, 1.0]',
-        'color': const Color(0xFFff9800),
-        'items': [
-          '合并原大盘调整+下跌折扣+板块过热+金融股折扣',
-          '大盘调整：marketAdjustment×0.4+positionFactor×0.6',
-          '大盘跌>3%：declineFactor=0.80(逆市跑赢可豁免)',
-          '板块过热：heatDiscount折扣',
-          '金融股(券商/银行/保险)：×0.88',
-          '总乘积clamp到[0.50, 1.0]',
-        ],
-      },
-      {
-        'title': '第3层：预测修正因子 [0.85, 1.05]',
-        'color': const Color(0xFF4caf50),
-        'items': [
-          'NextDayPredictor下跌概率>60%：×0.85',
-          'NextDayPredictor上涨概率>60%：×1.05',
-          'NextSession下行风险>55%且置信度>0.5：×0.90',
-          '总惩罚乘积不低于0.40（保底机制）',
-        ],
-      },
-      {
-        'title': '板块动量加成/折扣',
-        'color': const Color(0xFF00bcd4),
-        'items': [
-          '主线板块：评分×mainLineBonus(1.0-1.3)',
-          '板块退潮：评分×0.85',
-          '板块过热：主线加成受限',
-          '行业RS排名后30%：评分×0.90',
-        ],
-      },
-    ];
-
-    return adjustments.map((a) => Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: a['color'] as Color, width: 0.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            a['title'] as String,
-            style: theme.textTheme.titleSmall?.copyWith(color: a['color'] as Color, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 6),
-          ...(a['items'] as List<String>).map((item) => Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text('- $item', style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey)),
-          )),
-        ],
-      ),
-    )).toList();
-  }
-
   Widget _buildRecommendationTable(ThemeData theme) {
-    final recommendations = [
-      {'score': '1', 'level': '强烈卖出', 'action': '坚决卖出，清仓离场'},
-      {'score': '2', 'level': '卖出', 'action': '建议卖出，降低仓位'},
-      {'score': '3', 'level': '谨慎卖出', 'action': '可考虑卖出，观望为主'},
-      {'score': '4', 'level': '偏空观望', 'action': '观望，等待时机'},
-      {'score': '5', 'level': '偏多观望', 'action': '观望，关注机会'},
-      {'score': '6', 'level': '谨慎买入', 'action': '可少量买入，控制风险'},
-      {'score': '7', 'level': '买入', 'action': '建议买入，合理仓位'},
-      {'score': '8', 'level': '强烈买入', 'action': '积极买入，把握机会'},
-      {'score': '9-10', 'level': '强烈买入', 'action': '积极买入，把握机会'},
+    final t = RecommendationThresholds.defaults;
+    String f(double v) => v.toStringAsFixed(0);
+    final rows = <(String, String, String)>[
+      ('≥ +${f(t.strongBullish)}', '强烈买入', '积极参与'),
+      ('+${f(t.bullish)} ~ +${f(t.strongBullish)}', '买入', '合理仓位'),
+      ('+${f(t.cautiousBullish)} ~ +${f(t.bullish)}', '谨慎买入', '小量参与'),
+      ('+12 ~ +${f(t.cautiousBullish)}', '偏多观望', '观望偏多'),
+      ('-12 ~ +12', '观望', '中性等待'),
+      ('-${f(t.cautiousBullish)} ~ -12', '偏空观望', '观望偏空'),
+      ('-${f(t.bullish)} ~ -${f(t.cautiousBullish)}', '谨慎卖出', '减仓'),
+      ('-${f(t.strongBullish)} ~ -${f(t.bullish)}', '卖出', '卖出'),
+      ('≤ -${f(t.strongBullish)}', '强烈卖出', '清仓'),
     ];
-
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
@@ -389,52 +247,100 @@ class ScoringExplanationScreen extends StatelessWidget {
         children: [
           Row(
             children: [
-              _buildTableHeader('评分', theme),
-              _buildTableHeader('推荐', theme),
-              _buildTableHeader('操作建议', theme),
+              _tableHeader('方向分', theme),
+              _tableHeader('推荐', theme),
+              _tableHeader('操作', theme),
             ],
           ),
-          ...recommendations.map((r) => Row(
-            children: [
-              _buildTableCell(r['score'] as String, theme, width: 50),
-              _buildTableCell(r['level'] as String, theme, width: 80, isLevel: true),
-              _buildTableCell(r['action'] as String, theme, width: 0),
-            ],
-          )),
+          for (final r in rows)
+            Row(
+              children: [
+                _tableCell(r.$1, theme, width: 96),
+                _tableCell(r.$2, theme, width: 72, isLevel: true),
+                _tableCell(r.$3, theme, width: 0),
+              ],
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildTableHeader(String text, ThemeData theme) {
+  List<Widget> _buildGateCards(ThemeData theme) {
+    final t = RecommendationThresholds.defaults;
+    String f(double v) => v.toStringAsFixed(0);
+    final cards = <(String, String)>[
+      (
+        '强烈买入门控',
+        '交易质量 ≥ ${f(t.strongBullishQualityMin)} 且 风险 ≤ ${f(t.strongBullishRiskMax)} 且 '
+            '证据置信度 ≥ ${f(t.strongBullishConfidenceMin)}，任一不满足则降级为「偏多观望」'
+      ),
+      (
+        '买入门控',
+        '交易质量 ≥ ${f(t.bullishQualityMin)} 且 风险 ≤ ${f(t.bullishRiskMax)} 且 '
+            '证据置信度 ≥ ${f(t.bullishConfidenceMin)}'
+      ),
+      (
+        '谨慎买入门控',
+        '交易质量 ≥ ${f(t.cautiousBullishQualityMin)} 且 风险 ≤ ${f(t.cautiousBullishRiskMax)}'
+      ),
+      (
+        '空头证据门控',
+        '证据置信度 ≥ ${f(t.bearishConfidenceMin)} 方可给出可执行的卖出建议，否则降级为「偏空观望」'
+      ),
+    ];
+    return [
+      for (final c in cards)
+        Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF161B22),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFff9800), width: 0.5),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(c.$1,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                      color: const Color(0xFFff9800),
+                      fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              Text(c.$2,
+                  style:
+                      theme.textTheme.bodySmall?.copyWith(color: Colors.grey)),
+            ],
+          ),
+        ),
+    ];
+  }
+
+  Widget _tableHeader(String text, ThemeData theme) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
         decoration: const BoxDecoration(color: Color(0xFF21262D)),
-        child: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
+        child: Text(text,
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
     );
   }
 
-  Widget _buildTableCell(String text, ThemeData theme, {int width = 0, bool isLevel = false}) {
-    final color = isLevel ? _getLevelColor(text) : Colors.white70;
+  Widget _tableCell(String text, ThemeData theme,
+      {int width = 0, bool isLevel = false}) {
+    final color = isLevel ? _levelColor(text) : Colors.white70;
+    final child = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+      child: Text(text,
+          style: theme.textTheme.bodySmall?.copyWith(color: color)),
+    );
     return width > 0
-        ? SizedBox(
-            width: width.toDouble(),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-              child: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: color)),
-            ),
-          )
-        : Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-              child: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: color)),
-            ),
-          );
+        ? SizedBox(width: width.toDouble(), child: child)
+        : Expanded(child: child);
   }
 
-  Color _getLevelColor(String level) {
+  Color _levelColor(String level) {
     if (level.contains('买入')) return const Color(0xFFef5350);
     if (level.contains('卖出')) return const Color(0xFF26a69a);
     return Colors.grey;

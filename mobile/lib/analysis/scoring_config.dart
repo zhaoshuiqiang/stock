@@ -1,0 +1,60 @@
+/// Central scoring feature flags + version tags — single source of truth.
+///
+/// Every flag defaults to OFF so the live engine stays byte-identical to the
+/// pre-v4.3 behavior until data-driven calibration is explicitly enabled and
+/// validated against the accuracy report (scripts/analyze_decision_accuracy.py).
+///
+/// Flags are mutable statics (not `const`) so they can be toggled at runtime
+/// (e.g. from settings or tests) without recompiling. Version tags are stamped
+/// onto persisted decisions so historical scores are never silently compared
+/// with scores produced under a different weight/threshold regime.
+/// User risk appetite that tunes recommendation execution-gate strictness (P3).
+/// `balanced` is the neutral default and leaves gates byte-identical.
+enum RiskProfile { conservative, balanced, aggressive }
+
+class ScoringConfig {
+  ScoringConfig._();
+
+  /// P2.1 — use data-driven direction-component weights derived from realized
+  /// outcomes instead of the static [DirectionalEvidenceBuilder.componentWeights].
+  static bool useDynamicDirectionWeights = false;
+
+  /// P2.2 — use backtest-calibrated recommendation thresholds/gates.
+  static bool useCalibratedThresholds = false;
+
+  /// P2.3 — surface the calibrated hit probability next to the legacy 1-10 score.
+  static bool showCalibratedProbability = false;
+
+  /// P3 personalization: user risk appetite. `balanced` == no gate change, so
+  /// the default remains byte-identical to pre-P3 behavior.
+  static RiskProfile riskProfile = RiskProfile.balanced;
+
+  /// P4.1: offload batch-scan analysis to a background isolate (via compute).
+  /// Default off; enable after on-device frame-time validation.
+  static bool useIsolateScan = false;
+
+  /// Bumped whenever the active direction weights change, so old/new decisions
+  /// stay comparable only within the same version.
+  static const String defaultWeightsVersion = 'w-default-v1';
+
+  /// Bumped whenever recommendation thresholds/gates change.
+  static const String defaultPolicyVersion = 'p-default-v1';
+
+  /// Runtime weights version tag (updated by the optimizer bootstrap when
+  /// dynamic weights are applied; stays default when the flag is off).
+  static String activeWeightsVersion = defaultWeightsVersion;
+
+  // ---- Optimizer guardrails (mirror DecisionCalibrator statistical rigor) ----
+
+  /// Minimum evaluated samples before dynamic weights may deviate from default.
+  static const int minWeightSamples = 100;
+
+  /// Minimum distinct signal dates (guards against a single day dominating).
+  static const int minWeightDates = 20;
+
+  /// Per-component maximum absolute weight adjustment per optimization run.
+  static const double maxWeightAdjustment = 0.08;
+
+  /// Recency decay (older outcomes count less); 1.0 == no decay.
+  static const double weightDecayFactor = 0.98;
+}

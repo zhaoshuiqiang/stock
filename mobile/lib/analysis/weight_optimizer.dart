@@ -7,6 +7,10 @@ import '../storage/database_service.dart';
 /// 基于历史推荐命中率数据，自动调整7维评分的权重分配。
 /// 核心逻辑：表现好的维度权重上调，表现差的维度权重下调。
 /// 数据来源：recommendation_tracking 表中已关闭的推荐记录及其 dimension_scores_json。
+// NOTE (v4.3 / P2.4): Superseded by DirectionalWeightOptimizer, which targets the
+// live 5-dim direction engine. This 7-dim optimizer is retained ONLY for the
+// recommendation_stats_screen display and is NOT wired into live scoring. Do not
+// use it in new code.
 class WeightOptimizer {
   static final WeightOptimizer _instance = WeightOptimizer._();
   factory WeightOptimizer() => _instance;

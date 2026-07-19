@@ -576,6 +576,7 @@ class QuoteData {
   final double pb;
   final double totalMarketCap;
   final double circulatingMarketCap;
+  final double? roe; // return on equity (%), nullable; v4.3 fundamental input
   double mainInflow;
   double mainOutflow;
   double mainNetFlow;
@@ -603,6 +604,7 @@ class QuoteData {
     this.pb = 0,
     this.totalMarketCap = 0,
     this.circulatingMarketCap = 0,
+    this.roe,
     this.mainInflow = 0,
     this.mainOutflow = 0,
     this.mainNetFlow = 0,
@@ -632,6 +634,7 @@ class QuoteData {
       pb: _parseDouble(json['pb']),
       totalMarketCap: _parseDouble(json['total_market_cap']),
       circulatingMarketCap: _parseDouble(json['circulating_market_cap']),
+      roe: json['roe'] == null ? null : _parseDouble(json['roe']),
       mainInflow: _parseDouble(json['main_inflow']),
       mainOutflow: _parseDouble(json['main_outflow']),
       mainNetFlow: _parseDouble(json['main_net_flow']),
@@ -677,6 +680,7 @@ class QuoteData {
       'pb': pb,
       'total_market_cap': totalMarketCap,
       'circulating_market_cap': circulatingMarketCap,
+      'roe': roe,
       'main_inflow': mainInflow,
       'main_outflow': mainOutflow,
       'main_net_flow': mainNetFlow,
@@ -704,6 +708,7 @@ class QuoteData {
     double? pb,
     double? totalMarketCap,
     double? circulatingMarketCap,
+    double? roe,
     double? mainInflow,
     double? mainOutflow,
     double? mainNetFlow,
@@ -731,6 +736,7 @@ class QuoteData {
       pb: pb ?? this.pb,
       totalMarketCap: totalMarketCap ?? this.totalMarketCap,
       circulatingMarketCap: circulatingMarketCap ?? this.circulatingMarketCap,
+      roe: roe ?? this.roe,
       mainInflow: mainInflow ?? this.mainInflow,
       mainOutflow: mainOutflow ?? this.mainOutflow,
       mainNetFlow: mainNetFlow ?? this.mainNetFlow,

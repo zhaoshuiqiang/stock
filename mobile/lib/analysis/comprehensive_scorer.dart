@@ -72,8 +72,8 @@ class ComprehensiveScorer {
     FundamentalScore? fundamentalScore;
     double fundamentalScoreValue = 5.0;
     if (quote != null && quote.price > 0) {
-      // TODO: Pass ROE from QuoteData once EastMoney ROE data source is integrated
-      fundamentalScore = FundamentalAnalyzer.analyze(quote);
+      // v4.3: ROE now threaded from QuoteData (nullable; analyzer falls back to 5.0 when null)
+      fundamentalScore = FundamentalAnalyzer.analyze(quote, roe: quote.roe);
       fundamentalScoreValue = fundamentalScore.totalScore;
     }
 

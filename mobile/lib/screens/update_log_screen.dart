@@ -10,6 +10,32 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.4.20260719',
+        'date': '2026-07-19',
+        'changes': [
+          '评审修复: 批量扫描isolate化的评分配置传播——compute worker拥有独立静态态，会丢失动态权重/校准阈值/风险偏好；现将active配置随请求快照并在worker内恢复，保证开关开启时isolate与主线程评分一致',
+          '评审确认: 默认(开关关闭)路径经逐行复核与全量回归行为字节级不变',
+          '测试: 新增isolate配置恢复用例，全量1114测试通过；发布APK构建通过',
+        ],
+      },
+      {
+        'version': 'v4.3.20260719',
+        'date': '2026-07-19',
+        'changes': [
+          '新增: ROE基本面接入——QuoteData新增roe字段，东方财富F10最佳努力获取(缓存6h+范围校验)，接入综合评分',
+          '新增: 方向权重优化器——基于decision_outcomes真实命中数据校准5维方向权重(默认关闭，采样≥100且≥20个交易日方生效)',
+          '新增: 评分配置中心ScoringConfig——统一特性开关与权重版本打标，默认关闭保证历史可比',
+          '新增: v3准确性分析脚本analyze_decision_accuracy.py——读取真实decision_snapshots/outcomes产出命中率/Brier/ECE',
+          '新增: 评分解释页重写为真实v3引擎(6维方向权重/分档阈值/执行门控/校准)，从引擎常量渲染防漂移',
+          '新增: 个股评分明细卡(5维方向证据贡献+1/3/5日校准胜率区间)',
+          '新增: 推荐阈值数据驱动校准器(默认关闭)；风险偏好设置(保守/均衡/激进)动态调整推荐门控',
+          '新增: 持仓建议卡——ATR动态止损位+情景化加/减/持/止损+风险回撤货币化(预估亏损金额)',
+          '优化: DB升级v25补齐分析表索引；加载态骨架屏；清理死代码RecommendationCalibrator，归档WeightOptimizer',
+          '优化: 批量扫描可选迁入后台isolate(ScoringConfig.useIsolateScan，默认关，待真机帧率验证后开启)',
+          '测试: 新增金测/ROE/权重/阈值/风险/持仓/骨架/isolate等单测，全量1113测试通过(校准开关默认关，行为不变)；发布APK构建通过',
+        ],
+      },
+      {
         'version': 'v4.2.20260718',
         'date': '2026-07-18',
         'changes': [
