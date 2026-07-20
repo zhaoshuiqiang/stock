@@ -13,6 +13,7 @@ import 'package:stock_analyzer/screens/archive_screen.dart';
 import 'package:stock_analyzer/screens/alerts_screen.dart';
 import 'package:stock_analyzer/screens/update_log_screen.dart';
 import 'package:stock_analyzer/screens/scoring_explanation_screen.dart';
+import 'package:stock_analyzer/screens/settings_screen.dart';
 import 'package:stock_analyzer/services/notification_service.dart';
 import 'package:stock_analyzer/data/concept_tag_provider.dart';
 import 'package:stock_analyzer/analysis/directional_weight_optimizer.dart';
@@ -208,6 +209,16 @@ class _MyAppState extends State<MyApp> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(builder: (context) => const UpdateLogScreen()),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.settings),
+                    tooltip: '设置',
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const SettingsScreen()),
                       );
                     },
                   ),
