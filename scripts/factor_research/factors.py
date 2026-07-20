@@ -103,7 +103,8 @@ def _atr(high, low, close, n=14):
     return _wilder(tr, n)
 
 
-def _adx(high, low, close, n=14):
+def _dmi(high, low, close, n=14):
+    """返回 (adx, plus_di, minus_di)，供 ADX 值与方向判断复用。"""
     up = high.diff()
     down = -low.diff()
     plus_dm = ((up > down) & (up > 0)) * up
@@ -112,7 +113,12 @@ def _adx(high, low, close, n=14):
     plus_di = 100 * _wilder(plus_dm, n) / atr.replace(0, np.nan)
     minus_di = 100 * _wilder(minus_dm, n) / atr.replace(0, np.nan)
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
-    return _wilder(dx.fillna(0), n)
+    adx = _wilder(dx.fillna(0), n)
+    return adx, plus_di, minus_di
+
+
+def _adx(high, low, close, n=14):
+    return _dmi(high, low, close, n)[0]
 
 
 def compute_factors(kline: pd.DataFrame) -> pd.DataFrame:

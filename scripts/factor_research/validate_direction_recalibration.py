@@ -53,8 +53,9 @@ def _compute_pieces(kl: pd.DataFrame) -> pd.DataFrame:
     out['change3d'] = (c / c.shift(3) - 1) * 100
     out['mom5'] = (c / c.shift(5) - 1) * 100
     out['amp'] = (h - l) / prev * 100
-    out['adx14'] = F._adx(h, l, c, 14)
-    out['adx_bull'] = ma5 > ma20
+    adx14, plus_di, minus_di = F._dmi(h, l, c, 14)
+    out['adx14'] = adx14
+    out['adx_bull'] = plus_di > minus_di  # ¶ÔÆë Dart: plusDi14 > minusDi14
     out['rsi6'] = F._rsi(c, 6)
     k, d, _ = F._kdj(h, l, c, 9)
     out['k'], out['d'] = k, d
