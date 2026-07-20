@@ -214,7 +214,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
+        child: SingleChildScrollView(
+          child: Column(
           children: [
             Card(
               color: const Color(0xFF161B22),
@@ -421,6 +422,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: textTheme.bodySmall?.copyWith(color: Colors.grey[500]),
             ),
           ],
+        ),
         ),
       ),
     );
