@@ -33,6 +33,15 @@ class ScoringConfig {
   /// Default off; enable after on-device frame-time validation.
   static bool useIsolateScan = false;
 
+  /// P5 — 循证校准方向证据：低波/反转 fade + 降低追涨/放量奖励（基于离线 IC 证据）。
+  /// 默认关；开启后 DirectionalEvidenceBuilder 应用循证微调，关闭时字节等价回退。
+  static bool useRecalibratedDirection = false;
+
+  /// 方向模型版本标签：随循证校准开关切换，可写入 decision_snapshots.model_version，
+  /// 使不同口径的历史分数不被混合统计。
+  static String get directionModelVersion =>
+      useRecalibratedDirection ? 'dir-recal-v1' : 'dir-default-v1';
+
   /// Bumped whenever the active direction weights change, so old/new decisions
   /// stay comparable only within the same version.
   static const String defaultWeightsVersion = 'w-default-v1';

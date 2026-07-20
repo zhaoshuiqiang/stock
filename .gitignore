@@ -41,3 +41,7 @@ mobile/web/
 .streamlit/
 .kilo/
 .worktrees/
+
+# 因子研究离线管线的本地缓存与中间产物（可复现，不提交）
+scripts/factor_research/cache/
+scripts/factor_research/output/

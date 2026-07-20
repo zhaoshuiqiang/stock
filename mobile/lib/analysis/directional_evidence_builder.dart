@@ -3,6 +3,7 @@ import 'market_structure_analyzer.dart';
 import 'next_day_predictor.dart';
 import 'next_session_prediction.dart';
 import 'sector_momentum_calculator.dart';
+import 'scoring_config.dart';
 import 'signal_evidence_classifier.dart';
 import '../models/short_term_decision.dart';
 import '../models/stock_models.dart';
@@ -201,6 +202,8 @@ class DirectionalEvidenceBuilder {
         input.sellSignals,
         signalOwnership,
       ),
+      if (ScoringConfig.useRecalibratedDirection)
+        ..._factorFadeEvidence(input.data),
     ];
     final aggregated = _aggregateEvidence(observations);
     final components = aggregated.components;
@@ -315,20 +318,12 @@ class DirectionalEvidenceBuilder {
     final values = <_EvidenceObservation>[];
     final last = data.last;
     if (last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0) {
+      // P5: 循证校准下适度降低均线多头奖励（趋势短期部分反转）
+      final maMag = ScoringConfig.useRecalibratedDirection ? 0.35 : 0.45;
       if (last.ma5 > last.ma10 && last.ma10 > last.ma20) {
-        values.add(const _EvidenceObservation(
-          component: trendComponentKey,
-          family: 'ma',
-          signedValue: 0.45,
-          source: 'numeric',
-        ));
+        values.add(_numeric(trendComponentKey, 'ma', maMag));
       } else if (last.ma5 < last.ma10 && last.ma10 < last.ma20) {
-        values.add(const _EvidenceObservation(
-          component: trendComponentKey,
-          family: 'ma',
-          signedValue: -0.45,
-          source: 'numeric',
-        ));
+        values.add(_numeric(trendComponentKey, 'ma', -maMag));
       }
     }
 
@@ -336,20 +331,13 @@ class DirectionalEvidenceBuilder {
       final ref = data[data.length - 4].close;
       if (ref > 0 && last.close > 0) {
         final change3d = (last.close / ref - 1) * 100;
-        if (change3d >= 3) {
-          values.add(const _EvidenceObservation(
-            component: trendComponentKey,
-            family: 'price_momentum',
-            signedValue: 0.20,
-            source: 'numeric',
-          ));
-        } else if (change3d <= -3) {
-          values.add(const _EvidenceObservation(
-            component: trendComponentKey,
-            family: 'price_momentum',
-            signedValue: -0.20,
-            source: 'numeric',
-          ));
+        // P5: 循证校准下移除追涨贡献（近3日涨跌两向短期 IC 均与反转相左）
+        if (!ScoringConfig.useRecalibratedDirection) {
+          if (change3d >= 3) {
+            values.add(_numeric(trendComponentKey, 'price_momentum', 0.20));
+          } else if (change3d <= -3) {
+            values.add(_numeric(trendComponentKey, 'price_momentum', -0.20));
+          }
         }
       }
     }
@@ -443,8 +431,11 @@ class DirectionalEvidenceBuilder {
 
     if (last.volMa5 > 0 && last.volume > 0) {
       final volumeRatio = last.volume / last.volMa5;
+      // P5: 循证校准下降低放量上涨奖励（高量能短期负IC）
+      final upVolMag =
+          ScoringConfig.useRecalibratedDirection ? 0.30 : 0.55;
       if (last.close >= last.open && volumeRatio >= 1.4) {
-        values.add(_numeric(volumeFlowComponentKey, 'volume_price', 0.55));
+        values.add(_numeric(volumeFlowComponentKey, 'volume_price', upVolMag));
       } else if (last.close < last.open && volumeRatio >= 1.3) {
         values.add(_numeric(volumeFlowComponentKey, 'volume_price', -0.65));
       } else if (last.close >= last.open && volumeRatio < 0.7) {
@@ -587,6 +578,42 @@ class DirectionalEvidenceBuilder {
       }
     }
     return count;
+  }
+
+  /// P5: 循证校准的“过热回避/超跌反弹”因子证据（并入 reversal_momentum）。
+  /// 依据离线 IC：高振幅、近期大涨短期为负 IC → 回避；深超跌 → 反弹。
+  /// 幅度偏小，最终由离线验证(validate_direction_recalibration.py)调定。
+  static List<_EvidenceObservation> _factorFadeEvidence(
+    List<HistoryKline> data,
+  ) {
+    final values = <_EvidenceObservation>[];
+    final last = data.last;
+    // 振幅% = (high-low)/昨收*100（自算，避免依赖可能为0的 amplitude 字段）
+    if (data.length >= 2) {
+      final prevClose = data[data.length - 2].close;
+      if (prevClose > 0 && last.high > last.low) {
+        final ampPct = (last.high - last.low) / prevClose * 100;
+        if (ampPct >= 9) {
+          values.add(_numeric(reversalMomentumComponentKey, 'factor_amplitude', -0.30));
+        } else if (ampPct >= 6) {
+          values.add(_numeric(reversalMomentumComponentKey, 'factor_amplitude', -0.15));
+        }
+      }
+    }
+    if (data.length >= 6) {
+      final ref = data[data.length - 6].close;
+      if (ref > 0 && last.close > 0) {
+        final mom5 = (last.close / ref - 1) * 100;
+        if (mom5 >= 15) {
+          values.add(_numeric(reversalMomentumComponentKey, 'factor_momentum', -0.30));
+        } else if (mom5 >= 9) {
+          values.add(_numeric(reversalMomentumComponentKey, 'factor_momentum', -0.15));
+        } else if (mom5 <= -12) {
+          values.add(_numeric(reversalMomentumComponentKey, 'factor_momentum', 0.18));
+        }
+      }
+    }
+    return values;
   }
 
   static double _clampUnit(double value) {

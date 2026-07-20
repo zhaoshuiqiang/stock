@@ -7,6 +7,8 @@ import 'update_log_screen.dart';
 import 'indicator_reference_screen.dart';
 import 'strategy_reference_screen.dart';
 import '../analysis/scoring_config.dart';
+import '../analysis/directional_weight_optimizer.dart';
+import '../core/scoring_prefs.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -18,12 +20,18 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   AIProvider? _selectedProvider;
   RiskProfile _riskProfile = RiskProfile.balanced;
+  bool _recalDir = false;
+  bool _dynWeights = false;
+  bool _calibThresh = false;
+  bool _showCalibProb = false;
+  bool _isolateScan = false;
 
   @override
   void initState() {
     super.initState();
     _loadProviderSetting();
     _loadRiskProfile();
+    _loadScoringFlags();
   }
 
   Future<void> _loadProviderSetting() async {
@@ -78,6 +86,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _loadScoringFlags() async {
+    final prefs = await SharedPreferences.getInstance();
+    applyScoringPrefs(prefs);
+    if (!mounted) return;
+    setState(() {
+      _recalDir = ScoringConfig.useRecalibratedDirection;
+      _dynWeights = ScoringConfig.useDynamicDirectionWeights;
+      _calibThresh = ScoringConfig.useCalibratedThresholds;
+      _showCalibProb = ScoringConfig.showCalibratedProbability;
+      _isolateScan = ScoringConfig.useIsolateScan;
+    });
+  }
+
+  Future<void> _setScoringFlag(
+    String key,
+    bool value,
+    void Function(bool) apply, {
+    bool reloadWeights = false,
+    String hint = '下次扫描/进入详情后生效',
+  }) async {
+    apply(value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, value);
+    if (reloadWeights) {
+      await DirectionalWeightOptimizer.loadAndApply();
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(value ? '已开启 · $hint' : '已关闭 · $hint')),
+      );
+    }
+  }
+
   String _riskLabel(RiskProfile p) {
     switch (p) {
       case RiskProfile.conservative:
@@ -98,6 +139,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
       case RiskProfile.aggressive:
         return '门控更松：更多买入信号';
     }
+  }
+
+  Widget _buildScoringEngineCard(TextTheme textTheme) {
+    Widget tile(bool value, String title, String subtitle, String key,
+        void Function(bool) apply,
+        {bool reloadWeights = false, String hint = '下次扫描/进入详情后生效'}) {
+      return SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        activeThumbColor: Colors.tealAccent,
+        value: value,
+        onChanged: (v) => _setScoringFlag(key, v, apply,
+            reloadWeights: reloadWeights, hint: hint),
+        title: Text(title),
+        subtitle: Text(subtitle,
+            style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+      );
+    }
+
+    return Card(
+      color: const Color(0xFF161B22),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.science_outlined, size: 20, color: Colors.tealAccent),
+              const SizedBox(width: 8),
+              Text('评分引擎（实验）',
+                  style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            ]),
+            const SizedBox(height: 4),
+            const Text('数据驱动的评分校准开关，默认关闭，可随时一键回退。',
+                style: TextStyle(color: Colors.grey)),
+            tile(_recalDir, '方向引擎循证校准',
+                '降低追涨/放量奖励，加入低波/反转因子（提升评分准确性）',
+                kPrefUseRecalibratedDirection,
+                (x) { setState(() => _recalDir = x); ScoringConfig.useRecalibratedDirection = x; }),
+            tile(_dynWeights, '动态方向权重',
+                '依据历史决策结局自动校准各维度权重（需积累样本）',
+                kPrefUseDynamicDirectionWeights,
+                (x) { setState(() => _dynWeights = x); ScoringConfig.useDynamicDirectionWeights = x; },
+                reloadWeights: true, hint: '已重载动态权重'),
+            tile(_calibThresh, '校准推荐阈值',
+                '用回测校准的分档/门控阈值替代默认值',
+                kPrefUseCalibratedThresholds,
+                (x) { setState(() => _calibThresh = x); ScoringConfig.useCalibratedThresholds = x; }),
+            tile(_showCalibProb, '展示校准命中概率',
+                '在 1-10 分旁显示校准后的真实命中概率',
+                kPrefShowCalibratedProbability,
+                (x) { setState(() => _showCalibProb = x); ScoringConfig.showCalibratedProbability = x; }),
+            tile(_isolateScan, '后台 isolate 扫描',
+                '批量扫描迁入后台线程（降低卡顿，需真机验证）',
+                kPrefUseIsolateScan,
+                (x) { setState(() => _isolateScan = x); ScoringConfig.useIsolateScan = x; }),
+            const SizedBox(height: 4),
+            Text('提示：多数开关在下次扫描/进入详情页后生效。',
+                style: textTheme.bodySmall?.copyWith(color: Colors.grey[500])),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -226,6 +329,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ),
+            const SizedBox(height: 20),
+            _buildScoringEngineCard(textTheme),
             const SizedBox(height: 20),
             Card(
               color: const Color(0xFF161B22),

@@ -10,6 +10,17 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.5.20260720',
+        'date': '2026-07-20',
+        'changes': [
+          '新增: 方向引擎循证校准(ScoringConfig.useRecalibratedDirection，默认关)——基于离线IC证据降低追涨/放量奖励、加入低波/反转过热回避因子，提升评分方向准确性；离线验证分档单调性由0.20转+0.20、方向IC倒挂由0.020收敛至0.014',
+          '新增: 设置页“评分引擎(实验)”卡片——App内可直接开关方向循证校准/动态方向权重/校准阈值/展示校准概率/后台isolate扫描并持久化(原仅能改代码)',
+          '新增: 离线验证脚本validate_direction_recalibration.py——在540股×615日面板复刻方向证据子集对比current与校准版IC与分档单调性',
+          '优化: 启动引导先装载全部评分开关再应用动态权重，保证loadAndApply读到正确开关',
+          '测试: 新增方向校准/开关持久化/因子代理用例，全量1120测试通过(开关默认关，行为字节不变)',
+        ],
+      },
+      {
         'version': 'v4.4.20260719',
         'date': '2026-07-19',
         'changes': [

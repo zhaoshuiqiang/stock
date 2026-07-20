@@ -8,6 +8,7 @@ import 'next_day_predictor.dart';
 import 'next_session_prediction.dart';
 import 'primary_strategy_selector.dart';
 import 'recommendation_policy.dart';
+import 'scoring_config.dart';
 import 'short_term_risk_evaluator.dart';
 import 'strategy_engine.dart';
 import 'sector_momentum_calculator.dart';
@@ -63,7 +64,11 @@ class ShortTermDecisionResult {
 }
 
 class ShortTermDecisionEngine {
-  static const String modelVersion = 'short-term-v3';
+  /// v4.5: 循证校准开启时给模型版本追加标签，使新旧口径的决策统计不混合；
+  /// 关闭时保持 'short-term-v3' 字节不变。
+  static String get modelVersion => ScoringConfig.useRecalibratedDirection
+      ? 'short-term-v3+dir-recal-v1'
+      : 'short-term-v3';
 
   static ShortTermDecisionResult evaluate(ShortTermDecisionInput input) {
     final evidence = DirectionalEvidenceBuilder.build(

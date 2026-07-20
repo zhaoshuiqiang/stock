@@ -16,7 +16,7 @@ import 'package:stock_analyzer/screens/scoring_explanation_screen.dart';
 import 'package:stock_analyzer/services/notification_service.dart';
 import 'package:stock_analyzer/data/concept_tag_provider.dart';
 import 'package:stock_analyzer/analysis/directional_weight_optimizer.dart';
-import 'package:stock_analyzer/analysis/scoring_config.dart';
+import 'package:stock_analyzer/core/scoring_prefs.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -58,23 +58,15 @@ void main() async {
   // 预加载概念标签数据
   await ConceptTagProvider.instance.load();
 
-  // v4.3: apply data-driven direction weights when enabled. No-op (resets to
-  // static defaults) when ScoringConfig.useDynamicDirectionWeights is off, so
-  // startup behavior is unchanged until calibration is explicitly turned on.
-  await DirectionalWeightOptimizer.loadAndApply();
+  // P5: load all persisted scoring flags (recalibration, dynamic weights,
+  // thresholds, calibrated probability, isolate scan, risk profile) BEFORE
+  // applying dynamic weights, so loadAndApply sees the correct flag state.
+  final scoringPrefs = await SharedPreferences.getInstance();
+  applyScoringPrefs(scoringPrefs);
 
-  // v4.3 (P3): apply the persisted user risk profile (balanced when unset).
-  final riskPrefs = await SharedPreferences.getInstance();
-  switch (riskPrefs.getString('risk_profile')) {
-    case 'conservative':
-      ScoringConfig.riskProfile = RiskProfile.conservative;
-      break;
-    case 'aggressive':
-      ScoringConfig.riskProfile = RiskProfile.aggressive;
-      break;
-    default:
-      ScoringConfig.riskProfile = RiskProfile.balanced;
-  }
+  // v4.3: apply data-driven direction weights when enabled. No-op (resets to
+  // static defaults) when ScoringConfig.useDynamicDirectionWeights is off.
+  await DirectionalWeightOptimizer.loadAndApply();
 
   // v2.54: 初始化AI层
   if (AIConfig.enableAIEnhancement) {
