@@ -58,6 +58,13 @@ class ScoringConfig {
   /// scorer is byte-identical to the legacy inverted-U when this is false.
   static bool useShortTermRealtimeReprofile = false;
 
+  /// v4.11 - short-term trend discount: down-weight the lagging MA-alignment
+  /// and trend confluence that is contrarian intraday-to-1d (archive: MA-bull
+  /// forward -2.0%, trend-strength -0.70%). Cuts the technical trend reward
+  /// (bull-align 1.4->1.0, ADX bonus 0.5->0.3) and the MA confluence weight
+  /// (1.5->1.0). Default off; byte-identical to the legacy scorer when off.
+  static bool useShortTermTrendDiscount = false;
+
   /// 方向模型版本标签：随循证校准开关切换，可写入 decision_snapshots.model_version，
   /// 使不同口径的历史分数不被混合统计。
   static String get directionModelVersion =>

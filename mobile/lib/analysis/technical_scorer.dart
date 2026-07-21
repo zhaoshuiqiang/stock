@@ -1,4 +1,5 @@
 import '../models/stock_models.dart';
+import 'scoring_config.dart';
 
 class TechnicalScoreResult {
   final double signalScore;
@@ -93,7 +94,7 @@ class TechnicalScorer {
     double trendScore = 0;
     if (last.ma5 > 0 && last.ma10 > 0 && last.ma20 > 0) {
       if (last.ma5 > last.ma10 && last.ma10 > last.ma20) {
-        trendScore = 1.4;
+        trendScore = ScoringConfig.useShortTermTrendDiscount ? 1.0 : 1.4;
         if (last.close > 0) {
           final ma20Deviation = (last.close - last.ma20) / last.ma20 * 100;
           if (ma20Deviation > 8) {
@@ -129,7 +130,7 @@ class TechnicalScorer {
     // v2.48.0: 增加价格位置确认，避免强趋势下跌(ADX>25+价格在MA下方)获得趋势加分
     final priceAboveMa5 = last.close > 0 && last.ma5 > 0 && last.close > last.ma5;
     if (!isBearishAlignment && last.adx14 > 25 && priceAboveMa5) {
-      trendScore += 0.5;
+      trendScore += ScoringConfig.useShortTermTrendDiscount ? 0.3 : 0.5;
     } else if (last.adx14 > 0 && last.adx14 < 20) {
       trendScore -= 0.3;
     }

@@ -29,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _deemphBreakout = false;
   bool _reboundGuard = false;
   bool _shortTermReprofile = false;
+  bool _shortTermTrendDiscount = false;
 
   @override
   void initState() {
@@ -104,6 +105,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _deemphBreakout = ScoringConfig.deemphasizeBreakoutChase;
       _reboundGuard = ScoringConfig.useReboundGuard;
       _shortTermReprofile = ScoringConfig.useShortTermRealtimeReprofile;
+      _shortTermTrendDiscount = ScoringConfig.useShortTermTrendDiscount;
     });
   }
 
@@ -218,6 +220,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 '温和回调/持平区最优，3-5%追高区改为惩罚（3281行留档实证，跨日验证后再开）',
                 kPrefUseShortTermRealtimeReprofile,
                 (x) { setState(() => _shortTermReprofile = x); ScoringConfig.useShortTermRealtimeReprofile = x; }),
+            tile(_shortTermTrendDiscount, '趋势信号短周期降权 (B#1)',
+                'MA多头排列/趋势类共振短周期降权（留档MA多头前向-2.0%），跨日验证后再开',
+                kPrefUseShortTermTrendDiscount,
+                (x) { setState(() => _shortTermTrendDiscount = x); ScoringConfig.useShortTermTrendDiscount = x; }),
             const SizedBox(height: 4),
             Text('提示：多数开关在下次扫描/进入详情页后生效。',
                 style: textTheme.bodySmall?.copyWith(color: Colors.grey[500])),

@@ -41,6 +41,7 @@ class IsolateScanRequest {
   /// with fresh statics, so these are restored in [runBatchAnalysis] to keep
   /// batch scores identical to the main isolate when a flag is enabled.
   final bool useShortTermRealtimeReprofile;
+  final bool useShortTermTrendDiscount;
   final bool useRecalibratedDirection;
   final bool deemphasizeTrendStrength;
   final bool deemphasizeBreakoutChase;
@@ -52,6 +53,7 @@ class IsolateScanRequest {
     required this.activeWeights,
     required this.activeThresholds,
     this.useShortTermRealtimeReprofile = false,
+    this.useShortTermTrendDiscount = false,
     this.useRecalibratedDirection = false,
     this.deemphasizeTrendStrength = false,
     this.deemphasizeBreakoutChase = false,
@@ -84,6 +86,7 @@ List<IsolateScanResult> runBatchAnalysis(IsolateScanRequest request) {
   ScoringConfig.useCalibratedThresholds = true;
   ScoringConfig.riskProfile = RiskProfile.balanced;
   ScoringConfig.useShortTermRealtimeReprofile = request.useShortTermRealtimeReprofile;
+  ScoringConfig.useShortTermTrendDiscount = request.useShortTermTrendDiscount;
   ScoringConfig.useRecalibratedDirection = request.useRecalibratedDirection;
   ScoringConfig.deemphasizeTrendStrength = request.deemphasizeTrendStrength;
   ScoringConfig.deemphasizeBreakoutChase = request.deemphasizeBreakoutChase;

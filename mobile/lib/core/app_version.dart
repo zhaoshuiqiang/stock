@@ -1,4 +1,4 @@
 class AppVersion {
-  static const String version = '4.10.20260721';
+  static const String version = '4.11.20260722';
   static const String buildNumber = '1';
 }

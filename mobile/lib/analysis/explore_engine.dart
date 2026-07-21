@@ -412,6 +412,7 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
           activeWeights: DirectionalEvidenceBuilder.effectiveWeights,
           activeThresholds: RecommendationPolicy.active,
           useShortTermRealtimeReprofile: ScoringConfig.useShortTermRealtimeReprofile,
+          useShortTermTrendDiscount: ScoringConfig.useShortTermTrendDiscount,
           useRecalibratedDirection: ScoringConfig.useRecalibratedDirection,
           deemphasizeTrendStrength: ScoringConfig.deemphasizeTrendStrength,
           deemphasizeBreakoutChase: ScoringConfig.deemphasizeBreakoutChase,

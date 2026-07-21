@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.11.20260722',
+        'date': '2026-07-22',
+        'changes': [
+          '优化(实验/默认关): 趋势信号短周期降权(B#1)——基于3281行留档实证(MA多头排列前向-2.0%、趋势强度-0.70%，最高权重信号短期负收益)，新增开关ScoringConfig.useShortTermTrendDiscount：技术趋势MA多头基准分1.4→1.0、ADX加成0.5→0.3，共振MA权重1.5→1.0；默认关闭、字节等价可回退，已接入设置页开关与isolate传播',
+          '说明: 该降权对多空MA共振对称生效(留档证据主要覆盖多头MA-align)；为实验开关，正式灰度前需跨多日留档验证(validate_v47_flags.py)',
+          '测试: 新增趋势降权ON/OFF与持久化往返用例，全量1150测试通过',
+        ],
+      },
+      {
         'version': 'v4.10.20260721',
         'date': '2026-07-21',
         'changes': [

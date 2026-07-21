@@ -1,4 +1,5 @@
 import '../models/stock_models.dart';
+import 'scoring_config.dart';
 
 /// 跨指标共振评分结果
 class ConfluenceResult {
@@ -126,7 +127,7 @@ class ConfluenceScorer {
   /// 指标权重：基于历史回测可靠性和信号频率
   static double _indicatorWeight(String name) {
     switch (name) {
-      case 'MA': return 1.5;     // 趋势类最高可靠性，有回测数据支撑
+      case 'MA': return ScoringConfig.useShortTermTrendDiscount ? 1.0 : 1.5;     // 趋势类最高可靠性，有回测数据支撑
       case 'MACD': return 1.5;   // 核心动量指标，有回测数据支撑
       case 'VOL': return 1.2;    // 量价确认重要但需结合上下文
       case 'BOLL': return 1.0;   // 中轨参考价值适中
