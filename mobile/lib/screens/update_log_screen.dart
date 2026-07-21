@@ -10,6 +10,13 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.8.20260721',
+        'date': '2026-07-21',
+        'changes': [
+          '新增: 设置页“评分引擎（实验）”补齐 v4.7 的三个开关——趋势强度信号降权(P1)、追突破降权(P2)、超跌反弹护栏(P3)，现可在 App 内开关并持久化(默认全关，字节级不改变历史行为；需跨多日留档验证后再灰度开启)',
+        ],
+      },
+      {
         'version': 'v4.7.20260721',
         'date': '2026-07-21',
         'changes': [

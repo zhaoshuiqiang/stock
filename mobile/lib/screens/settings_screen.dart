@@ -25,6 +25,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _calibThresh = false;
   bool _showCalibProb = false;
   bool _isolateScan = false;
+  bool _deemphTrend = false;
+  bool _deemphBreakout = false;
+  bool _reboundGuard = false;
 
   @override
   void initState() {
@@ -96,6 +99,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _calibThresh = ScoringConfig.useCalibratedThresholds;
       _showCalibProb = ScoringConfig.showCalibratedProbability;
       _isolateScan = ScoringConfig.useIsolateScan;
+      _deemphTrend = ScoringConfig.deemphasizeTrendStrength;
+      _deemphBreakout = ScoringConfig.deemphasizeBreakoutChase;
+      _reboundGuard = ScoringConfig.useReboundGuard;
     });
   }
 
@@ -194,6 +200,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 '批量扫描迁入后台线程（降低卡顿，需真机验证）',
                 kPrefUseIsolateScan,
                 (x) { setState(() => _isolateScan = x); ScoringConfig.useIsolateScan = x; }),
+            tile(_deemphTrend, '趋势强度信号降权 (P1)',
+                'ADX"趋势强度强劲"多空双向降权——反转市里该信号常做反（留档跨日验证后再开）',
+                kPrefDeemphasizeTrendStrength,
+                (x) { setState(() => _deemphTrend = x); ScoringConfig.deemphasizeTrendStrength = x; }),
+            tile(_deemphBreakout, '追突破降权 (P2)',
+                '"趋势突破上轨"买入信号降权（留档次日 0% 胜率）',
+                kPrefDeemphasizeBreakoutChase,
+                (x) { setState(() => _deemphBreakout = x); ScoringConfig.deemphasizeBreakoutChase = x; }),
+            tile(_reboundGuard, '超跌反弹护栏 (P3)',
+                '暴跌超卖股的偏空评分上拉向中性（追高惩罚的镜像）',
+                kPrefUseReboundGuard,
+                (x) { setState(() => _reboundGuard = x); ScoringConfig.useReboundGuard = x; }),
             const SizedBox(height: 4),
             Text('提示：多数开关在下次扫描/进入详情页后生效。',
                 style: textTheme.bodySmall?.copyWith(color: Colors.grey[500])),

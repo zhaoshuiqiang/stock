@@ -13,6 +13,9 @@ const String kPrefUseCalibratedThresholds = 'use_calibrated_thresholds';
 const String kPrefShowCalibratedProbability = 'show_calibrated_probability';
 const String kPrefUseIsolateScan = 'use_isolate_scan';
 const String kPrefRiskProfile = 'risk_profile';
+const String kPrefDeemphasizeTrendStrength = 'deemphasize_trend_strength';
+const String kPrefDeemphasizeBreakoutChase = 'deemphasize_breakout_chase';
+const String kPrefUseReboundGuard = 'use_rebound_guard';
 
 /// Load persisted scoring flags into [ScoringConfig]. Defaults (all off /
 /// balanced) when unset, so behavior stays byte-identical to pre-P5 until the
@@ -28,6 +31,12 @@ void applyScoringPrefs(SharedPreferences prefs) {
       prefs.getBool(kPrefShowCalibratedProbability) ?? false;
   ScoringConfig.useIsolateScan =
       prefs.getBool(kPrefUseIsolateScan) ?? false;
+  ScoringConfig.deemphasizeTrendStrength =
+      prefs.getBool(kPrefDeemphasizeTrendStrength) ?? false;
+  ScoringConfig.deemphasizeBreakoutChase =
+      prefs.getBool(kPrefDeemphasizeBreakoutChase) ?? false;
+  ScoringConfig.useReboundGuard =
+      prefs.getBool(kPrefUseReboundGuard) ?? false;
   switch (prefs.getString(kPrefRiskProfile)) {
     case 'conservative':
       ScoringConfig.riskProfile = RiskProfile.conservative;
