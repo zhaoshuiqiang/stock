@@ -320,7 +320,7 @@ class BacktestEngine {
 
   // ═══════════════════════════════════════════════════════════
   // 配置
-  // �══════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════
 
   static void setConfig(BacktestConfig cfg) {
     config = cfg;
@@ -807,7 +807,7 @@ class BacktestEngine {
 
   /// Walk-Forward 滚动窗口回测
   ///
-  /// 将数据分割为多个滚动窗口，每窗口用前N日训练（样本内），后M日测试（样本外��。
+  /// 将数据分割为多个滚动窗口，每窗口用前N日训练（样本内），后M日测试（样本外）。
   /// 如果 OOS 收益远小于 IS 收益，或分年标准差过大 → 疑似过拟合
   static WalkForwardResult walkForwardBacktest(
     List<HistoryKline> data, {
@@ -868,7 +868,7 @@ class BacktestEngine {
         totalWindows: 0, passedWindows: 0,
         inSampleAvgReturn: 0, outOfSampleAvgReturn: 0,
         windowStdDev: 0, windowReturns: [],
-        isOverfit: false, verdict: 'Walk-Forward分析���败',
+        isOverfit: false, verdict: 'Walk-Forward分析失败',
       );
     }
 

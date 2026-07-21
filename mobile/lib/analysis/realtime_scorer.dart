@@ -1,4 +1,5 @@
 import '../models/stock_models.dart';
+import 'scoring_config.dart';
 
 class RealtimeScorer {
   /// 倒U型评分：温和上涨最优，抑制追高
@@ -13,15 +14,29 @@ class RealtimeScorer {
       // v4.6: 11-day archive validation — already up 3~9% => next-day win rate
       // collapses (3-6% ~36%, 6-9% ~31% vs mild-rise ~55%). Reward only mild
       // rise (0~3%); do NOT add points across the 3~9% chase zone.
-      if (cp > 1 && cp <= 3) s += 1.0;
-      else if (cp > 0 && cp <= 1) s += 0.5;
-      else if (cp > 3 && cp <= 5) s += 0.3;
-      else if (cp > 5 && cp <= 8) s += 0.0;
-      else if (cp > 8) s += 0.0;
-      else if (cp >= -2) s += 0.5;
-      else if (cp >= -5) s -= 0.5;
-      else if (cp >= -8) s -= 1.5;
-      else s -= 2.5;
+      if (ScoringConfig.useShortTermRealtimeReprofile) {
+        // v4.10 reprofile (default off): reward peak at mild pullback/flat,
+        // 3-5% chase zone penalized. Evidence: 3281-row archive outcomes.
+        if (cp > 1 && cp <= 3) s += 0.3;
+        else if (cp > 0 && cp <= 1) s += 0.6;
+        else if (cp > 3 && cp <= 5) s -= 0.3;
+        else if (cp > 5 && cp <= 8) s -= 0.2;
+        else if (cp > 8) s += 0.0;
+        else if (cp >= -2) s += 1.0;
+        else if (cp >= -5) s -= 0.3;
+        else if (cp >= -8) s -= 1.5;
+        else s -= 2.5;
+      } else {
+        if (cp > 1 && cp <= 3) s += 1.0;
+        else if (cp > 0 && cp <= 1) s += 0.5;
+        else if (cp > 3 && cp <= 5) s += 0.3;
+        else if (cp > 5 && cp <= 8) s += 0.0;
+        else if (cp > 8) s += 0.0;
+        else if (cp >= -2) s += 0.5;
+        else if (cp >= -5) s -= 0.5;
+        else if (cp >= -8) s -= 1.5;
+        else s -= 2.5;
+      }
 
       // v2.48.0: 跳空低开检测 — 开盘价低于昨收3%以上表明恐慌抛压
       if (quote.preClose > 0 && quote.open > 0) {

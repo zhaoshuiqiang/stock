@@ -10,6 +10,16 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.10.20260721',
+        'date': '2026-07-21',
+        'changes': [
+          '优化(实验/默认关): 实时评分倒U重定峰——基于3281行留档实证(温和回调-2~0%前向收益+0.30%最佳，追高区3-5%命中率仅45%、均值-0.54%最差)，新增开关ScoringConfig.useShortTermRealtimeReprofile：奖励峰由(1,3]移至温和回调/持平[-2,+1]，3-5%由+0.3改为-0.3惩罚、5-8%改为-0.2，涨停(>8%)维持中性；默认关闭、字节等价可回退',
+          '硬化: 发布门禁——build_release.ps1打包前强制执行prerelease_check.ps1(flutter test硬门禁+analyze软提示)，任一测试失败即中止构建、不产出APK',
+          '测试: 新增版本三文件一致性守卫、源码UTF-8编码守卫(扫描lib下U+FFFD乱码)、ai_layer(NullAILayer回退)与notification_service单测；并修复signal_detector/backtest_engine历史GBK乱码，全量1140测试通过',
+          '说明: 倒U重定峰为实验开关，正式灰度前需跨多日留档验证(validate_v47_flags.py)，并确认批量isolate扫描下的标志传播',
+        ],
+      },
+      {
         'version': 'v4.9.20260721',
         'date': '2026-07-21',
         'changes': [

@@ -51,6 +51,13 @@ class ScoringConfig {
   /// penalty). Default off; validate cross-day before enabling.
   static bool useReboundGuard = false;
 
+  /// v4.10 - short-term realtime inverted-U reprofile: move the reward peak
+  /// from (1,3] to mild pullback/flat (-2..+1) and turn the 3-5% chase zone
+  /// into a penalty. Evidence: 3281-row archive (mild pullback -2..0% =>
+  /// +0.30% forward; 3-5% => -0.54%, worst hit rate). Default off; the
+  /// scorer is byte-identical to the legacy inverted-U when this is false.
+  static bool useShortTermRealtimeReprofile = false;
+
   /// 方向模型版本标签：随循证校准开关切换，可写入 decision_snapshots.model_version，
   /// 使不同口径的历史分数不被混合统计。
   static String get directionModelVersion =>
