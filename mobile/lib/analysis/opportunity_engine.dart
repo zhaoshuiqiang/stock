@@ -283,6 +283,45 @@ class OpportunityEngine extends BaseAnalysisEngine<OpportunityProgress> {
               completedCount: klineFetched,
               failedCount: klineFailed));
         }
+
+        // v4.9: retry stocks whose K-line came back empty. The first pass fires
+        // klineBatchSize x racingSources concurrent requests per burst, so
+        // transient timeouts/rate-limits under that load cause partial failures;
+        // a lower-concurrency retry after the burst recovers most of them.
+        // Genuinely dataless stocks (delisted/suspended/too-new) stay failed.
+        if (klineFailed > 0) {
+          bool stillEmpty(WatchlistItem item) =>
+              (klineCache[_apiClient.addMarketPrefix(item.code)] ??
+                      const <HistoryKline>[])
+                  .isEmpty;
+          final retryItems = uncachedStocks.where(stillEmpty).toList();
+          const retryBatchSize = 5;
+          for (int i = 0; i < retryItems.length; i += retryBatchSize) {
+            final end = min(i + retryBatchSize, retryItems.length);
+            final batch = retryItems.sublist(i, end);
+            final retryResults = await Future.wait(
+              batch.map((item) {
+                final pc = _apiClient.addMarketPrefix(item.code);
+                return _apiClient
+                    .getStockHistory(pc, days: klineDays, bypassCache: true)
+                    .catchError((e) {
+                  debugPrint('[OpportunityEngine] kline retry failed: $pc - $e');
+                  return <HistoryKline>[];
+                });
+              }),
+            );
+            for (int j = 0; j < batch.length; j++) {
+              final pc = _apiClient.addMarketPrefix(batch[j].code);
+              if (retryResults[j].isNotEmpty) klineCache[pc] = retryResults[j];
+            }
+          }
+          klineFailed = uncachedStocks.where(stillEmpty).length;
+          emit(OpportunityProgress(
+              status: OpportunityStatus.fetchingKlines,
+              totalCount: totalCount,
+              completedCount: klineFetched,
+              failedCount: klineFailed));
+        }
       } else {
         emit(OpportunityProgress(
             status: OpportunityStatus.fetchingKlines,
