@@ -121,5 +121,15 @@ void main() {
       // v3.34: cp=1.0, cp>1为false→cp>0:+0.5, 5.0+0.5=5.5
       expect(RealtimeScorer.score(quote), equals(5.5));
     });
+
+    test('chase zone (3-9%) not rewarded above mild rise (v4.6)', () {
+      QuoteData q(double cp) =>
+          QuoteData(code: '000001', name: 'T', price: 10.0, changePct: cp);
+      // mild rise (2%) should score strictly higher than the 3~9% chase zone
+      expect(RealtimeScorer.score(q(2.0)),
+          greaterThan(RealtimeScorer.score(q(4.0))));
+      expect(RealtimeScorer.score(q(2.0)),
+          greaterThan(RealtimeScorer.score(q(7.0))));
+    });
   });
 }

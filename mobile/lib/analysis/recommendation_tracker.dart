@@ -446,47 +446,6 @@ class RecommendationTracker {
     return reflections;
   }
 
-  /// 获取全市场历史决策统计（用于跨股票学习）
-  /// 返回最近20条已关闭推荐的收益分布和反思
-  Future<List<Map<String, dynamic>>> getMarketWideReflections(
-      {int limit = 20}) async {
-    if (!_initialized) await init();
-
-    final db = await _dbService.database;
-    final rows = await db.query(
-      'recommendation_tracking',
-      columns: [
-        'code',
-        'name',
-        'signal_date',
-        'strategy',
-        'day20_return',
-        'alpha_vs_market',
-        'reflection',
-        'direction'
-      ],
-      where: 'is_closed = 1 AND day20_return IS NOT NULL',
-      orderBy: 'signal_date DESC',
-      limit: limit,
-    );
-
-    final reflections = <Map<String, dynamic>>[];
-    for (final row in rows) {
-      reflections.add({
-        'code': row['code'] as String,
-        'name': row['name'] as String? ?? '',
-        'signal_date':
-            DateTime.fromMillisecondsSinceEpoch(row['signal_date'] as int),
-        'strategy': row['strategy'] as String? ?? '',
-        'day20_return': (row['day20_return'] as num).toDouble(),
-        'alpha_vs_market': (row['alpha_vs_market'] as num?)?.toDouble() ?? 0,
-        'reflection': row['reflection'] as String? ?? '',
-        'direction': (row['direction'] as String?) ?? '',
-      });
-    }
-    return reflections;
-  }
-
   /// 存储AI生成的反思
   Future<void> saveReflection(int snapshotId, String reflection) async {
     if (!_initialized) await init();

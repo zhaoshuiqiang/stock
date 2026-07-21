@@ -862,6 +862,15 @@ void main() {
       expect(r3.chaseRiskFactor, lessThanOrEqualTo(1.0));
     });
 
+    test('chase zone 3-9% penalized more than mild rise (v4.6)', () {
+      final mild = _scoreWith(changePct: 2.0); // no chase penalty
+      final zone36 = _scoreWith(changePct: 5.0); // 3-6% chase zone
+      final zone69 = _scoreWith(changePct: 7.0); // 6-9% worst zone
+      expect(zone36.chaseRiskFactor, lessThan(mild.chaseRiskFactor));
+      expect(zone69.chaseRiskFactor, lessThan(zone36.chaseRiskFactor));
+      expect(zone69.totalScore, lessThanOrEqualTo(mild.totalScore));
+    });
+
     test('marketFactor is within [0.50, 1.0]', () {
       final r1 = _scoreWith(marketCtx: _makeMarket(-3.0));
       expect(r1.marketFactor, greaterThanOrEqualTo(0.50));

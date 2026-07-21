@@ -148,10 +148,16 @@ class ComprehensiveScorer {
     final cp = currentChangePct ?? quote?.changePct;
     if (cp != null && quote != null && quote.price > 0) {
       final consecutiveRise = _consecutiveRiseDays(data);
-      if (cp > 9.5) chaseP = 0.65;
-      else if (cp > 8) chaseP = 0.75;
-      else if (cp > 5 && consecutiveRise >= 3) chaseP = 0.92;
-      if (cp > 5) {
+      // v4.6: 11-day archive validation — the 3~9% chase zone has the lowest
+      // next-day win rate (6-9% ~31%, 3-6% ~36%). Fresh limit-ups (>9.5%) fare
+      // better (continuation), so penalize them less than the 6-9% zone.
+      if (cp > 9.5) chaseP = 0.80;
+      else if (cp > 6) chaseP = 0.72;
+      else if (cp > 3) chaseP = 0.85;
+      else if (cp > 1.5 && consecutiveRise >= 3) chaseP = 0.92;
+      // Momentum protection applies ONLY to limit-ups (>9.5%); do NOT dilute the
+      // 3~9% chase-zone penalty (validation: strong-trend + extended still fades).
+      if (cp > 9.5) {
         chaseP = 1.0 - (1.0 - chaseP) * momentumFactor;
       }
     }

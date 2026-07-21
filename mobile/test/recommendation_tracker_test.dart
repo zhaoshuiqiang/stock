@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:stock_analyzer/analysis/recommendation_tracker.dart';
-import 'package:stock_analyzer/analysis/weight_optimizer.dart';
 import 'package:stock_analyzer/models/stock_models.dart';
 import 'package:stock_analyzer/storage/database_service.dart';
 
@@ -66,24 +65,6 @@ AnalysisResult _analysis({
     recommendation: score >= 6 ? '谨慎买入' : '偏多观望',
     dimensionScores: dimensionScores,
   );
-}
-
-Future<void> _insertClosedRecommendation(
-  Database db, {
-  required String code,
-  required DateTime signalDate,
-  required double day20Return,
-  required Map<String, double> dimensionScores,
-}) async {
-  await db.insert('recommendation_tracking', {
-    'code': code,
-    'name': '测试股$code',
-    'signal_price': 10.0,
-    'signal_date': signalDate.millisecondsSinceEpoch,
-    'day20_return': day20Return,
-    'is_closed': 1,
-    'dimension_scores_json': jsonEncode(dimensionScores),
-  });
 }
 
 void main() {
@@ -185,67 +166,6 @@ void main() {
       expect(snapshot.dimensionScores, {'技术面': 7.5, '资金面': 6.0});
       expect(
           snapshot.toMap()['dimension_scores_json'], '{"技术面":7.5,"资金面":6.0}');
-    });
-  });
-
-  group('WeightOptimizer historical weighting', () {
-    test('strong decay lets recent wins outweigh stale losses', () async {
-      final now = DateTime.now();
-      for (var i = 0; i < 4; i++) {
-        await _insertClosedRecommendation(
-          db,
-          code: 'old$i',
-          signalDate: now.subtract(Duration(days: 120 + i)),
-          day20Return: -5.0,
-          dimensionScores: {'技术面': 8.0},
-        );
-      }
-      for (var i = 0; i < 2; i++) {
-        await _insertClosedRecommendation(
-          db,
-          code: 'new$i',
-          signalDate: now.subtract(Duration(days: i + 1)),
-          day20Return: 6.0,
-          dimensionScores: {'技术面': 8.0},
-        );
-      }
-
-      final weights = await WeightOptimizer().getOptimizedWeights(
-        minSamples: 1,
-        maxAdjustment: 0.08,
-        decayFactor: 0.5,
-      );
-
-      expect(
-        weights['技术面']!,
-        greaterThan(WeightOptimizer.kDefaultWeights['技术面']!),
-        reason:
-            'Recent successful technical-score records should dominate stale failures',
-      );
-      expect(
-        weights.values.reduce((a, b) => a + b),
-        closeTo(1.0, 0.000001),
-      );
-    });
-
-    test('dimension performance report keeps sample counts below threshold',
-        () async {
-      await _insertClosedRecommendation(
-        db,
-        code: 'few1',
-        signalDate: DateTime.now().subtract(const Duration(days: 1)),
-        day20Return: 3.0,
-        dimensionScores: {'技术面': 7.0},
-      );
-
-      final report = await WeightOptimizer().getDimensionPerformanceReport(
-        minSamples: 3,
-      );
-      final tech = report.firstWhere((row) => row['name'] == '技术面');
-
-      expect(tech['sample_count'], 1);
-      expect(tech['has_enough_data'], isFalse);
-      expect(tech['current_weight'], WeightOptimizer.kDefaultWeights['技术面']);
     });
   });
 

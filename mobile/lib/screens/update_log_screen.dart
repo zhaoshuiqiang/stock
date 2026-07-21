@@ -10,6 +10,16 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.6.20260721',
+        'date': '2026-07-21',
+        'changes': [
+          '优化: 追高抑制强化——基于留档跨11日验证(已涨3~9%次日胜率仅约31~36%，而温和上涨约55%)，实时分不再奖励3~9%涨幅区间；综合评分追高因子对3~6%(×0.85)与6~9.5%(×0.72)加惩罚，涨停(>9.5%)因连板可能改为从轻(×0.80)，动量保护仅对涨停生效、不再稀释3~9%区间惩罚',
+          '修复: short_term_decision_engine.dart 注释被存成GBK乱码导致整个工程无法编译(Dart前端报该文件不存在)，已修复为UTF-8',
+          '清理: 移除UI删除后遗留的死代码(推荐效果统计页及两个组件、WeightOptimizer及相关测试)，decision_statistics 精简为仅保留 DecisionStatisticsFilter',
+          '测试: 新增追高区间评分回归用例，全量1112测试通过',
+        ],
+      },
+      {
         'version': 'v4.5.20260720',
         'date': '2026-07-20',
         'changes': [

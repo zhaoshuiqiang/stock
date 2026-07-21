@@ -10,9 +10,13 @@ class RealtimeScorer {
       // v3.34: 留档数据分析——涨幅>2%时胜率急降，评分与当日涨幅高度耦合导致追涨推荐
       // 修复: 涨幅>3%改为惩罚，涨幅>5%大幅惩罚，涨停板惩罚加倍
       // 数据: 涨幅2~3%胜率7%, 3~5%胜率18%, >5%胜率26%
-      if (cp > 1 && cp <= 5) s += 1.0;
+      // v4.6: 11-day archive validation — already up 3~9% => next-day win rate
+      // collapses (3-6% ~36%, 6-9% ~31% vs mild-rise ~55%). Reward only mild
+      // rise (0~3%); do NOT add points across the 3~9% chase zone.
+      if (cp > 1 && cp <= 3) s += 1.0;
       else if (cp > 0 && cp <= 1) s += 0.5;
-      else if (cp > 5 && cp <= 8) s += 0.3;
+      else if (cp > 3 && cp <= 5) s += 0.3;
+      else if (cp > 5 && cp <= 8) s += 0.0;
       else if (cp > 8) s += 0.0;
       else if (cp >= -2) s += 0.5;
       else if (cp >= -5) s -= 0.5;
