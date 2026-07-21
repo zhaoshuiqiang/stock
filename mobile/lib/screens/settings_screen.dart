@@ -28,6 +28,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _deemphTrend = false;
   bool _deemphBreakout = false;
   bool _reboundGuard = false;
+  bool _shortTermReprofile = false;
 
   @override
   void initState() {
@@ -102,6 +103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _deemphTrend = ScoringConfig.deemphasizeTrendStrength;
       _deemphBreakout = ScoringConfig.deemphasizeBreakoutChase;
       _reboundGuard = ScoringConfig.useReboundGuard;
+      _shortTermReprofile = ScoringConfig.useShortTermRealtimeReprofile;
     });
   }
 
@@ -212,6 +214,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 '暴跌超卖股的偏空评分上拉向中性（追高惩罚的镜像）',
                 kPrefUseReboundGuard,
                 (x) { setState(() => _reboundGuard = x); ScoringConfig.useReboundGuard = x; }),
+            tile(_shortTermReprofile, '实时评分倒U重定峰 (v4.10)',
+                '温和回调/持平区最优，3-5%追高区改为惩罚（3281行留档实证，跨日验证后再开）',
+                kPrefUseShortTermRealtimeReprofile,
+                (x) { setState(() => _shortTermReprofile = x); ScoringConfig.useShortTermRealtimeReprofile = x; }),
             const SizedBox(height: 4),
             Text('提示：多数开关在下次扫描/进入详情页后生效。',
                 style: textTheme.bodySmall?.copyWith(color: Colors.grey[500])),

@@ -411,6 +411,11 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
           marketContext: marketContext,
           activeWeights: DirectionalEvidenceBuilder.effectiveWeights,
           activeThresholds: RecommendationPolicy.active,
+          useShortTermRealtimeReprofile: ScoringConfig.useShortTermRealtimeReprofile,
+          useRecalibratedDirection: ScoringConfig.useRecalibratedDirection,
+          deemphasizeTrendStrength: ScoringConfig.deemphasizeTrendStrength,
+          deemphasizeBreakoutChase: ScoringConfig.deemphasizeBreakoutChase,
+          useReboundGuard: ScoringConfig.useReboundGuard,
         ),
       );
     } catch (e) {

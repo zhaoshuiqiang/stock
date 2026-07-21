@@ -37,11 +37,25 @@ class IsolateScanRequest {
   final Map<String, double> activeWeights;
   final RecommendationThresholds activeThresholds;
 
+  /// v4.10: experimental scoring flags snapshot. A compute() worker starts
+  /// with fresh statics, so these are restored in [runBatchAnalysis] to keep
+  /// batch scores identical to the main isolate when a flag is enabled.
+  final bool useShortTermRealtimeReprofile;
+  final bool useRecalibratedDirection;
+  final bool deemphasizeTrendStrength;
+  final bool deemphasizeBreakoutChase;
+  final bool useReboundGuard;
+
   const IsolateScanRequest({
     required this.items,
     this.marketContext,
     required this.activeWeights,
     required this.activeThresholds,
+    this.useShortTermRealtimeReprofile = false,
+    this.useRecalibratedDirection = false,
+    this.deemphasizeTrendStrength = false,
+    this.deemphasizeBreakoutChase = false,
+    this.useReboundGuard = false,
   });
 }
 
@@ -69,6 +83,11 @@ List<IsolateScanResult> runBatchAnalysis(IsolateScanRequest request) {
   RecommendationPolicy.applyThresholdOverride(request.activeThresholds);
   ScoringConfig.useCalibratedThresholds = true;
   ScoringConfig.riskProfile = RiskProfile.balanced;
+  ScoringConfig.useShortTermRealtimeReprofile = request.useShortTermRealtimeReprofile;
+  ScoringConfig.useRecalibratedDirection = request.useRecalibratedDirection;
+  ScoringConfig.deemphasizeTrendStrength = request.deemphasizeTrendStrength;
+  ScoringConfig.deemphasizeBreakoutChase = request.deemphasizeBreakoutChase;
+  ScoringConfig.useReboundGuard = request.useReboundGuard;
 
   final results = <IsolateScanResult>[];
   for (final item in request.items) {
