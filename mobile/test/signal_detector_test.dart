@@ -3,6 +3,7 @@ import 'package:stock_analyzer/models/stock_models.dart';
 import 'package:stock_analyzer/analysis/indicators.dart';
 import 'package:stock_analyzer/analysis/signal_layer.dart';
 import 'package:stock_analyzer/analysis/signal_detector.dart';
+import 'package:stock_analyzer/analysis/scoring_config.dart';
 
 List<HistoryKline> _baseData({int count = 40}) {
   final prices = List.generate(count, (i) => 10.0 + i * 0.1);
@@ -211,6 +212,55 @@ void main() {
       final signals = SignalLayer.detectAllSignals(data, code: '600001');
       final lateDrop = signals.where((s) => s.signal == '尾盘急跌');
       expect(lateDrop.isEmpty, true, reason: 'Should not detect 尾盘急跌 when closePosition >= 0.3');
+    });
+  });
+
+  group('v4.7 signal de-emphasis flags', () {
+    tearDown(() {
+      ScoringConfig.deemphasizeTrendStrength = false;
+      ScoringConfig.deemphasizeBreakoutChase = false;
+    });
+
+    test('P1 deemphasizeTrendStrength lowers 趋势强度强劲 buy strength', () {
+      var data = _baseData();
+      final n = data.length;
+      data[n - 1] =
+          data[n - 1].copyWith(adx14: 30.0, plusDi14: 30.0, minusDi14: 15.0);
+
+      ScoringConfig.deemphasizeTrendStrength = false;
+      var sig = SignalDetector.detectLayeredSignals(data)
+          .firstWhere((s) => s.signal == '趋势强度强劲');
+      expect(sig.strength, 75);
+      expect(sig.confidence, 0.8);
+
+      ScoringConfig.deemphasizeTrendStrength = true;
+      sig = SignalDetector.detectLayeredSignals(data)
+          .firstWhere((s) => s.signal == '趋势强度强劲');
+      expect(sig.strength, 50);
+      expect(sig.confidence, 0.55);
+    });
+
+    test('P2 deemphasizeBreakoutChase lowers 趋势突破上轨 strength', () {
+      var data = _baseData();
+      final n = data.length;
+      data[n - 2] = data[n - 2].copyWith(close: 18.0, bollUpper: 20.0);
+      data[n - 1] = data[n - 1].copyWith(
+          close: 25.0,
+          high: 26.0,
+          bollUpper: 20.0,
+          adx14: 30.0,
+          plusDi14: 30.0,
+          minusDi14: 15.0);
+
+      ScoringConfig.deemphasizeBreakoutChase = false;
+      var sig = SignalDetector.detectLayeredSignals(data)
+          .firstWhere((s) => s.signal == '趋势突破上轨');
+      expect(sig.strength, 75);
+
+      ScoringConfig.deemphasizeBreakoutChase = true;
+      sig = SignalDetector.detectLayeredSignals(data)
+          .firstWhere((s) => s.signal == '趋势突破上轨');
+      expect(sig.strength, 50);
     });
   });
 }

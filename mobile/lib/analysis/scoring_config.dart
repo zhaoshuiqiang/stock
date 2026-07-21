@@ -37,6 +37,20 @@ class ScoringConfig {
   /// 默认关；开启后 DirectionalEvidenceBuilder 应用循证微调，关闭时字节等价回退。
   static bool useRecalibratedDirection = false;
 
+  /// v4.7 P1 — de-emphasize the lagging ADX '趋势强度强劲' signal (both directions).
+  /// Archive validation showed it is contrarian at reversals (bull -1.3%, bear
+  /// +2.4% next-day). Default off; enable after cross-day validation.
+  static bool deemphasizeTrendStrength = false;
+
+  /// v4.7 P2 — de-emphasize the '趋势突破上轨' upper-band breakout BUY signal
+  /// (archive: 0% next-day win, -3.4%). Default off.
+  static bool deemphasizeBreakoutChase = false;
+
+  /// v4.7 P3 — rebound guard: pull bearish-leaning scores toward neutral when the
+  /// stock is oversold/crashed (mean-reversion bounce likely; mirror of the chase
+  /// penalty). Default off; validate cross-day before enabling.
+  static bool useReboundGuard = false;
+
   /// 方向模型版本标签：随循证校准开关切换，可写入 decision_snapshots.model_version，
   /// 使不同口径的历史分数不被混合统计。
   static String get directionModelVersion =>

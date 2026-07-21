@@ -1,6 +1,7 @@
 import 'dart:math';
 import '../models/stock_models.dart';
 import 'signal_evidence_classifier.dart';
+import 'scoring_config.dart';
 
 /// 分层信号检测器
 /// 负责检测短期、中期、长期的信号
@@ -395,7 +396,7 @@ return signals;
             description: isTrending
                 ? '股价突破布林带上轨且趋势明确(ADX=${last.adx14.toStringAsFixed(1)})，强势突破'
                 : '股价突破布林带上轨，超买状态',
-            strength: isTrending ? 75 : 70,
+            strength: isTrending ? (ScoringConfig.deemphasizeBreakoutChase ? 50 : 75) : 70,
             timestamp: last.date,
             duration: SignalDuration.mediumTerm,
             confidence: isTrending ? 0.7 : 0.65,
@@ -559,10 +560,10 @@ return signals;
         indicator: 'ADX',
         signal: '趋势强度强劲',
         description: 'ADX>25，多头趋势明确，可顺势而为',
-        strength: 75,
+        strength: ScoringConfig.deemphasizeTrendStrength ? 50 : 75,
         timestamp: last.date,
         duration: SignalDuration.longTerm,
-        confidence: 0.8,
+        confidence: ScoringConfig.deemphasizeTrendStrength ? 0.55 : 0.8,
         signalCount: 1,
       ));
     } else if (last.adx14 > 25 && last.minusDi14 > last.plusDi14) {
@@ -571,7 +572,7 @@ return signals;
         indicator: 'ADX',
         signal: '趋势强度强劲',
         description: 'ADX>25，空头趋势明确，建议回避',
-        strength: 75,
+        strength: ScoringConfig.deemphasizeTrendStrength ? 50 : 75,
         timestamp: last.date,
         duration: SignalDuration.longTerm,
         // v3.22: 降低空头趋势信号置信度(0.80→0.55)，ADX是滞后长周期指标，

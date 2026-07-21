@@ -7,6 +7,7 @@ import 'next_session_prediction.dart';
 import 'sector_heat_detector.dart';
 import 'sector_rotation.dart';
 import 'sector_momentum_calculator.dart';
+import 'scoring_config.dart';
 
 class ComprehensiveScoreResult {
   final int totalScore;
@@ -225,11 +226,27 @@ class ComprehensiveScorer {
       }
     }
 
-    var temperedScore = rawScore * chaseRiskFactor * marketFactor * predictionModifierValue;
+    // v4.7 P3: rebound guard (mirror of the chase penalty) — pull bearish-leaning
+    // scores toward neutral when the stock is oversold/crashed, since a
+    // mean-reversion bounce is likely (archive: crashed stocks bounced next day).
+    double reboundFactor = 1.0;
+    if (ScoringConfig.useReboundGuard && cp != null && rawScore < 5.0) {
+      final oversold = (bias6 != null && bias6 < -8) || cp <= -5;
+      if (oversold) {
+        reboundFactor =
+            ((bias6 != null && bias6 < -12) || cp <= -8) ? 1.25 : 1.15;
+      }
+    }
+    var temperedScore =
+        rawScore * chaseRiskFactor * marketFactor * predictionModifierValue;
     final totalPenalty = chaseRiskFactor * marketFactor * predictionModifierValue;
     if (totalPenalty < 0.40) {
       temperedScore = rawScore * 0.40;
     }
+    // v4.7 P3: apply the rebound guard AFTER the penalty floor so an oversold
+    // bounce is still lifted under extreme market penalties (bounces are
+    // strongest exactly then). No-op when the flag is off (reboundFactor == 1.0).
+    temperedScore *= reboundFactor;
     temperedScore = temperedScore.clamp(0.0, 10.0);
 
     // ST股票封顶：最高"偏多观望"，防止推荐高风险标的

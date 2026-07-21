@@ -5,6 +5,7 @@ import 'package:stock_analyzer/analysis/signal_engine.dart';
 import 'package:stock_analyzer/analysis/comprehensive_scorer.dart';
 import 'package:stock_analyzer/analysis/sector_momentum_calculator.dart';
 import 'package:stock_analyzer/analysis/market_structure_analyzer.dart';
+import 'package:stock_analyzer/analysis/scoring_config.dart';
 
 /// Generate uptrend kline data with indicators calculated.
 List<HistoryKline> _uptrendData({int count = 60}) {
@@ -869,6 +870,28 @@ void main() {
       expect(zone36.chaseRiskFactor, lessThan(mild.chaseRiskFactor));
       expect(zone69.chaseRiskFactor, lessThan(zone36.chaseRiskFactor));
       expect(zone69.totalScore, lessThanOrEqualTo(mild.totalScore));
+    });
+
+    test('P3 reboundGuard lifts oversold bearish score toward neutral (v4.7)', () {
+      ComprehensiveScoreResult oversoldScore() => ComprehensiveScorer.combine(
+            technicalScore: 3.0,
+            realtimeScore: 3.0,
+            confluenceScore: 3.0,
+            quote: QuoteData(
+                code: 'sh600000', name: 'T', price: 10.0, changePct: -8.0),
+            marketContext: null,
+            newsList: null,
+            capitalFlowScore: null,
+            marketPositionFactor: 1.0,
+            bias6: -13.0,
+          );
+      ScoringConfig.useReboundGuard = false;
+      final off = oversoldScore();
+      ScoringConfig.useReboundGuard = true;
+      final on = oversoldScore();
+      ScoringConfig.useReboundGuard = false;
+      expect(on.totalScore, greaterThan(off.totalScore),
+          reason: 'rebound guard should lift a crashed/oversold bearish score');
     });
 
     test('marketFactor is within [0.50, 1.0]', () {
