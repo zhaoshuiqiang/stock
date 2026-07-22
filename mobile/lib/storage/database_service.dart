@@ -1216,13 +1216,31 @@ class DatabaseService {
     );
   }
 
-  Future<String?> getHomeCache(String key) async {
+  /// Reads a home-cache entry. When [freshDaily] is true, an entry saved on a
+  /// previous Beijing calendar day is treated as stale (returns null) so the
+  /// home screen never paints yesterday's market snapshot before the live
+  /// fetch completes.
+  Future<String?> getHomeCache(String key, {bool freshDaily = false}) async {
     final db = await database;
     final result = await db.query('home_cache',
         where: 'key = ?', whereArgs: [key], limit: 1);
-    if (result.isNotEmpty) return result.first['value'] as String;
-    return null;
+    if (result.isEmpty) return null;
+    final row = result.first;
+    if (freshDaily && row['updated_at'] != null) {
+      final updated =
+          DateTime.fromMillisecondsSinceEpoch(row['updated_at'] as int);
+      if (_beijingDay(updated) != _beijingDay(DateTime.now())) return null;
+    }
+    return row['value'] as String?;
   }
+
+  /// Beijing (UTC+8) calendar day as YYYY-MM-DD, matching the app-wide
+  /// convention used for intraday/trade-date freshness checks.
+  static String _beijingDay(DateTime t) => t
+      .toUtc()
+      .add(const Duration(hours: 8))
+      .toIso8601String()
+      .substring(0, 10);
 
   Future<DateTime?> getHomeCacheTime(String key) async {
     final db = await database;
@@ -1241,7 +1259,7 @@ class DatabaseService {
   }
 
   Future<List<QuoteData>> getMarketQuotesCache() async {
-    final json = await getHomeCache('market_quotes');
+    final json = await getHomeCache('market_quotes', freshDaily: true);
     if (json == null) return [];
     final list = jsonDecode(json) as List;
     return list
@@ -1255,7 +1273,7 @@ class DatabaseService {
   }
 
   Future<List<SectorInfo>> getSectorsCache() async {
-    final json = await getHomeCache('hot_sectors');
+    final json = await getHomeCache('hot_sectors', freshDaily: true);
     if (json == null) return [];
     final list = jsonDecode(json) as List;
     return list

@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.17.20260722',
+        'date': '2026-07-22',
+        'changes': [
+          '修复: 首页缓存(home_cache)跨交易日展示昨日数据——getHomeCache 原先无任何过期检查，新的一天若在线拉取失败，首页会持续显示昨日的大盘指数/热门板块快照；现 market_quotes/hot_sectors 读取按北京日历日校验(freshDaily)，跨日缓存视为过期返回空，交由在线拉取填充今日',
+          '说明: 同一交易日缓存仍即时渲染(不影响启动秒开)；跨日或离线时显示空白+错误提示，而非误导性的昨日数据；getHomeCache 默认行为向后兼容(其余调用不受影响)',
+          '测试: 新增首页缓存跨日过期用例(同日保留/跨日剔除/legacy兼容)，全量1166测试通过',
+        ],
+      },
+      {
         'version': 'v4.16.20260722',
         'date': '2026-07-22',
         'changes': [
