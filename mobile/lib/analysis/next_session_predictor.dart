@@ -30,7 +30,8 @@ class NextSessionPredictor {
     final candidates = <_ComparableSample>[];
 
     for (var i = 1; i < currentIndex; i++) {
-      if (i + 1 > currentIndex) continue;
+      final current = data[i];
+      if (current.close <= 0) continue;
       final sampleFeatures =
           NextSessionFeatureExtractor.extract(data, index: i);
       var similarity = _similarity(features, sampleFeatures);
@@ -38,11 +39,9 @@ class NextSessionPredictor {
           ? (1.0 - (currentIndex - i) / currentIndex * 0.3).clamp(0.7, 1.0)
           : 1.0;
       similarity *= timeDecay;
-      if (similarity < 0.5) continue;
+      if (!similarity.isFinite || similarity <= 0) continue;
 
-      final current = data[i];
       final next = data[i + 1];
-      if (current.close <= 0) continue;
       candidates.add(_ComparableSample(
         similarity: similarity,
         nextOpenReturn: (next.open / current.close - 1) * 100,
@@ -51,7 +50,16 @@ class NextSessionPredictor {
     }
 
     candidates.sort((a, b) => b.similarity.compareTo(a.similarity));
-    final samples = candidates.take(maxSamples).toList(growable: false);
+    // v4.12: K-nearest with a legacy-radius preference. Keep the >=0.5
+    // neighbor set when it already has enough samples (byte-identical to the
+    // old radius filter); otherwise fall back to the top-K nearest so the
+    // indicator still yields a meaningful similarity-weighted estimate
+    // instead of the degenerate 50/50 neutral. On normal-length history few
+    // bars clear the strict 0.5 radius, which left sampleCount stuck at 0.
+    final strong =
+        candidates.where((s) => s.similarity >= 0.5).toList(growable: false);
+    final selected = strong.length >= minSamples ? strong : candidates;
+    final samples = selected.take(maxSamples).toList(growable: false);
     if (samples.length < minSamples) {
       final sampleFactor = samples.length / minSamples;
       return NextSessionPrediction.neutral(
