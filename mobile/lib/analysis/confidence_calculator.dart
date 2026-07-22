@@ -119,11 +119,39 @@ class ConfidenceCalculator {
       'fundamental_support': result.fundamentalSupport / 100,
       'sentiment_confirm': result.sentimentConfirm / 100,
       'market_confirm': result.marketEnvironment / 100,
-      'structure_confirm': result.marketEnvironment / 100,
+      'structure_confirm': _structureConfirm(marketStructure, resolvedDirection) / 100,
       'signal_freshness': result.freshness / 100,
       'historical_winrate': result.backtestWinRate / 100,
       'prediction_support': (predictionSupport ?? 0.5),
     };
+  }
+
+  // v4.13: structure_confirm reflects the market STRUCTURE alignment with
+  // the direction, independent of market_confirm (which combined context +
+  // structure and previously made the two rows identical). 50 when flat.
+  static double _structureConfirm(
+    MarketStructureResult? ms,
+    RecommendationDirection dir,
+  ) {
+    if (ms == null) return 50.0;
+    final isBullish = ms.structure == MarketStructure.bullTrend ||
+        ms.structure == MarketStructure.accumulation;
+    final isBearish = ms.structure == MarketStructure.bearTrend ||
+        ms.structure == MarketStructure.distribution;
+    final conf = ms.confidence.clamp(0.0, 1.0);
+    if (dir == RecommendationDirection.bullish && isBullish) {
+      return (50 + 40 * conf).clamp(0.0, 100.0).toDouble();
+    }
+    if (dir == RecommendationDirection.bearish && isBearish) {
+      return (50 + 40 * conf).clamp(0.0, 100.0).toDouble();
+    }
+    if (dir == RecommendationDirection.bullish && isBearish) {
+      return (50 - 40 * conf).clamp(0.0, 100.0).toDouble();
+    }
+    if (dir == RecommendationDirection.bearish && isBullish) {
+      return (50 - 40 * conf).clamp(0.0, 100.0).toDouble();
+    }
+    return 50.0;
   }
 
   static Map<String, double> _buildDirectionComponents(

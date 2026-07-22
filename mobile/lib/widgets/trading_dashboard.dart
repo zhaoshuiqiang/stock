@@ -1311,11 +1311,12 @@ class TradingDashboard extends StatelessWidget {
   Widget _buildDirectionComponentsCard() {
     final components = analysis!.shortTermDecision!.directionComponents;
     final labels = {
-      'trend': '趋势(30%)',
+      'trend': '趋势(25%)',
       'reversal_momentum': '反转动量(25%)',
       'volume_flow': '量价流(20%)',
       'relative_strength': '相对强度(15%)',
-      'next_session': '次日预测(10%)',
+      'sector_momentum': '板块动量(10%)',
+      'next_session': '次日预测(5%)',
     };
     final direction = analysis!.shortTermDecision!.direction;
     final dirColor = direction == RecommendationDirection.bullish
