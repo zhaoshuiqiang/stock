@@ -2054,7 +2054,7 @@ class ApiClient {
             '?secid=$secid'
             '&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13'
             '&fields2=f51,f52,f53,f54,f55,f56,f57,f58'
-            '&iscr=0');
+            '&ndays=1&iscr=0');
 
     try {
       final response = await _httpGet(url, headers: {
@@ -2097,8 +2097,20 @@ class ApiClient {
       final amountMap = <int, double>{};
       final vwapMap = <int, double>{};
 
+      // v4.16: keep only today's (Beijing) intraday points. The trends API
+      // can return the previous trading day (pre-open) or multiple days, and
+      // the parser maps purely by HH:MM, so stale rows were rendered as
+      // today's curve (intraday chart "stuck on yesterday").
+      final todayStr = DateTime.now()
+          .toUtc()
+          .add(const Duration(hours: 8))
+          .toIso8601String()
+          .substring(0, 10);
+
       for (final item in trends) {
-        final point = TimeshareParser.parseEastMoneyTrendLine(item as String);
+        final line = item as String;
+        if (TimeshareParser.dateOf(line) != todayStr) continue;
+        final point = TimeshareParser.parseEastMoneyTrendLine(line);
         if (point == null) continue;
 
         priceMap[point.offset] = point.price;
@@ -2175,9 +2187,17 @@ class ApiClient {
       final amountMap = <int, double>{};
       double preClose = 0;
 
+      // v4.16: keep only today's points (Sina 5-min datalen=240 spans ~5 days).
+      final todayStr = DateTime.now()
+          .toUtc()
+          .add(const Duration(hours: 8))
+          .toIso8601String()
+          .substring(0, 10);
+
       for (int i = 0; i < list.length; i++) {
         final item = list[i] as Map<String, dynamic>;
         final day = item['day'] as String? ?? '';
+        if (TimeshareParser.dateOf(day) != todayStr) continue;
         final close = _parseDouble(item['close']);
         final volume = _parseDouble(item['volume']);
 

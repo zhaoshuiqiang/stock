@@ -34,6 +34,17 @@ class TimeshareParser {
     );
   }
 
+  /// Extracts the "YYYY-MM-DD" date prefix from an EastMoney trend line
+  /// ("2026-07-22 09:30,...") or a Sina `day` value ("2026-07-22 09:35:00").
+  /// Returns null when no date prefix is present. Used to drop stale
+  /// previous-day / multi-day rows that would otherwise be mapped by HH:MM
+  /// only and rendered as today's intraday curve.
+  static String? dateOf(String line) {
+    final head = line.split(',').first.trim();
+    final datePart = head.split(' ').first;
+    return datePart.isEmpty ? null : datePart;
+  }
+
   static int? minuteOffsetFromTime(String timeText) {
     final timePart = timeText.trim().split(' ').last;
     final timeParts = timePart.split(':');

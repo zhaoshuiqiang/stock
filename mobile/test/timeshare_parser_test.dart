@@ -28,5 +28,15 @@ void main() {
       expect(point.amount, closeTo(72153789.00, 0.001));
       expect(point.vwap, closeTo(264.632, 0.001));
     });
+
+    test('dateOf extracts the date prefix used to drop stale/previous-day rows',
+        () {
+      expect(TimeshareParser.dateOf('2026-07-22 09:30,1,2,3,4,5,6,7'),
+          equals('2026-07-22'));
+      // Sina "day" style value (HH:MM:SS)
+      expect(TimeshareParser.dateOf('2026-07-21 09:35:00'),
+          equals('2026-07-21'));
+      expect(TimeshareParser.dateOf(''), isNull);
+    });
   });
 }
