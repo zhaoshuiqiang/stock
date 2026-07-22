@@ -68,6 +68,10 @@ class QuoteScreenState extends State<QuoteScreen>
   Position? _heldPosition;
   List<Map<String, dynamic>>? _scoreTrend; // v3.13: 评分趋势数据
   MarketContext? _marketContext;
+  // v4.14: cache sector rotation from initial load so analysis refresh keeps
+  // the sector_momentum direction component (and directionScore) consistent.
+  List<SectorAnalysis>? _sectorAnalysisCache;
+  String? _sectorNameCache;
   bool _isLoading = true;
   bool _isAnalysisRefreshing = false;
   bool _isFavorite = false;
@@ -431,6 +435,8 @@ class QuoteScreenState extends State<QuoteScreen>
         calculated,
         _quote,
         marketContext: marketContext,
+        sectorName: _sectorNameCache,
+        sectorAnalysis: _sectorAnalysisCache,
         enableAsyncSideEffects: false,
         onAIUpdate: (aiReasons) {
           if (mounted) {
@@ -572,6 +578,8 @@ class QuoteScreenState extends State<QuoteScreen>
           _klines,
           mergedQuote,
           marketContext: _marketContext,
+          sectorName: _sectorNameCache,
+          sectorAnalysis: _sectorAnalysisCache,
           enableAsyncSideEffects: false,
         );
         newAnalysis = await _calibrationService.enrich(
@@ -637,6 +645,8 @@ class QuoteScreenState extends State<QuoteScreen>
           .toList();
       final sectorRotationResult =
           SectorRotation.analyze(sectorList: sectorData);
+      _sectorNameCache = sectorName;
+      _sectorAnalysisCache = sectorRotationResult.topSectors;
 
       if (quote != null) {
         quote = QuoteData(
@@ -3346,6 +3356,8 @@ class QuoteScreenState extends State<QuoteScreen>
         calculated,
         _quote,
         marketContext: _marketContext,
+        sectorName: _sectorNameCache,
+        sectorAnalysis: _sectorAnalysisCache,
         enableAsyncSideEffects: false,
         onAIUpdate: (aiReasons) {
           if (mounted) {

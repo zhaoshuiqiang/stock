@@ -65,6 +65,14 @@ class ScoringConfig {
   /// (1.5->1.0). Default off; byte-identical to the legacy scorer when off.
   static bool useShortTermTrendDiscount = false;
 
+  /// v4.14 - calibration cold-start: when the strict per-(regime x band)
+  /// bucket lacks the >=100 samples / 20 dates / 95% completion needed for a
+  /// calibrated hit-rate, fall back to progressively wider buckets (band-
+  /// level, then direction-level) with lower floors and tag the estimate
+  /// isColdStart so the UI labels it a small-sample reference. Default off;
+  /// the strict path is byte-identical when this is false.
+  static bool useCalibrationColdStart = false;
+
   /// 方向模型版本标签：随循证校准开关切换，可写入 decision_snapshots.model_version，
   /// 使不同口径的历史分数不被混合统计。
   static String get directionModelVersion =>

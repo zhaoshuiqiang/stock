@@ -1,6 +1,7 @@
 import '../models/short_term_decision.dart';
 import '../models/stock_models.dart';
 import 'calibration_metrics.dart';
+import 'scoring_config.dart';
 
 class DecisionCalibrator {
   static DecisionCalibrationModel buildModel(
@@ -43,13 +44,70 @@ class DecisionCalibrationModel {
     if (direction == RecommendationDirection.neutral) return null;
     final band = DecisionCalibrator.strengthBand(directionScore);
     if (band == null) return null;
-    final global = _rows.where((row) =>
-        row.modelVersion == modelVersion &&
-        row.horizon == horizon &&
-        row.direction == direction);
-    final bucket = global.where((row) =>
-        row.marketRegime == marketRegime &&
-        DecisionCalibrator.strengthBand(row.directionScore) == band);
+    final global = _rows
+        .where((row) =>
+            row.modelVersion == modelVersion &&
+            row.horizon == horizon &&
+            row.direction == direction)
+        .toList(growable: false);
+
+    // Strict tier: (marketRegime x strengthBand) bucket with the full
+    // statistical gates. Byte-identical to the pre-v4.14 behavior; always
+    // tried first, and the only tier when cold-start is disabled.
+    final strict = _estimateFor(
+      global.where((row) =>
+          row.marketRegime == marketRegime &&
+          DecisionCalibrator.strengthBand(row.directionScore) == band),
+      global,
+      horizon,
+      minValid: 100,
+      minDates: 20,
+      minRate: 0.95,
+      isColdStart: false,
+    );
+    if (strict != null) return strict;
+
+    // v4.14 cold-start: only when explicitly enabled, progressively widen the
+    // bucket (drop regime, then drop band) with lower floors so a usable — but
+    // clearly-labeled small-sample — estimate appears before the strict bucket
+    // has accumulated. Off by default => returns null exactly like before.
+    if (!ScoringConfig.useCalibrationColdStart) return null;
+
+    final bandTier = _estimateFor(
+      global.where(
+          (row) => DecisionCalibrator.strengthBand(row.directionScore) == band),
+      global,
+      horizon,
+      minValid: 40,
+      minDates: 10,
+      minRate: 0.80,
+      isColdStart: true,
+    );
+    if (bandTier != null) return bandTier;
+
+    return _estimateFor(
+      global,
+      global,
+      horizon,
+      minValid: 20,
+      minDates: 8,
+      minRate: 0.70,
+      isColdStart: true,
+    );
+  }
+
+  /// Computes a Beta-Binomial posterior + Wilson interval for [bucket] when it
+  /// clears the (minValid, minDates, minRate) gates, using [global] only for
+  /// the base-rate prior. Returns null when the gates are not met.
+  CalibrationEstimate? _estimateFor(
+    Iterable<DecisionCalibrationRow> bucket,
+    List<DecisionCalibrationRow> global,
+    int horizon, {
+    required int minValid,
+    required int minDates,
+    required double minRate,
+    required bool isColdStart,
+  }) {
     final total = bucket.length;
     if (total == 0) return null;
     final valid = bucket
@@ -57,13 +115,13 @@ class DecisionCalibrationModel {
             row.status == DecisionOutcomeStatus.evaluated &&
             row.effectiveDirectionHit != null)
         .toList(growable: false);
-    if (valid.length < 100) return null;
+    if (valid.length < minValid) return null;
     final distinctDates = valid
         .map((row) =>
             '${row.signalTradeDate.year}-${row.signalTradeDate.month}-${row.signalTradeDate.day}')
         .toSet()
         .length;
-    if (distinctDates < 20 || valid.length / total < 0.95) return null;
+    if (distinctDates < minDates || valid.length / total < minRate) return null;
     final globalValid = global.where((row) =>
         row.status == DecisionOutcomeStatus.evaluated &&
         row.effectiveDirectionHit != null);
@@ -83,6 +141,7 @@ class DecisionCalibrationModel {
       sampleCount: valid.length,
       wilsonLower: interval.lower,
       wilsonUpper: interval.upper,
+      isColdStart: isColdStart,
     );
   }
 }

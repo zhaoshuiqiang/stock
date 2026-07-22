@@ -85,7 +85,7 @@ class _ShortTermDecisionPanelState extends State<ShortTermDecisionPanel> {
           if (estimate != null) ...[
             const SizedBox(height: 8),
             Text(
-              '校准有效命中率 ${(estimate.probability * 100).toStringAsFixed(1)}%  '
+              '${estimate.isColdStart ? '校准小样本参考 ' : '校准有效命中率 '}${(estimate.probability * 100).toStringAsFixed(1)}%  '
               'n=${estimate.sampleCount}  '
               '[${(estimate.wilsonLower * 100).toStringAsFixed(1)}%, '
               '${(estimate.wilsonUpper * 100).toStringAsFixed(1)}%]',

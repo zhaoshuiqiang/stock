@@ -36,6 +36,7 @@ class CalibrationEstimate {
   final int sampleCount;
   final double wilsonLower;
   final double wilsonUpper;
+  final bool isColdStart;
 
   CalibrationEstimate({
     required this.horizon,
@@ -43,6 +44,7 @@ class CalibrationEstimate {
     required this.sampleCount,
     required this.wilsonLower,
     required this.wilsonUpper,
+    this.isColdStart = false,
   }) {
     if (!_supportedCalibrationHorizons.contains(horizon)) {
       throw ArgumentError.value(
@@ -77,6 +79,7 @@ class CalibrationEstimate {
       sampleCount: _intValue(json['sample_count'], 'sample_count'),
       wilsonLower: _doubleValue(json['wilson_lower'], 'wilson_lower'),
       wilsonUpper: _doubleValue(json['wilson_upper'], 'wilson_upper'),
+      isColdStart: json['is_cold_start'] == true,
     );
   }
 
@@ -86,6 +89,7 @@ class CalibrationEstimate {
         'sample_count': sampleCount,
         'wilson_lower': wilsonLower,
         'wilson_upper': wilsonUpper,
+        'is_cold_start': isColdStart,
       };
 }
 
