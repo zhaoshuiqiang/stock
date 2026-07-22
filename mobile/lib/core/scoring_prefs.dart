@@ -19,6 +19,8 @@ const String kPrefUseReboundGuard = 'use_rebound_guard';
 const String kPrefUseShortTermRealtimeReprofile = 'use_short_term_realtime_reprofile';
 const String kPrefUseShortTermTrendDiscount = 'use_short_term_trend_discount';
 const String kPrefUseCalibrationColdStart = 'use_calibration_cold_start';
+const String kPrefUseDetailNewsSentiment = 'use_detail_news_sentiment';
+const String kPrefUseHistoricalStability = 'use_historical_stability';
 
 /// Load persisted scoring flags into [ScoringConfig]. Defaults (all off /
 /// balanced) when unset, so behavior stays byte-identical to pre-P5 until the
@@ -46,6 +48,10 @@ void applyScoringPrefs(SharedPreferences prefs) {
       prefs.getBool(kPrefUseShortTermTrendDiscount) ?? false;
   ScoringConfig.useCalibrationColdStart =
       prefs.getBool(kPrefUseCalibrationColdStart) ?? false;
+  ScoringConfig.useDetailNewsSentiment =
+      prefs.getBool(kPrefUseDetailNewsSentiment) ?? false;
+  ScoringConfig.useHistoricalStability =
+      prefs.getBool(kPrefUseHistoricalStability) ?? false;
   switch (prefs.getString(kPrefRiskProfile)) {
     case 'conservative':
       ScoringConfig.riskProfile = RiskProfile.conservative;

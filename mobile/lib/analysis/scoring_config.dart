@@ -73,6 +73,19 @@ class ScoringConfig {
   /// the strict path is byte-identical when this is false.
   static bool useCalibrationColdStart = false;
 
+  /// v4.15 - detail news sentiment: when on, the stock-detail screen fetches
+  /// news and passes it into generateAnalysis so the "sentiment_confirm"
+  /// dimension and the comprehensive sentiment weight become live instead of
+  /// a constant 50. Default off; the detail path passes no news when off, so
+  /// scores stay byte-identical.
+  static bool useDetailNewsSentiment = false;
+
+  /// v4.15 - historical stability: when on, the stock-detail screen pre-fetches
+  /// this stock's past recommendation 5-day hit-rate and feeds it as the
+  /// evidence-confidence history_stability input (default 50 otherwise).
+  /// Default off; null is passed when off, keeping evidenceConfidence identical.
+  static bool useHistoricalStability = false;
+
   /// 方向模型版本标签：随循证校准开关切换，可写入 decision_snapshots.model_version，
   /// 使不同口径的历史分数不被混合统计。
   static String get directionModelVersion =>

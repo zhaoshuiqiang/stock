@@ -32,6 +32,7 @@ class ShortTermDecisionInput {
   final NewsSentiment? newsSentiment;
   final Map<String, BacktestResult>? backtestResults;
   final SectorMomentumResult? sectorMomentum;
+  final double? historicalStability;
 
   const ShortTermDecisionInput({
     required this.data,
@@ -50,6 +51,7 @@ class ShortTermDecisionInput {
     this.newsSentiment,
     this.backtestResults,
     this.sectorMomentum,
+    this.historicalStability,
   });
 }
 
@@ -96,6 +98,7 @@ class ShortTermDecisionEngine {
       directionComponents: evidence.components,
       directionalSignals: directionalSignals,
       dataQualityFlags: evidence.dataQualityFlags,
+      historicalStability: input.historicalStability ?? 50,
       fundamentalScore: input.fundamentalScore,
       newsSentiment: input.newsSentiment,
       marketContext: input.marketContext,

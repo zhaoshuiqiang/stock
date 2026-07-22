@@ -145,6 +145,23 @@ void main() {
     expect(high.decision.directionScore, low.decision.directionScore);
     expect(high.decision.directionComponents['relative_strength'], 0);
   });
+
+  test('historical stability input lifts evidence confidence (v4.15)', () {
+    double confidence(double? hs) => ShortTermDecisionEngine.evaluate(
+          _input(
+            data: _data(trend: 1),
+            buySignals: [_signal('MA'), _signal('volume')],
+            historicalStability: hs,
+          ),
+        ).decision.evidenceConfidence;
+
+    final high = confidence(95);
+    final low = confidence(5);
+    final defaulted = confidence(null); // falls back to 50
+    expect(high, greaterThan(low));
+    expect(defaulted, greaterThan(low));
+    expect(defaulted, lessThan(high));
+  });
 }
 
 ShortTermDecisionInput _input({
@@ -158,6 +175,7 @@ ShortTermDecisionInput _input({
   NextDayPredictionResult? nextDayPrediction,
   NextSessionPrediction nextSessionPrediction =
       const NextSessionPrediction.neutral(),
+  double? historicalStability,
 }) {
   return ShortTermDecisionInput(
     data: data,
@@ -175,6 +193,7 @@ ShortTermDecisionInput _input({
     },
     activeStrategies: activeStrategies,
     rawComprehensiveScore: 5,
+    historicalStability: historicalStability,
   );
 }
 

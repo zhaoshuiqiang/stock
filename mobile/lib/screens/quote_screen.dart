@@ -22,6 +22,8 @@ import '../widgets/trading_dashboard.dart';
 import '../core/trading_session.dart';
 import '../analysis/intraday_level_analyzer.dart';
 import '../analysis/sector_rotation.dart';
+import '../analysis/scoring_config.dart';
+import '../analysis/recommendation_tracker.dart';
 import '../analysis/ai_layer.dart';
 import '../analysis/archive_service.dart';
 import '../core/ai_config.dart';
@@ -72,6 +74,8 @@ class QuoteScreenState extends State<QuoteScreen>
   // the sector_momentum direction component (and directionScore) consistent.
   List<SectorAnalysis>? _sectorAnalysisCache;
   String? _sectorNameCache;
+  List<dynamic>? _newsCache; // v4.15: cached news (useDetailNewsSentiment)
+  double? _historyStabilityCache; // v4.15 (useHistoricalStability)
   bool _isLoading = true;
   bool _isAnalysisRefreshing = false;
   bool _isFavorite = false;
@@ -437,6 +441,8 @@ class QuoteScreenState extends State<QuoteScreen>
         marketContext: marketContext,
         sectorName: _sectorNameCache,
         sectorAnalysis: _sectorAnalysisCache,
+        newsList: _newsCache,
+        historicalStability: _historyStabilityCache,
         enableAsyncSideEffects: false,
         onAIUpdate: (aiReasons) {
           if (mounted) {
@@ -580,6 +586,8 @@ class QuoteScreenState extends State<QuoteScreen>
           marketContext: _marketContext,
           sectorName: _sectorNameCache,
           sectorAnalysis: _sectorAnalysisCache,
+          newsList: _newsCache,
+          historicalStability: _historyStabilityCache,
           enableAsyncSideEffects: false,
         );
         newAnalysis = await _calibrationService.enrich(
@@ -607,6 +615,16 @@ class QuoteScreenState extends State<QuoteScreen>
         _analysis = _analysis!.copyWith(quote: mergedQuote);
       }
     });
+  }
+
+  // v4.15: map this stock's historical recommendation 5-day hit-rate to a
+  // 30..100 evidence-confidence stability input. Null when there is no history.
+  double? _computeHistoryStability(List<Map<String, dynamic>> hist) {
+    if (hist.isEmpty) return null;
+    final wins = hist
+        .where((h) => ((h['day5_return'] as num?)?.toDouble() ?? 0) > 0)
+        .length;
+    return (30 + (wins / hist.length) * 70).clamp(0.0, 100.0);
   }
 
   Future<void> _loadData() async {
@@ -647,6 +665,27 @@ class QuoteScreenState extends State<QuoteScreen>
           SectorRotation.analyze(sectorList: sectorData);
       _sectorNameCache = sectorName;
       _sectorAnalysisCache = sectorRotationResult.topSectors;
+      // v4.15: optional news sentiment + historical stability (default off)
+      List<dynamic>? newsForAnalysis;
+      double? historyStability;
+      if (ScoringConfig.useDetailNewsSentiment) {
+        try {
+          newsForAnalysis = await _apiClient.getStockNews(widget.name);
+        } catch (e) {
+          debugPrint('QuoteScreen.getStockNews: $e');
+        }
+      }
+      if (ScoringConfig.useHistoricalStability) {
+        try {
+          final hist = await RecommendationTracker()
+              .getHistoricalRecommendationsWithScore(widget.code);
+          historyStability = _computeHistoryStability(hist);
+        } catch (e) {
+          debugPrint('QuoteScreen.historyStability: $e');
+        }
+      }
+      _newsCache = newsForAnalysis;
+      _historyStabilityCache = historyStability;
 
       if (quote != null) {
         quote = QuoteData(
@@ -681,6 +720,8 @@ class QuoteScreenState extends State<QuoteScreen>
         marketContext: marketContext,
         sectorName: sectorName,
         sectorAnalysis: sectorRotationResult.topSectors,
+        newsList: newsForAnalysis,
+        historicalStability: historyStability,
         enableAsyncSideEffects: false,
       );
       try {
@@ -3358,6 +3399,8 @@ class QuoteScreenState extends State<QuoteScreen>
         marketContext: _marketContext,
         sectorName: _sectorNameCache,
         sectorAnalysis: _sectorAnalysisCache,
+        newsList: _newsCache,
+        historicalStability: _historyStabilityCache,
         enableAsyncSideEffects: false,
         onAIUpdate: (aiReasons) {
           if (mounted) {

@@ -10,6 +10,15 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.15.20260722',
+        'date': '2026-07-22',
+        'changes': [
+          '新增(实验/默认关): 详情新闻情绪(useDetailNewsSentiment)——个股详情原从不拉取新闻致“情绪确认”恒50%；开启后拉取个股新闻计算情绪确认、并激活综合评分情绪维度(mediumTerm 10%权重)，首屏与手动/实时/AI三条刷新路径经缓存复用；默认关、关闭时字节等价',
+          '新增(实验/默认关): 历史稳定性(useHistoricalStability)——证据置信“历史稳定性”维度(10%权重)此前恒默认50；开启后用本股历史推荐5日胜率映射(30~100)作为输入，经generateAnalysis透传至决策引擎；默认关、null回退50字节等价',
+          '测试: 新增“历史稳定性→证据置信”单调性用例(95>50>5)，全量1163测试通过',
+        ],
+      },
+      {
         'version': 'v4.14.20260722',
         'date': '2026-07-22',
         'changes': [

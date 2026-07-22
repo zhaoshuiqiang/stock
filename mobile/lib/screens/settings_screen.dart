@@ -31,6 +31,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _shortTermReprofile = false;
   bool _shortTermTrendDiscount = false;
   bool _calibColdStart = false;
+  bool _detailNews = false;
+  bool _historyStability = false;
 
   @override
   void initState() {
@@ -108,6 +110,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _shortTermReprofile = ScoringConfig.useShortTermRealtimeReprofile;
       _shortTermTrendDiscount = ScoringConfig.useShortTermTrendDiscount;
       _calibColdStart = ScoringConfig.useCalibrationColdStart;
+      _detailNews = ScoringConfig.useDetailNewsSentiment;
+      _historyStability = ScoringConfig.useHistoricalStability;
     });
   }
 
@@ -230,6 +234,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 '样本不足时显示放宽档(方向级)并标注“小样本参考”，而非“暂无数据”',
                 kPrefUseCalibrationColdStart,
                 (x) { setState(() => _calibColdStart = x); ScoringConfig.useCalibrationColdStart = x; }),
+            tile(_detailNews, '详情新闻情绪(实验)',
+                '开启后个股详情会拉取新闻并计算“情绪确认”，同时激活综合评分的情绪维度；默认关、会增加一次网络请求',
+                kPrefUseDetailNewsSentiment,
+                (x) { setState(() => _detailNews = x); ScoringConfig.useDetailNewsSentiment = x; }),
+            tile(_historyStability, '历史稳定性(实验)',
+                '用本股历史推荐的5日胜率作为“证据置信-历史稳定性”输入(默认50)；默认关、进入详情时多一次本地查询',
+                kPrefUseHistoricalStability,
+                (x) { setState(() => _historyStability = x); ScoringConfig.useHistoricalStability = x; }),
             const SizedBox(height: 4),
             Text('提示：多数开关在下次扫描/进入详情页后生效。',
                 style: textTheme.bodySmall?.copyWith(color: Colors.grey[500])),

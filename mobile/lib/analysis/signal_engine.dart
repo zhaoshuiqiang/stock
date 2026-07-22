@@ -301,6 +301,7 @@ AnalysisResult generateAnalysis(
   bool autoTriggerAI = false,
   bool enableAsyncSideEffects = true,
   IntradayProfile? intradayProfile,
+  double? historicalStability,
 }) {
   if (data.isEmpty) {
     return AnalysisResult(
@@ -532,6 +533,7 @@ AnalysisResult generateAnalysis(
       fundamentalScore: compResult.fundamentalScore,
       newsSentiment: compResult.newsSentiment,
       backtestResults: backtestResults,
+      historicalStability: historicalStability,
       sectorMomentum: sectorMomentumResult,
     ),
   );
