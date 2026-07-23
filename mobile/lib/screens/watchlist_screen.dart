@@ -5,6 +5,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../api/api_client.dart';
 import '../api/websocket_client.dart';
 import '../analysis/opportunity_engine.dart';
@@ -24,6 +27,7 @@ import '../storage/portfolio_asset_store.dart';
 import '../analysis/sector_pick_engine.dart';
 import '../widgets/stock_card.dart';
 import '../widgets/alert_dialog.dart';
+import '../services/watchlist_export_csv.dart';
 import 'quote_screen.dart';
 import 'alerts_screen.dart';
 import 'portfolio_chart_screen.dart';
@@ -696,6 +700,83 @@ class WatchlistScreenState extends State<WatchlistScreen>
   }
 
   // ─── 一键归档 ──────────────────────────────────────────────────
+
+  Future<void> _exportSelectedToCsv() async {
+    if (_selectedCodes.isEmpty) return;
+    final seen = <String>{};
+    final items = <WatchlistExportItem>[];
+    for (final wItem in _watchlist) {
+      if (!_selectedCodes.contains(wItem.code)) continue;
+      final normalized = StockCodeUtils.normalizeForArchive(wItem.code);
+      if (!seen.add(normalized)) continue;
+      final codeWithPrefix = _apiClient.addMarketPrefix(wItem.code);
+      final quote = _quotes.firstWhere(
+        (q) => q.code == codeWithPrefix,
+        orElse: () => QuoteData.empty(),
+      );
+      final opp = _oppMap[wItem.code] ??
+          _oppMap[normalized] ??
+          _oppMap[StockCodeUtils.stripMarketPrefix(normalized)];
+      items.add(WatchlistExportItem(
+        code: wItem.code,
+        name: wItem.name.isNotEmpty ? wItem.name : quote.name,
+        quote: quote.price > 0 ? quote : null,
+        opp: opp,
+      ));
+    }
+    if (items.isEmpty) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      final now = DateTime.now();
+      final stamp = DateFormat('yyyyMMdd_HHmmss').format(now);
+      final csv = buildWatchlistExportCsv(items: items, now: now);
+      final fileName = 'watchlist_export_$stamp.csv';
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File('${tempDir.path}/$fileName');
+      await tempFile.writeAsString(csv);
+      final docDir = await getApplicationDocumentsDirectory();
+      final docFile = File('${docDir.path}/$fileName');
+      await docFile.writeAsString(csv);
+      if (!mounted) return;
+      Navigator.pop(context);
+      try {
+        await Share.shareXFiles(
+          [XFile(tempFile.path)],
+          subject: '自选股导出 ($stamp)',
+        );
+      } catch (_) {}
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已导出 $fileName（${items.length}只）'),
+            action: SnackBarAction(
+              label: '查看路径',
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(docFile.path,
+                        style: const TextStyle(fontSize: 12)),
+                    duration: const Duration(seconds: 8),
+                  ),
+                );
+              },
+            ),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导出失败: $e')),
+      );
+    }
+  }
 
   Future<void> _oneClickArchive() async {
     if (_oppResults.isEmpty) return;
@@ -4099,6 +4180,30 @@ class WatchlistScreenState extends State<WatchlistScreen>
                   ),
                 ),
               ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: _selectedCodes.isEmpty ? null : _exportSelectedToCsv,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _darkSurface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _selectedCodes.isEmpty ? _borderColor : _accentColor,
+                  ),
+                ),
+                child: Text(
+                  '导出',
+                  style: TextStyle(
+                    color:
+                        _selectedCodes.isEmpty ? _textSecondary : _accentColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
             const SizedBox(width: 8),
             GestureDetector(
               onTap: _selectedCodes.isEmpty

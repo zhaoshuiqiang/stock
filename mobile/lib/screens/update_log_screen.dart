@@ -10,6 +10,14 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.21.20260723',
+        'date': '2026-07-23',
+        'changes': [
+          '新增(自选页): 多选导出——进入多选后底栏新增“导出”，将所选个股导出为分析就绪CSV(BOM+CRLF、26列)并经系统分享，同时存入App文档目录(可点“查看路径”)；含行情+评分/推荐/风险+方向分/交易质量/风险/证据置信/方向/市场结构+入场止损止盈盈亏比+topSignals；无分析数据的个股仅导出行情列、分析列留空',
+          '测试: 新增 watchlist_export_csv 单测(BOM+CRLF+26列schema/有分析行/纯自选行留空/空列表)，全量测试通过',
+        ],
+      },
+      {
         'version': 'v4.20.20260723',
         'date': '2026-07-23',
         'changes': [
