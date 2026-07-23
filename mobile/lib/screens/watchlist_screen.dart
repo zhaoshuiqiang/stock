@@ -46,7 +46,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
   List<WatchlistItem> _watchlist = [];
   List<QuoteData> _quotes = [];
   bool _isLoading = true;
-  String _filterType = '全部'; // 全部/强烈买入/买入/谨慎买入/偏多观望/偏空观望/谨慎卖出/卖出/强烈卖出
+  String _filterType = '全部'; // 全部/强烈买入/买入/谨慎买入/偏多观望/观望/偏空观望/谨慎卖出/卖出/强烈卖出
   String _sortBy = 'default'; // 'default', 'change_pct', 'score'
   bool _sortAscending = false;
   bool _isEditMode = false;
@@ -467,8 +467,8 @@ class WatchlistScreenState extends State<WatchlistScreen>
     }
     // 无分析数据或推荐为空时用涨跌幅
     if (quote.changePct > 0) return '偏多观望';
-    if (quote.changePct < 0) return '中性';
-    return '中性';
+    if (quote.changePct < 0) return '偏空观望';
+    return '观望';
   }
 
   List<Map<String, dynamic>> _getFilteredAndSortedItems() {
@@ -3235,6 +3235,7 @@ class WatchlistScreenState extends State<WatchlistScreen>
             DropdownMenuItem(value: '买入', child: Text('买入')),
             DropdownMenuItem(value: '谨慎买入', child: Text('谨慎买入')),
             DropdownMenuItem(value: '偏多观望', child: Text('偏多观望')),
+            DropdownMenuItem(value: '观望', child: Text('观望')),
             DropdownMenuItem(value: '偏空观望', child: Text('偏空观望')),
             DropdownMenuItem(value: '谨慎卖出', child: Text('谨慎卖出')),
             DropdownMenuItem(value: '卖出', child: Text('卖出')),
