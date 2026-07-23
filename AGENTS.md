@@ -8,11 +8,14 @@ Flutter (Dart) A-share stock analysis Android app. Pure client-side rule engine 
 - **Version**: `mobile/pubspec.yaml` + `mobile/lib/core/app_version.dart` (currently v4.2.20260718)
 - **Python env**: `venv/` (akshare for concept data generation)
 - **Stats**: ~141 Dart source files, 105 test files, 1061 tests
+- **Toolchain (pinned in `.tool-versions`)**: Flutter 3.44.0 stable (bundles Dart 3.12.0), JDK 17, Android SDK API 36+ — run `flutter doctor` to verify.
 
 ## Developer Commands
 
 ```bash
-# Setup
+# Setup — toolchain versions are pinned in .tool-versions
+#   (Flutter 3.44.0 stable / Dart 3.12.0; JDK 17). Verify first, then fetch:
+flutter doctor
 cd mobile && flutter pub get
 
 # Run all tests (1061 tests, 6 skipped — hot_sectors_test requires network)
@@ -36,16 +39,23 @@ flutter run -d emulator-5554
 ### Environment Variables
 
 ```powershell
-ANDROID_HOME=D:\MyProjects\stock\android-sdk
-ANDROID_SDK_ROOT=D:\Users\zsq53\Desktop\stock\android-sdk
-ANDROID_AVD_HOME=D:\MyProjects\stock\android-emulator
+# <REPO_ROOT> = absolute path where this repo is checked out on your machine
+#   (this machine: D:\MyProjects\stock). The Android SDK is bundled inside
+#   the repo, so ANDROID_HOME and ANDROID_SDK_ROOT MUST point to the same dir.
+ANDROID_HOME=<REPO_ROOT>\android-sdk
+ANDROID_SDK_ROOT=<REPO_ROOT>\android-sdk
+ANDROID_AVD_HOME=<REPO_ROOT>\android-emulator
 ```
+
+> The definitive SDK path is `sdk.dir` in `mobile/android/local.properties`
+> (git-ignored, per-machine). Keep the variables above consistent with it.
 
 ## Version Release (3 files must update together)
 
 1. `mobile/pubspec.yaml` → `version: X.Y.Z`
 2. `mobile/lib/core/app_version.dart` → `static const String version = 'X.Y.Z';`
 3. `mobile/lib/screens/update_log_screen.dart` → Add new version entry to `updates` list
+> Enforced by `mobile/test/release_ritual_guard_test.dart` (run `cd mobile && flutter test test/release_ritual_guard_test.dart`): fails when the three declared versions drift apart.
 
 ## Architecture
 
@@ -162,7 +172,7 @@ API (K-line + Quotes)
 - **Colors**: Defined as `const _k*` at top of screen files; red=up, green=down (A股 convention)
 - **Version bumps**: Update `pubspec.yaml`, `app_version.dart`, and `update_log_screen.dart` together
 - **Plan files**: Stored in `docs/superpowers/plans/` and `docs/superpowers/specs/`
-- **File encoding**: Must use Python scripts to modify Dart files containing Chinese characters (Edit tool / PowerShell corrupts UTF-8)
+- **File encoding**: Must use Python scripts to modify Dart files containing Chinese characters (Edit tool / PowerShell corrupts UTF-8) Enforced by `mobile/test/release_ritual_guard_test.dart` (scans `lib/**/*.dart` for U+FFFD / invalid UTF-8).
 - **API parallel racing**: `_fetchStockHistory` uses Completer-based parallel racing, first success returns
 
 ## Modules WITHOUT Tests (priority for coverage)
@@ -177,7 +187,7 @@ API (K-line + Quotes)
 
 ## Known Issues
 
-1. **API Key in plaintext** — `assets/secrets.json` contains 3 API keys. In `.gitignore` (not committed), but should rotate periodically.
+1. **API Key handling (fixed v4.18)** — `assets/secrets.json` was removed from `pubspec.yaml` assets in v4.18, so release APKs no longer bundle it (verified by unpacking). Keys are now injected at runtime via Settings (persisted to SharedPreferences) or environment variables. Rotate any keys shipped in APKs v4.17 or earlier, since those builds distributed them in plaintext.
 2. **ROE data source not integrated** — `comprehensive_scorer.dart` TODO: fundamental scoring lacks ROE (uses default 5.0).
 3. **MA120 unavailable** — Alert system MA cross only supports up to MA60.
 4. **AI layer + notification service lack tests** — 1522 lines with zero test coverage.

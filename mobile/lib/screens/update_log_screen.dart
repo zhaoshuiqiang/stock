@@ -10,6 +10,24 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.19.20260723',
+        'date': '2026-07-23',
+        'changes': [
+          '优化(全开场景): 新增“强势趋势护栏”——13个实验开关全开时，5个“抑制趋势/追高”开关会在信号/技术/共振/方向/实时多层重复扣分，系统性压制真正健康的强势上升趋势(与打板/主线选股目标相悖)。新增 ScoringConfig.activeTrendDampenerCount 计数，当≥2个抑制开关同时开启、个股为确认健康强势上升趋势(均线多头+ADX≥25+价在MA5上方且非抛物线追高)、且方向分被拖入[0,+12)弱中性带时，将方向分下限抬到+12(仅上抬不下压)；开关<2个时完全不触发、与单开关留档结论字节等价',
+          '说明: 护栏复用既有 oversoldReboundGuard/chaseGuard 范式，排除抛物线/追高个股(交由追高惩罚处理)，不使用魔法数(复用+12看多阈值)；本次仅方向证据侧(directional_evidence_builder)，综合评分侧对称护栏与权重优化器 model_version 过滤列为后续增量',
+          '测试: 新增 all_on_trend_guard_test(全关不触发/仅1开关不触发/全开触发抬至+12/抛物线不救援)，并附设计文档 docs/design_all_on_scoring_coordination.md',
+        ],
+      },
+      {
+        'version': 'v4.18.20260722',
+        'date': '2026-07-22',
+        'changes': [
+          '安全: API 密钥不再随 APK 打包——移除 pubspec 资产声明 assets/secrets.json，密钥改为运行时在“设置-API 密钥”中填入、仅保存在本机(SharedPreferences)，并保留环境变量注入(桌面/测试)；解包 release APK 已不再含明文密钥',
+          '说明: 升级后首次使用 AI 功能需在设置页重新填入各服务密钥(强烈建议同时轮换此前随包分发过的旧密钥)；未配置密钥时 AI 层安全降级，核心行情与本地技术分析不受影响',
+          '设置: 新增“API 密钥”配置卡(智谱/OpenRouter/CliProxyAPI)，支持保存/清除/显隐，保存后即时重建 AI 层',
+        ],
+      },
+      {
         'version': 'v4.17.20260722',
         'date': '2026-07-22',
         'changes': [

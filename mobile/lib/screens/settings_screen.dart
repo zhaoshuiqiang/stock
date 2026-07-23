@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_version.dart';
 import '../core/ai_config.dart';
 import '../analysis/ai_layer.dart';
+import '../analysis/news_sentiment_analyzer.dart';
 import 'update_log_screen.dart';
 import 'indicator_reference_screen.dart';
 import 'strategy_reference_screen.dart';
@@ -34,12 +35,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _detailNews = false;
   bool _historyStability = false;
 
+  final Map<AIProvider, TextEditingController> _keyControllers = {
+    for (final p in AIProvider.values) p: TextEditingController(),
+  };
+  final Map<AIProvider, bool> _keyConfigured = {};
+  final Map<AIProvider, bool> _obscureKey = {
+    for (final p in AIProvider.values) p: true,
+  };
+
   @override
   void initState() {
     super.initState();
     _loadProviderSetting();
     _loadRiskProfile();
     _loadScoringFlags();
+    _loadApiKeyStatus();
+  }
+
+  @override
+  void dispose() {
+    for (final c in _keyControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
   }
 
   Future<void> _loadProviderSetting() async {
@@ -155,6 +173,153 @@ class _SettingsScreenState extends State<SettingsScreen> {
       case RiskProfile.aggressive:
         return '门控更松：更多买入信号';
     }
+  }
+
+  Future<void> _loadApiKeyStatus() async {
+    await AIConfig.init();
+    if (!mounted) return;
+    setState(() {
+      for (final p in AIProvider.values) {
+        _keyConfigured[p] = AIConfig.hasKeyForProvider(p);
+      }
+    });
+  }
+
+  Future<void> _reinitAILayer() async {
+    if (!AIConfig.enableAIEnhancement) return;
+    final provider = _selectedProvider ?? AIProvider.zhipu;
+    final apiKey = AIConfig.getApiKeyForProvider(provider);
+    if (apiKey.isNotEmpty) {
+      final aiLayer = ChatCompletionLayer(apiKey: apiKey, provider: provider);
+      AILayerProvider.set(aiLayer);
+      NewsSentimentAnalyzer.setAILayer(aiLayer);
+    }
+  }
+
+  Future<void> _saveApiKey(AIProvider provider) async {
+    final text = _keyControllers[provider]!.text.trim();
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先输入密钥再保存')),
+      );
+      return;
+    }
+    await AIConfig.setApiKeyForProvider(provider, text);
+    _keyControllers[provider]!.clear();
+    await _reinitAILayer();
+    if (!mounted) return;
+    setState(() => _keyConfigured[provider] = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已保存${provider.label}密钥（仅存本机）')),
+    );
+  }
+
+  Future<void> _clearApiKey(AIProvider provider) async {
+    await AIConfig.setApiKeyForProvider(provider, '');
+    if (!mounted) return;
+    setState(() => _keyConfigured[provider] = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已清除${provider.label}密钥')),
+    );
+  }
+
+  Widget _buildKeyField(AIProvider provider) {
+    final configured = _keyConfigured[provider] ?? false;
+    final obscure = _obscureKey[provider] ?? true;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(provider.label,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(width: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: (configured ? Colors.green : Colors.grey)
+                      .withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(configured ? '已配置' : '未配置',
+                    style: TextStyle(
+                        color: configured ? Colors.green : Colors.grey,
+                        fontSize: 11)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _keyControllers[provider],
+            obscureText: obscure,
+            autocorrect: false,
+            enableSuggestions: false,
+            style: const TextStyle(fontSize: 13),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: configured ? '输入新密钥以更新' : '粘贴${provider.label}密钥',
+              hintStyle: TextStyle(color: Colors.grey[600], fontSize: 12),
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: Icon(obscure ? Icons.visibility_off : Icons.visibility,
+                    size: 18),
+                onPressed: () =>
+                    setState(() => _obscureKey[provider] = !obscure),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (configured)
+                TextButton(
+                  onPressed: () => _clearApiKey(provider),
+                  child: const Text('清除',
+                      style: TextStyle(color: Colors.redAccent)),
+                ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: () => _saveApiKey(provider),
+                child: const Text('保存'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildApiKeyCard(TextTheme textTheme) {
+    return Card(
+      color: const Color(0xFF161B22),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.key, size: 20, color: Colors.amber),
+                const SizedBox(width: 8),
+                Text('API 密钥',
+                    style: textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '密钥仅保存在本机、不随应用打包。请填入你自己的 API Key 后保存；清除后可停用对应服务。',
+              style: TextStyle(color: Colors.grey),
+            ),
+            ...AIProvider.values.map(_buildKeyField),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildScoringEngineCard(TextTheme textTheme) {
@@ -333,13 +498,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '提示：切换后需要重启应用才能生效。API Key请通过环境变量配置。',
+                      '提示：切换后需重启应用才能生效。密钥请在下方“API 密钥”中填写。',
                       style: textTheme.bodySmall?.copyWith(color: Colors.grey[500]),
                     ),
                   ],
                 ),
               ),
             ),
+            const SizedBox(height: 20),
+            _buildApiKeyCard(textTheme),
             const SizedBox(height: 20),
             Card(
               color: const Color(0xFF161B22),
