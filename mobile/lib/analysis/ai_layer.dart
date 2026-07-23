@@ -128,7 +128,7 @@ class AIChatResult {
 enum AIProvider {
   zhipu('智谱AI', 'glm-4.7-flash', 'https://open.bigmodel.cn/api/paas/v4/chat/completions'),
   openrouter('OpenRouter', 'openrouter/free', 'https://openrouter.ai/api/v1/chat/completions'),
-  cliproxyapi('CliProxyAPI', 'gpt-5.4', 'http://10.210.2.201:8319/v1/chat/completions');
+  cliproxyapi('CliProxyAPI', 'gpt-5.6-sol', 'http://10.210.2.201:8319/v1/chat/completions');
 
   final String label;
   final String defaultModel;

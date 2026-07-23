@@ -10,6 +10,13 @@ class UpdateLogScreen extends StatelessWidget {
 
     final updates = [
       {
+        'version': 'v4.22.20260723',
+        'date': '2026-07-23',
+        'changes': [
+          '配置(AI): CliProxyAPI 默认模型由 gpt-5.4 升级为 gpt-5.6-sol；智谱/OpenRouter 提供方不变。仅当在设置中选择 CliProxyAPI 提供方时生效，请求端点不变',
+        ],
+      },
+      {
         'version': 'v4.21.20260723',
         'date': '2026-07-23',
         'changes': [
