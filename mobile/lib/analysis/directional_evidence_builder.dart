@@ -17,7 +17,6 @@ const String sectorMomentumComponentKey = 'sector_momentum';
 
 const String oversoldReboundGuard = 'oversold_rebound_guard';
 const String chaseGuard = 'chase_guard';
-const String strongTrendGuard = 'strong_trend_guard';
 const String historyDataMissingFlag = 'history_data_missing';
 const String quoteDataMissingFlag = 'quote_data_missing';
 const String evidenceFamilyConflictFlag = 'evidence_family_conflict';
@@ -238,20 +237,6 @@ class DirectionalEvidenceBuilder {
         !(trend >= 0.45 && volumeFlow >= 0.45)) {
       guardedDirectionScore = 34;
       guardReasons.add(chaseGuard);
-    }
-
-    // Strong-trend guard (all-on stacking protection): when >=2 trend/chase
-    // dampeners stack they can over-suppress a genuinely healthy uptrend out
-    // of the bullish band. Restore to the bullish threshold (a floor; never
-    // lowers) for a confirmed, non-parabolic strong uptrend that stacked
-    // dampening pushed into the weak-neutral [0, +12) band. No-op when <2
-    // dampeners are active, so single-flag behavior stays byte-identical.
-    if (ScoringConfig.activeTrendDampenerCount >= 2 &&
-        guardedDirectionScore >= 0 &&
-        guardedDirectionScore < kDirectionBullishThreshold &&
-        _hasStrongHealthyUptrend(input.data, input.quote)) {
-      guardedDirectionScore = kDirectionBullishThreshold;
-      guardReasons.add(strongTrendGuard);
     }
 
     return DirectionalEvidenceResult(
@@ -580,35 +565,6 @@ class DirectionalEvidenceBuilder {
     // WR14低值=超买(<=20), bias6高值=超买(>=8)
     if (last.wr14 != null) return last.wr14! <= 20;
     return last.bias6 >= 8;
-  }
-
-  /// Confirmed healthy strong uptrend: multi-head MAs, price above MA5, a
-  /// strong upward ADX, and explicitly NOT parabolic/extended (that is the
-  /// chase penalty's job). Used only to arm [strongTrendGuard].
-  static bool _hasStrongHealthyUptrend(
-    List<HistoryKline> data,
-    QuoteData? quote,
-  ) {
-    if (data.isEmpty) return false;
-    final last = data.last;
-    final maAligned = last.ma5 > 0 &&
-        last.ma10 > 0 &&
-        last.ma20 > 0 &&
-        last.ma5 > last.ma10 &&
-        last.ma10 > last.ma20;
-    if (!maAligned) return false;
-    if (!(last.close > 0 && last.close > last.ma5)) return false;
-    if (!(last.adx14 >= 25 && last.plusDi14 > last.minusDi14)) return false;
-    // Exclude parabolic / chase setups (handled by the chase penalty).
-    final dayChange = quote?.changePct ?? last.changePct;
-    if (dayChange >= 7) return false;
-    if (last.bias6.isFinite && last.bias6 >= 8) return false;
-    if (last.rsi6 >= 80) return false;
-    if (_consecutiveRiseDays(data) >= 4) return false;
-    if (last.open > 0 && (last.close - last.open) / last.open * 100 <= -3) {
-      return false;
-    }
-    return true;
   }
 
   static int _consecutiveRiseDays(List<HistoryKline> data) {

@@ -86,21 +86,6 @@ class ScoringConfig {
   /// Default off; null is passed when off, keeping evidenceConfidence identical.
   static bool useHistoricalStability = false;
 
-  /// Number of active trend/chase dampeners. Consumed by the strong-trend
-  /// guard (directional_evidence_builder) to detect the all-on stacking case:
-  /// each dampener was validated in isolation, so when >=2 stack they can
-  /// over-suppress a genuinely healthy uptrend. >=2 arms the guard; 0/1 keeps
-  /// single-flag behavior byte-identical.
-  static int get activeTrendDampenerCount {
-    var n = 0;
-    if (deemphasizeTrendStrength) n++;
-    if (deemphasizeBreakoutChase) n++;
-    if (useShortTermTrendDiscount) n++;
-    if (useShortTermRealtimeReprofile) n++;
-    if (useRecalibratedDirection) n++;
-    return n;
-  }
-
   /// 方向模型版本标签：随循证校准开关切换，可写入 decision_snapshots.model_version，
   /// 使不同口径的历史分数不被混合统计。
   static String get directionModelVersion =>
