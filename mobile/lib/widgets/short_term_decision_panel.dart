@@ -94,13 +94,32 @@ class _ShortTermDecisionPanelState extends State<ShortTermDecisionPanel> {
           ] else ...[
             const SizedBox(height: 8),
             Text(
-              '暂无${_horizon}日校准数据（需积累历史决策记录，请先使用“全市场扫描”生成决策快照）',
+              '短线方向命中≈随大盘（经多轮验证：T+1近掷硬币、不宜作预测）；当前市场：${_regimeLabel(decision.marketRegime)}。相对选股超额α见留档页。',
               style: const TextStyle(color: Color(0xFF8B949E), fontSize: 11),
             ),
           ],
         ],
       ),
     );
+  }
+
+  String _regimeLabel(MarketRegime r) {
+    switch (r) {
+      case MarketRegime.bullishTrend:
+        return '多头趋势';
+      case MarketRegime.bearishTrend:
+        return '空头趋势';
+      case MarketRegime.rebound:
+        return '反弹';
+      case MarketRegime.pullback:
+        return '回调';
+      case MarketRegime.range:
+        return '震荡';
+      case MarketRegime.highVolatility:
+        return '高波动';
+      case MarketRegime.unknown:
+        return '未知';
+    }
   }
 
   Widget _metric(IconData icon, String label, String value) => Container(

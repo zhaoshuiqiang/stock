@@ -5,6 +5,7 @@ import 'score_breakdown_card.dart';
 import 'position_context_card.dart';
 import 'skeleton_loader.dart';
 import 'score_trend_chart.dart';
+import '../analysis/chip_distribution_analyzer.dart';
 import 'short_term_decision_panel.dart';
 import '../models/short_term_decision.dart';
 
@@ -17,6 +18,7 @@ class TradingDashboard extends StatelessWidget {
   final bool isRefreshing;
   final String lastUpdateTime;
   final List<Map<String, dynamic>>? scoreTrend;
+  final ChipDistribution? chipDistribution;
   final Position? position;
 
   const TradingDashboard({
@@ -27,6 +29,7 @@ class TradingDashboard extends StatelessWidget {
     this.isRefreshing = false,
     this.lastUpdateTime = '',
     this.scoreTrend,
+    this.chipDistribution,
     this.position,
   });
 
@@ -113,6 +116,10 @@ class TradingDashboard extends StatelessWidget {
           if (scoreTrend != null && scoreTrend!.isNotEmpty) ...[
             const SizedBox(height: 10),
             _buildScoreTrendCard(),
+          ],
+          if (chipDistribution != null && chipDistribution!.isValid) ...[
+            const SizedBox(height: 10),
+            _buildChipCard(),
           ],
           if (analysis!.earlyWarningSignals != null &&
               analysis!.earlyWarningSignals!.isNotEmpty) ...[
@@ -1130,6 +1137,110 @@ class TradingDashboard extends StatelessWidget {
   }
 
   // ─── 评分历史趋势 (v3.13) ────────────────────────────────
+
+  Widget _buildChipCard() {
+    final c = chipDistribution!;
+    final profitPct = c.profitRatio * 100;
+    final trappedPct = c.trappedRatio * 100;
+    const red = Color(0xFFE74C3C);
+    const green = Color(0xFF2ECC71);
+    String money(double v) => v.toStringAsFixed(2);
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF30363D), width: 0.8),
+      ),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        initiallyExpanded: false,
+        leading: const Icon(Icons.stacked_bar_chart,
+            color: Color(0xFF58A6FF), size: 20),
+        title: Row(
+          children: [
+            const Text('筹码分布',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(width: 8),
+            Text('获利${profitPct.toStringAsFixed(0)}%',
+                style: const TextStyle(
+                    color: red, fontSize: 11, fontWeight: FontWeight.w500)),
+            const Spacer(),
+            Text('集中度${(c.concentration90 * 100).toStringAsFixed(0)}%',
+                style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          ],
+        ),
+        children: [
+          Row(
+            children: const [
+              Text('获利盘',
+                  style: TextStyle(color: Colors.white54, fontSize: 11)),
+              Spacer(),
+              Text('套牢盘',
+                  style: TextStyle(color: Colors.white54, fontSize: 11)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: profitPct.round().clamp(1, 100),
+                  child: Container(height: 12, color: red),
+                ),
+                Expanded(
+                  flex: trappedPct.round().clamp(1, 100),
+                  child: Container(height: 12, color: green),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Text('${profitPct.toStringAsFixed(1)}%',
+                  style: const TextStyle(color: red, fontSize: 11)),
+              const Spacer(),
+              Text('${trappedPct.toStringAsFixed(1)}%',
+                  style: const TextStyle(color: green, fontSize: 11)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _chipMetricRow('平均成本(近似主力)', money(c.averageCost),
+              c.currentPrice >= c.averageCost ? red : green),
+          _chipMetricRow('主峰价', money(c.peakPrice), Colors.white70),
+          _chipMetricRow('90%成本区间',
+              '${money(c.lowerCost90)} ~ ${money(c.upperCost90)}', Colors.white70),
+          const SizedBox(height: 6),
+          const Text(
+            '说明: 基于K线换手衰减估算，纯K线无法区分主力/散户，平均成本为全体筹码近似',
+            style: TextStyle(color: Colors.white30, fontSize: 10, height: 1.4),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chipMetricRow(String label, String value, Color valueColor) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          children: [
+            Text(label,
+                style: const TextStyle(color: Colors.white54, fontSize: 12)),
+            const Spacer(),
+            Text(value,
+                style: TextStyle(
+                    color: valueColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
+      );
 
   Widget _buildScoreTrendCard() {
     final avgScore = scoreTrend!

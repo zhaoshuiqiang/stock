@@ -605,6 +605,11 @@ class ArchiveScreenState extends State<ArchiveScreen>
     final deviationPct = reliabilityStats.deviationPct;
     final veryDeviationPct = reliabilityStats.veryDeviationPct;
 
+    final relativeStats = ArchiveReliabilityEvaluator.calculateRelativeAlpha(
+      records: filteredArchives,
+      currentPriceOf: (record) => _currentQuotes[record.code]?.price ?? 0,
+    );
+
     return RefreshIndicator(
       onRefresh: _loadArchives,
       child: CustomScrollView(
@@ -709,6 +714,7 @@ class ArchiveScreenState extends State<ArchiveScreen>
                       ),
                     ],
                   ),
+                  _buildRegimeAlphaInsight(relativeStats),
                   const SizedBox(height: 12),
                   // 第三行：分段比例条 + 标签
                   Column(
@@ -1257,6 +1263,91 @@ class ArchiveScreenState extends State<ArchiveScreen>
           style: TextStyle(color: color, fontSize: 10),
         ),
       ],
+    );
+  }
+
+  Widget _buildRegimeAlphaInsight(ArchiveRelativeAlphaStats s) {
+    if (!s.hasEnoughData) return const SizedBox.shrink();
+    final up = s.marketMeanReturn >= 0;
+    // A股惯例：红涨绿跌
+    final regimeColor = up ? _kVeryDeviationColor : _kVeryReasonableColor;
+    final regimeSign = up ? '+' : '';
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('当日留档域行情',
+                  style: TextStyle(color: Colors.white54, fontSize: 11)),
+              const SizedBox(width: 6),
+              Text(
+                '$regimeSign${s.marketMeanReturn.toStringAsFixed(2)}%'
+                '  ${s.downBreadthPct.toStringAsFixed(0)}%下跌',
+                style: TextStyle(
+                    color: regimeColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '方向合理率主要反映当日行情；下方的超额为剔除行情后的相对选股表现',
+            style: TextStyle(color: Colors.white30, fontSize: 10, height: 1.4),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildAlphaCell('看多超额', s.bullishAlpha, s.bullishCount),
+              const SizedBox(width: 6),
+              _buildAlphaCell('看空超额', s.bearishAlpha, s.bearishCount),
+              const SizedBox(width: 6),
+              _buildAlphaCell('观望超额', s.neutralAlpha, s.neutralCount),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAlphaCell(String label, double alpha, int count) {
+    final has = count > 0;
+    // A股惯例：超额为正显红，为负显绿
+    final color = !has
+        ? Colors.white30
+        : (alpha >= 0 ? _kVeryDeviationColor : _kVeryReasonableColor);
+    final value =
+        has ? '${alpha >= 0 ? '+' : ''}${alpha.toStringAsFixed(2)}%' : '--';
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Column(
+          children: [
+            Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white54, fontSize: 10)),
+            const SizedBox(height: 2),
+            Text('$value  n=$count',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: color, fontSize: 11, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
     );
   }
 

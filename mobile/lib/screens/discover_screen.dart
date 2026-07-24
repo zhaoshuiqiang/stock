@@ -525,6 +525,24 @@ class DiscoverScreenState extends State<DiscoverScreen>
         ),
       );
     }
+    // v4.26: 全市场扫描决策快照生成结果反馈
+    if (p.status == ExploreStatus.complete &&
+        p.decisionSnapshotsSaved != null &&
+        mounted) {
+      final saved = p.decisionSnapshotsSaved!;
+      final failed = p.decisionSnapshotsFailed ?? 0;
+      final failSuffix = failed > 0 ? '（$failed 条失败）' : '';
+      final msg = saved > 0
+          ? '本次扫描已生成 $saved 条决策快照$failSuffix'
+          : '本次扫描未生成决策快照$failSuffix';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: saved > 0 ? null : Colors.orange,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   // ─── Tab 1: 打板梯队（涨停/连板标的） ─────────────────────────

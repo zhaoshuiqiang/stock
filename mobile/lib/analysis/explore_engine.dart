@@ -266,6 +266,26 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
           'Explore 分析完成，结果已落库: ${results.length} stocks in ${elapsed.inSeconds}s (optimized)');
 
       // 先把结果通知 UI 完成，避免后续的决策追踪/推荐回测（含批量网络请求）卡在“保存结果”
+      // v4.26: capture decision snapshots (awaited) BEFORE reporting complete,
+      // so they persist even if the app is backgrounded; report the count.
+      var snapshotsSaved = 0;
+      var snapshotsFailed = 0;
+      try {
+        final capture = await captureDecisionBatchForTesting(
+          analyses: analysisList,
+          source: 'explore',
+          tracker: DecisionTracker(),
+          signalTradeDate: DateTime.now(),
+          benchmarkCode: '000300',
+        );
+        snapshotsSaved = capture.success;
+        snapshotsFailed = capture.failed;
+        debugPrint(
+            'ExploreEngine.decisionTracking: saved=$snapshotsSaved failed=$snapshotsFailed');
+      } catch (e) {
+        debugPrint('ExploreEngine.decisionTracking: $e');
+      }
+
       emit(ExploreProgress(
         status: ExploreStatus.complete,
         results: results,
@@ -273,10 +293,12 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
         foundStocks: results.length,
         elapsedSeconds: elapsed.inSeconds,
         marketTiming: marketTiming,
+        decisionSnapshotsSaved: snapshotsSaved,
+        decisionSnapshotsFailed: snapshotsFailed,
       ));
 
       // 决策追踪 / 推荐快照 / 收益回测 等副作用放到后台执行，不阻塞结果展示
-      unawaited(_runDecisionSideEffects(analysisList, quoteCache));
+      unawaited(_runSlowSideEffects(analysisList, quoteCache));
     } catch (e) {
       debugPrint('ExploreEngine error: $e');
       emit(ExploreProgress(status: ExploreStatus.error, message: '分析出错：$e'));
@@ -287,26 +309,10 @@ class ExploreEngine extends BaseAnalysisEngine<ExploreProgress> {
 
   /// 后台执行决策追踪副作用（不阻塞分析结果展示）。
   /// [refreshPending] 内含批量网络请求，可能耗时很长，故在结果落库并通知 UI 完成后异步进行。
-  Future<void> _runDecisionSideEffects(
+  Future<void> _runSlowSideEffects(
     List<AnalysisResult> analysisList,
     Map<String, QuoteData> quoteCache,
   ) async {
-    try {
-      final batchResult = await captureDecisionBatchForTesting(
-        analyses: analysisList,
-        source: 'explore',
-        tracker: DecisionTracker(),
-        signalTradeDate: DateTime.now(),
-        benchmarkCode: '000300',
-      );
-      debugPrint(
-          'ExploreEngine.decisionTracking: 成功 ${batchResult.success} 条，'
-          '失败 ${batchResult.failed} 条'
-          '${batchResult.failedCodes.isNotEmpty ? ' (${batchResult.failedCodes.join(",")})' : ''}');
-    } catch (e) {
-      debugPrint('ExploreEngine.decisionTracking: $e');
-    }
-
     // 1.15: capture 后评估 pending outcomes，否则 decision_outcomes 永远为 pending
     try {
       await DecisionTracker().refreshPending(limit: 100);
@@ -546,6 +552,8 @@ class ExploreProgress {
   final List<ExploreResult>? results;
   final int? elapsedSeconds;
   final MarketTimingResult? marketTiming;
+  final int? decisionSnapshotsSaved;
+  final int? decisionSnapshotsFailed;
 
   ExploreProgress({
     required this.status,
@@ -557,5 +565,7 @@ class ExploreProgress {
     this.results,
     this.elapsedSeconds,
     this.marketTiming,
+    this.decisionSnapshotsSaved,
+    this.decisionSnapshotsFailed,
   });
 }

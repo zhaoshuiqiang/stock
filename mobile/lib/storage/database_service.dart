@@ -1406,6 +1406,35 @@ class DatabaseService {
   /// 返回按时间升序的 {date, score} 列表
   Future<List<Map<String, dynamic>>> getScoreTrend(String code) async {
     final db = await database;
+    // v4.25: prefer decision_snapshots (captured on every scan/snapshot, no
+    // 20-trading-day active-dedup) so a real multi-point trend accumulates;
+    // dedup to one point per trade date. Fall back to recommendation_tracking
+    // when there are fewer than 2 snapshot points (backward compatible).
+    final snaps = await db.query(
+      'decision_snapshots',
+      columns: ['signal_trade_date', 'legacy_score'],
+      where: 'code = ?',
+      whereArgs: [code],
+      orderBy: 'signal_trade_date ASC, id ASC',
+      limit: 60,
+    );
+    if (snaps.isNotEmpty) {
+      final byDate = <String, Map<String, dynamic>>{};
+      for (final row in snaps) {
+        final d = row['signal_trade_date'] as String?;
+        final score = (row['legacy_score'] as num?)?.toDouble() ?? 0;
+        if (d == null || d.isEmpty || score <= 0) continue;
+        final parsed = DateTime.tryParse(d);
+        if (parsed == null) continue;
+        byDate[d] = {'date': parsed, 'score': score};
+      }
+      if (byDate.length >= 2) {
+        final list = byDate.values.toList()
+          ..sort((a, b) =>
+              (a['date'] as DateTime).compareTo(b['date'] as DateTime));
+        return list.length > 20 ? list.sublist(list.length - 20) : list;
+      }
+    }
     final rows = await db.query(
       'recommendation_tracking',
       columns: [

@@ -12,6 +12,7 @@ import '../models/stock_models.dart';
 import '../analysis/indicators.dart';
 import '../analysis/signal_engine.dart';
 import '../analysis/decision_calibration_service.dart';
+import '../analysis/chip_distribution_analyzer.dart';
 import '../analysis/backtest_engine.dart';
 import '../analysis/limit_up_analyzer.dart';
 import '../storage/database_service.dart';
@@ -2609,12 +2610,24 @@ class QuoteScreenState extends State<QuoteScreen>
   }
 
   Widget _buildDashboard() {
+    final q = _quote ?? _analysis?.quote;
+    ChipDistribution? chipDist;
+    if (q != null && q.price > 0 && _klines.isNotEmpty) {
+      final circShares =
+          q.circulatingMarketCap > 0 ? q.circulatingMarketCap / q.price : 0.0;
+      chipDist = ChipDistributionAnalyzer.analyze(
+        _klines,
+        currentPrice: q.price,
+        circulatingShares: circShares,
+      );
+    }
     return TradingDashboard(
       quote: _quote,
       analysis: _analysis,
       isRefreshing: _isAnalysisRefreshing,
       lastUpdateTime: _lastUpdateTime,
       scoreTrend: _scoreTrend,
+      chipDistribution: chipDist,
       onRefresh: () => _refreshAnalysis(),
       position: _heldPosition,
     );

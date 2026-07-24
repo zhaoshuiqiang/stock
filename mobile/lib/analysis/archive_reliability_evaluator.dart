@@ -63,6 +63,34 @@ class ArchiveReliabilityStats {
       neutralTotal > 0 ? neutralStable / neutralTotal * 100 : 0.0;
 }
 
+class ArchiveRelativeAlphaStats {
+  final double marketMeanReturn;
+  final double downBreadthPct;
+  final int sampleCount;
+  final int cohortCount;
+  final double bullishAlpha;
+  final int bullishCount;
+  final double bearishAlpha;
+  final int bearishCount;
+  final double neutralAlpha;
+  final int neutralCount;
+
+  const ArchiveRelativeAlphaStats({
+    required this.marketMeanReturn,
+    required this.downBreadthPct,
+    required this.sampleCount,
+    required this.cohortCount,
+    required this.bullishAlpha,
+    required this.bullishCount,
+    required this.bearishAlpha,
+    required this.bearishCount,
+    required this.neutralAlpha,
+    required this.neutralCount,
+  });
+
+  bool get hasEnoughData => sampleCount >= 3;
+}
+
 class ArchiveReliabilityEvaluator {
   /// v3.21: 短线阈值收紧 — 当天(0-1日)基准陖1.0%，次日(1-2日)1.5%，之后沿用原有平方根增长。
   /// 超短线用户关心“买入后跌1.9%算不算正确”，原2%阈值太宽松，收紧后更真实反映短线胜率。
@@ -250,6 +278,95 @@ class ArchiveReliabilityEvaluator {
       bearishHits: bearishHits,
       neutralTotal: neutralTotal,
       neutralStable: neutralStable,
+    );
+  }
+
+  /// Cohort-relative alpha: groups records by archive calendar date, uses each
+  /// cohort's mean forward return as the market baseline, and reports the mean
+  /// excess return (alpha) per direction. Regime-neutral by construction, so a
+  /// low direction-reasonable rate on a broad-down day is not mistaken for a
+  /// scoring regression.
+  static ArchiveRelativeAlphaStats calculateRelativeAlpha({
+    required Iterable<ArchiveRecord> records,
+    required double Function(ArchiveRecord record) currentPriceOf,
+  }) {
+    String cohortKey(ArchiveRecord r) =>
+        '${r.archivedAt.year}-${r.archivedAt.month}-${r.archivedAt.day}';
+
+    final cohortReturns = <String, List<double>>{};
+    final entries = <MapEntry<ArchiveRecord, double>>[];
+    for (final record in records) {
+      final currentPrice = currentPriceOf(record);
+      if (currentPrice <= 0 || record.price <= 0) continue;
+      final ret = (currentPrice - record.price) / record.price * 100;
+      (cohortReturns[cohortKey(record)] ??= <double>[]).add(ret);
+      entries.add(MapEntry(record, ret));
+    }
+
+    if (entries.isEmpty) {
+      return const ArchiveRelativeAlphaStats(
+        marketMeanReturn: 0,
+        downBreadthPct: 0,
+        sampleCount: 0,
+        cohortCount: 0,
+        bullishAlpha: 0,
+        bullishCount: 0,
+        bearishAlpha: 0,
+        bearishCount: 0,
+        neutralAlpha: 0,
+        neutralCount: 0,
+      );
+    }
+
+    final cohortMean = <String, double>{};
+    cohortReturns.forEach((key, list) {
+      cohortMean[key] = list.reduce((a, b) => a + b) / list.length;
+    });
+
+    var totalReturn = 0.0;
+    var downCount = 0;
+    var bullSum = 0.0;
+    var bearSum = 0.0;
+    var neutSum = 0.0;
+    var bullN = 0;
+    var bearN = 0;
+    var neutN = 0;
+    for (final entry in entries) {
+      final record = entry.key;
+      final ret = entry.value;
+      totalReturn += ret;
+      if (ret < 0) downCount++;
+      final alpha = ret - (cohortMean[cohortKey(record)] ?? ret);
+      switch (directionOf(record)) {
+        case ArchiveRecommendationDirection.bullish:
+          bullSum += alpha;
+          bullN++;
+          break;
+        case ArchiveRecommendationDirection.bearish:
+          bearSum += alpha;
+          bearN++;
+          break;
+        case ArchiveRecommendationDirection.neutral:
+          neutSum += alpha;
+          neutN++;
+          break;
+        case ArchiveRecommendationDirection.unknown:
+          break;
+      }
+    }
+
+    final n = entries.length;
+    return ArchiveRelativeAlphaStats(
+      marketMeanReturn: totalReturn / n,
+      downBreadthPct: downCount / n * 100,
+      sampleCount: n,
+      cohortCount: cohortReturns.length,
+      bullishAlpha: bullN > 0 ? bullSum / bullN : 0,
+      bullishCount: bullN,
+      bearishAlpha: bearN > 0 ? bearSum / bearN : 0,
+      bearishCount: bearN,
+      neutralAlpha: neutN > 0 ? neutSum / neutN : 0,
+      neutralCount: neutN,
     );
   }
 }
