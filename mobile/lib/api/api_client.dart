@@ -9,6 +9,7 @@ import '../models/stock_models.dart';
 import '../analysis/limit_up_analyzer.dart';
 import '../validators/data_validator.dart';
 import '../core/stock_code_utils.dart';
+import '../core/trading_calendar.dart';
 import 'timeshare_parser.dart';
 
 enum SectorCategory {
@@ -2097,19 +2098,28 @@ class ApiClient {
       final amountMap = <int, double>{};
       final vwapMap = <int, double>{};
 
-      // v4.16: keep only today's (Beijing) intraday points. The trends API
-      // can return the previous trading day (pre-open) or multiple days, and
-      // the parser maps purely by HH:MM, so stale rows were rendered as
-      // today's curve (intraday chart "stuck on yesterday").
-      final todayStr = DateTime.now()
-          .toUtc()
-          .add(const Duration(hours: 8))
-          .toIso8601String()
-          .substring(0, 10);
+      // v4.16/v4.28: keep a single day's intraday points. The trends API
+      // can return the previous trading day (pre-open) or multiple days, so
+      // stale rows must not be mapped by HH:MM onto today's curve. On a
+      // trading day keep only today (pre-open => empty => "no data"); on a
+      // non-trading day (weekend/holiday) keep the latest available session
+      // so the last full trading day still renders instead of a blank chart.
+      final beijingNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+      final todayStr = beijingNow.toIso8601String().substring(0, 10);
+      final availableDates = <String>[];
+      for (final item in trends) {
+        final d = TimeshareParser.dateOf(item as String);
+        if (d != null) availableDates.add(d);
+      }
+      final targetDate = TimeshareParser.resolveTargetDate(
+        availableDates: availableDates,
+        todayStr: todayStr,
+        isTradingDay: TradingCalendar.isTradingDay(beijingNow),
+      );
 
       for (final item in trends) {
         final line = item as String;
-        if (TimeshareParser.dateOf(line) != todayStr) continue;
+        if (TimeshareParser.dateOf(line) != targetDate) continue;
         final point = TimeshareParser.parseEastMoneyTrendLine(line);
         if (point == null) continue;
 
@@ -2187,17 +2197,27 @@ class ApiClient {
       final amountMap = <int, double>{};
       double preClose = 0;
 
-      // v4.16: keep only today's points (Sina 5-min datalen=240 spans ~5 days).
-      final todayStr = DateTime.now()
-          .toUtc()
-          .add(const Duration(hours: 8))
-          .toIso8601String()
-          .substring(0, 10);
+      // v4.16/v4.28: keep a single day's points (Sina 5-min datalen=240
+      // spans ~5 days). Trading day => today only; non-trading day =>
+      // latest available session.
+      final beijingNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+      final todayStr = beijingNow.toIso8601String().substring(0, 10);
+      final availableDates = <String>[];
+      for (final raw in list) {
+        final day = (raw as Map<String, dynamic>)['day'] as String? ?? '';
+        final d = TimeshareParser.dateOf(day);
+        if (d != null) availableDates.add(d);
+      }
+      final targetDate = TimeshareParser.resolveTargetDate(
+        availableDates: availableDates,
+        todayStr: todayStr,
+        isTradingDay: TradingCalendar.isTradingDay(beijingNow),
+      );
 
       for (int i = 0; i < list.length; i++) {
         final item = list[i] as Map<String, dynamic>;
         final day = item['day'] as String? ?? '';
-        if (TimeshareParser.dateOf(day) != todayStr) continue;
+        if (TimeshareParser.dateOf(day) != targetDate) continue;
         final close = _parseDouble(item['close']);
         final volume = _parseDouble(item['volume']);
 

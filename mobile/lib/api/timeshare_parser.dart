@@ -45,6 +45,23 @@ class TimeshareParser {
     return datePart.isEmpty ? null : datePart;
   }
 
+  /// Chooses the single date whose intraday rows should be rendered from a
+  /// trends payload that may span multiple days.
+  ///
+  /// On a trading day only [todayStr] is kept (pre-open yields an empty set so
+  /// the UI shows "no data" instead of yesterday-mapped-as-today). On a
+  /// non-trading day (weekend/holiday) the latest available session is kept so
+  /// the last full trading day still renders instead of a blank chart.
+  static String resolveTargetDate({
+    required Iterable<String> availableDates,
+    required String todayStr,
+    required bool isTradingDay,
+  }) {
+    if (isTradingDay) return todayStr;
+    final dates = availableDates.where((d) => d.isNotEmpty).toList()..sort();
+    return dates.isEmpty ? todayStr : dates.last;
+  }
+
   static int? minuteOffsetFromTime(String timeText) {
     final timePart = timeText.trim().split(' ').last;
     final timeParts = timePart.split(':');
